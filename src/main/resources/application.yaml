@@ -3,6 +3,11 @@ spring:
     url: ${RAFT_SCORE_DATABASE_URL:jdbc:postgresql://localhost:5432/raftscore}
     username: ${RAFT_SCORE_DATABASE_USERNAME:raftscore}
     password: ${RAFT_SCORE_DATABASE_PASSWORD:}
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.xml
+  jpa:
+    hibernate:
+      ddl-auto: validate
 
 raftscore:
   initial-administrator:
