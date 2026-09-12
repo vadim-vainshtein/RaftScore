@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: ${RAFT_SCORE_DATABASE_URL:jdbc:postgresql://localhost:5432/raftscore}
+    username: ${RAFT_SCORE_DATABASE_USERNAME:raftscore}
+    password: ${RAFT_SCORE_DATABASE_PASSWORD:}
+
+raftscore:
+  initial-administrator:
+    username: ${RAFT_SCORE_INITIAL_ADMINISTRATOR_USERNAME:admin}
+    password: ${RAFT_SCORE_INITIAL_ADMINISTRATOR_PASSWORD:}
+
+server:
+  address: ${RAFT_SCORE_SERVER_ADDRESS:0.0.0.0}
+  port: ${RAFT_SCORE_SERVER_PORT:8080}
+  servlet:
+    session:
+      cookie:
+        name: ${RAFT_SCORE_COOKIE_NAME:RAFTSCORE_SESSION}
+        http-only: ${RAFT_SCORE_COOKIE_HTTP_ONLY:true}
+        secure: ${RAFT_SCORE_COOKIE_SECURE:false}
+        same-site: ${RAFT_SCORE_COOKIE_SAME_SITE:Lax}
