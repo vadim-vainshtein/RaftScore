@@ -47,6 +47,9 @@ class RaftScorePropertiesTest {
 
         assertThat(properties.getProperty("spring.datasource.url"))
                 .isEqualTo("${RAFT_SCORE_DATABASE_URL:jdbc:postgresql://localhost:5432/raftscore}");
+        assertThat(properties.getProperty("spring.liquibase.change-log"))
+                .isEqualTo("classpath:db/changelog/db.changelog-master.xml");
+        assertThat(properties.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(properties.getProperty("server.address")).isEqualTo("${RAFT_SCORE_SERVER_ADDRESS:0.0.0.0}");
         assertThat(properties.getProperty("server.servlet.session.cookie.http-only"))
                 .isEqualTo("${RAFT_SCORE_COOKIE_HTTP_ONLY:true}");
