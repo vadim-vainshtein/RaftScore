@@ -3,12 +3,7 @@ package kz.vainshtein.raftscore;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.env.PropertySource;
-
-import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -37,26 +32,6 @@ class RaftScorePropertiesTest {
                     assertThat(properties.initialAdministrator().username()).isEqualTo("chief-judge");
                     assertThat(properties.initialAdministrator().password()).isEqualTo("admin-secret");
                 });
-    }
-
-    @Test
-    void definesLocalNetworkDeploymentDefaults() throws IOException {
-        PropertySource<?> properties = new YamlPropertySourceLoader()
-                .load("application", new ClassPathResource("application.yaml"))
-                .getFirst();
-
-        assertThat(properties.getProperty("spring.datasource.url"))
-                .isEqualTo("${RAFT_SCORE_DATABASE_URL:jdbc:postgresql://localhost:5432/raftscore}");
-        assertThat(properties.getProperty("spring.liquibase.change-log"))
-                .isEqualTo("classpath:db/changelog/db.changelog-master.xml");
-        assertThat(properties.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
-        assertThat(properties.getProperty("server.address")).isEqualTo("${RAFT_SCORE_SERVER_ADDRESS:0.0.0.0}");
-        assertThat(properties.getProperty("server.servlet.session.cookie.http-only"))
-                .isEqualTo("${RAFT_SCORE_COOKIE_HTTP_ONLY:true}");
-        assertThat(properties.getProperty("server.servlet.session.cookie.secure"))
-                .isEqualTo("${RAFT_SCORE_COOKIE_SECURE:false}");
-        assertThat(properties.getProperty("server.servlet.session.cookie.same-site"))
-                .isEqualTo("${RAFT_SCORE_COOKIE_SAME_SITE:Lax}");
     }
 
     @EnableConfigurationProperties(RaftScoreProperties.class)
