@@ -15,7 +15,7 @@ class RaftScorePropertiesTest {
     @Test
     void usesTheDefaultInitialAdministratorUsername() {
         contextRunner.run(context -> {
-            RaftScoreProperties properties = context.getBean(RaftScoreProperties.class);
+            var properties = context.getBean(RaftScoreProperties.class);
 
             assertThat(properties.initialAdministrator().username()).isEqualTo("admin");
         });
@@ -27,7 +27,7 @@ class RaftScorePropertiesTest {
                 "raftscore.initial-administrator.username=chief-judge",
                 "raftscore.initial-administrator.password=admin-secret")
                 .run(context -> {
-                    RaftScoreProperties properties = context.getBean(RaftScoreProperties.class);
+                    var properties = context.getBean(RaftScoreProperties.class);
 
                     assertThat(properties.initialAdministrator().username()).isEqualTo("chief-judge");
                     assertThat(properties.initialAdministrator().password()).isEqualTo("admin-secret");
