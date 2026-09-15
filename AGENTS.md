@@ -13,3 +13,16 @@ Use this workflow for work that originates from a repository issue:
    branch or pull request is an external action and requires the user's explicit
    authorization; do not push, open, merge, or modify a PR otherwise.
 
+## Testing and Java Boilerplate
+
+- Prefer behavior-focused tests over declaration-only tests when verifying
+  behavior or contracts.
+- When database-backed behavior is relevant, use the shared Testcontainers
+  integration-test support to validate it against PostgreSQL.
+- Remove redundant legacy tests when stronger behavior coverage replaces them.
+- Use Lombok for routine entity getters, setters, and constructors; keep JPA
+  no-argument constructors `protected`.
+- Use `var` for local variables when the inferred type is clear from the
+  initializer; retain explicit types when they improve readability.
+- On JDK 26, configure Lombok annotation processing explicitly. After changing
+  that configuration, run `mvn clean test`.
