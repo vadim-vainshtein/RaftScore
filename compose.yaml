@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: raftscore
+      POSTGRES_USER: raftscore
+      POSTGRES_PASSWORD: raftscore-local-password
+    ports:
+      - "5433:5432"
+    volumes:
+      - raftscore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raftscore -d raftscore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  raftscore-postgres-data:
