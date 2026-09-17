@@ -27,6 +27,12 @@ Use this workflow for work that originates from a repository issue:
 - Remove redundant legacy tests when stronger behavior coverage replaces them.
 - Use Lombok for routine entity getters, setters, and constructors; keep JPA
   no-argument constructors `protected`.
+- For entities with several caller-supplied fields, prefer Lombok `@Builder`
+  on a dedicated constructor.
+- Do not use `@SuperBuilder` solely because an entity extends a JPA persistence
+  superclass. Use it only when callers must intentionally construct inherited
+  domain state; do not expose persistence-managed IDs or optimistic-lock
+  versions through builders.
 - Use `var` for local variables when the inferred type is clear from the
   initializer; retain explicit types when they improve readability.
 - On JDK 26, configure Lombok annotation processing explicitly. After changing
