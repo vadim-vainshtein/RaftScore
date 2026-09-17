@@ -13,6 +13,11 @@ Use this workflow for work that originates from a repository issue:
    branch or pull request is an external action and requires the user's explicit
    authorization; do not push, open, merge, or modify a PR otherwise.
 
+## Code Readability
+
+- Break nontrivial methods into short, well-named blocks or helpers so the
+  high-level flow is easy to follow. Use judgment rather than a fixed line count.
+
 ## Testing and Java Boilerplate
 
 - Prefer behavior-focused tests over declaration-only tests when verifying
