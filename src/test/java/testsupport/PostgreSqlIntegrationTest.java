@@ -6,6 +6,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
  * Shared PostgreSQL Testcontainers configuration for Spring integration tests.
+ *
+ * <p>The container is owned by the test JVM rather than the JUnit lifecycle. Spring caches application
+ * contexts across test classes, so their data sources must outlive each individual test class.</p>
  */
 public abstract class PostgreSqlIntegrationTest {
 
