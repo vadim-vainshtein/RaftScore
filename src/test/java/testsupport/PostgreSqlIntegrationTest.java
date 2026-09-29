@@ -24,5 +24,6 @@ public abstract class PostgreSqlIntegrationTest {
         registry.add("spring.datasource.url", POSTGRESQL::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRESQL::getUsername);
         registry.add("spring.datasource.password", POSTGRESQL::getPassword);
+        registry.add("raftscore.initial-administrator.password", () -> "integration-test-initial-password");
     }
 }

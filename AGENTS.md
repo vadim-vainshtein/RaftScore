@@ -27,6 +27,8 @@ Use this workflow for work that originates from a repository issue:
 - Remove redundant legacy tests when stronger behavior coverage replaces them.
 - Use Lombok for routine entity getters, setters, and constructors; keep JPA
   no-argument constructors `protected`.
+- Use Lombok `@RequiredArgsConstructor` for trivial constructors that only assign
+  required arguments to fields.
 - For entities with several caller-supplied fields, prefer Lombok `@Builder`
   on a dedicated constructor.
 - Do not use `@SuperBuilder` solely because an entity extends a JPA persistence
