@@ -1,8 +1,10 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.services;
 
 import java.util.List;
 import java.util.concurrent.Executors;
 
+import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import kz.vainshtein.raftscore.auth.models.UserRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;

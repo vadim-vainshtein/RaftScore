@@ -1,4 +1,4 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.services;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
