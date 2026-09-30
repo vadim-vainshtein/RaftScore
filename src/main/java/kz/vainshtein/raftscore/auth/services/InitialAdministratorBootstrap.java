@@ -1,7 +1,10 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.services;
 
 import jakarta.persistence.EntityManager;
 import kz.vainshtein.raftscore.RaftScoreProperties;
+import kz.vainshtein.raftscore.auth.entities.User;
+import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import kz.vainshtein.raftscore.auth.models.UserRole;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;

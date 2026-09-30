@@ -1,5 +1,6 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.configurations;
 
+import kz.vainshtein.raftscore.auth.services.PasswordHashingService;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
