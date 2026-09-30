@@ -5,10 +5,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.WebApplicationContext;
 import testsupport.PostgreSqlIntegrationTest;
 
@@ -19,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
+@Import(AuthenticationControllerIntegrationTest.AuthorizationPolicyProbeConfiguration.class)
 class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest {
 
     @Autowired
@@ -113,6 +122,23 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
                 .andExpect(status().isNoContent());
     }
 
+    @Test
+    void allowsAuthenticatedUsersToReadApiResourcesButOnlyFullAccessUsersToMutateThem() throws Exception {
+        mockMvc.perform(get("/api/authorization-policy-probe")
+                        .with(SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/authorization-policy-probe")
+                        .with(SecurityMockMvcRequestPostProcessors.csrf())
+                        .with(SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/authorization-policy-probe")
+                        .with(SecurityMockMvcRequestPostProcessors.csrf())
+                        .with(SecurityMockMvcRequestPostProcessors.user("administrator").roles("FULL_ACCESS")))
+                .andExpect(status().isOk());
+    }
+
     private CsrfBootstrap csrf() throws Exception {
         var response = mockMvc.perform(get("/api/auth/csrf"))
                 .andExpect(status().isOk())
@@ -127,5 +153,28 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
     }
 
     private record CsrfBootstrap(MockHttpSession session, String headerName, String token) {
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class AuthorizationPolicyProbeConfiguration {
+
+        @Bean
+        AuthorizationPolicyProbeController authorizationPolicyProbeController() {
+            return new AuthorizationPolicyProbeController();
+        }
+    }
+
+    @RestController
+    @RequestMapping("/api/authorization-policy-probe")
+    static class AuthorizationPolicyProbeController {
+
+        @GetMapping
+        String read() {
+            return "read";
+        }
+
+        @PostMapping
+        void write() {
+        }
     }
 }

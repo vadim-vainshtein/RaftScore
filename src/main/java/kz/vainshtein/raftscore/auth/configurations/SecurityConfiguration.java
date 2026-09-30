@@ -3,6 +3,7 @@ package kz.vainshtein.raftscore.auth.configurations;
 import kz.vainshtein.raftscore.auth.entities.UserRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -51,6 +52,12 @@ class SecurityConfiguration {
                                 "/api/auth/csrf",
                                 "/api/auth/login")
                         .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/**")
+                        .access(AuthorizationPolicies.authenticated())
+                        .requestMatchers(HttpMethod.HEAD, "/api/**")
+                        .access(AuthorizationPolicies.authenticated())
+                        .requestMatchers("/api/**")
+                        .access(AuthorizationPolicies.fullAccess())
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
