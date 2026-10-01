@@ -1,9 +1,9 @@
 package kz.vainshtein.raftscore;
 
 import jakarta.persistence.EntityManager;
-import kz.vainshtein.raftscore.auth.PasswordHashingService;
-import kz.vainshtein.raftscore.auth.UserRepository;
-import kz.vainshtein.raftscore.auth.UserRole;
+import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import kz.vainshtein.raftscore.auth.models.UserRole;
+import kz.vainshtein.raftscore.auth.services.PasswordHashingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

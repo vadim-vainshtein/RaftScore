@@ -1,4 +1,4 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.entities;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import kz.vainshtein.raftscore.auth.models.UserRole;
 import kz.vainshtein.raftscore.persistence.VersionedEntity;
 import lombok.AccessLevel;
 import lombok.Builder;

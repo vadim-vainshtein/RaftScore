@@ -1,8 +1,11 @@
-package kz.vainshtein.raftscore.auth;
+package kz.vainshtein.raftscore.auth.services;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import kz.vainshtein.raftscore.RaftScoreProperties;
+import kz.vainshtein.raftscore.auth.entities.User;
+import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import kz.vainshtein.raftscore.auth.models.UserRole;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.DefaultApplicationArguments;
