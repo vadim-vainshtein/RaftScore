@@ -9,6 +9,11 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.core.MethodParameter;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
@@ -87,9 +92,27 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("username", "admin")
                         .param("password", "integration-test-initial-password"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("access.forbidden"))
+                .andExpect(jsonPath("$.parameters").isMap())
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
+    @Test
+    void returnsFieldValidationErrorForMissingLoginPassword() throws Exception {
+        var csrf = csrf();
+        mockMvc.perform(post("/api/auth/login")
+                        .session(csrf.session())
+                        .header(csrf.headerName(), csrf.token())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("username", "admin"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("request.validation_failed"))
+                .andExpect(jsonPath("$.parameters").isMap())
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("password"))
+                .andExpect(jsonPath("$.fieldErrors[0].code").value("validation.required"))
+                .andExpect(jsonPath("$.fieldErrors[0].parameters").isMap());
+    }
     @Test
     void rejectsInvalidCredentialsWithoutCreatingAnAuthenticatedSession() throws Exception {
         var csrf = csrf();
@@ -131,7 +154,10 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
         mockMvc.perform(post("/api/authorization-policy-probe")
                         .with(SecurityMockMvcRequestPostProcessors.csrf())
                         .with(SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("access.forbidden"))
+                .andExpect(jsonPath("$.parameters").isMap())
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
 
         mockMvc.perform(post("/api/authorization-policy-probe")
                         .with(SecurityMockMvcRequestPostProcessors.csrf())
@@ -139,6 +165,32 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void returnsSafeStructuredErrorsForMalformedValidationAndConflicts() throws Exception {
+        var user = SecurityMockMvcRequestPostProcessors.user("administrator").roles("FULL_ACCESS");
+        mockMvc.perform(post("/api/authorization-policy-probe/malformed").with(user)
+                        .with(SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"secret\","))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("request.malformed"))
+                .andExpect(jsonPath("$.parameters").isMap())
+                .andExpect(jsonPath("$.fieldErrors").isEmpty());
+        mockMvc.perform(post("/api/authorization-policy-probe/validation").with(user)
+                        .with(SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("request.validation_failed"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("password"))
+                .andExpect(jsonPath("$.fieldErrors[0].code").value("validation.invalid"))
+                .andExpect(jsonPath("$.fieldErrors[0].parameters").isMap())
+                .andExpect(result -> org.assertj.core.api.Assertions.assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("secret", "internal detail"));
+        mockMvc.perform(post("/api/authorization-policy-probe/conflict").with(user)
+                        .with(SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("conflict.optimistic_lock"))
+                .andExpect(result -> org.assertj.core.api.Assertions.assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("internal detail"));
+    }
     private CsrfBootstrap csrf() throws Exception {
         var response = mockMvc.perform(get("/api/auth/csrf"))
                 .andExpect(status().isOk())
@@ -173,6 +225,24 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
             return "read";
         }
 
+        record PasswordProbe(String password) { }
+
+        @PostMapping("/malformed")
+        void malformed(@RequestBody java.util.Map<String, Object> body) {
+        }
+
+        @PostMapping("/validation")
+        void validation() throws Exception {
+            var binding = new BeanPropertyBindingResult(new PasswordProbe("secret"), "request");
+            binding.rejectValue("password", "invalid", "internal detail");
+            var parameter = new MethodParameter(getClass().getDeclaredMethod("malformed", java.util.Map.class), 0);
+            throw new MethodArgumentNotValidException(parameter, binding);
+        }
+
+        @PostMapping("/conflict")
+        void conflict() {
+            throw new OptimisticLockingFailureException("internal detail");
+        }
         @PostMapping
         void write() {
         }

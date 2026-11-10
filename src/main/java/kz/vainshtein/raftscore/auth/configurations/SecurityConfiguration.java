@@ -1,6 +1,8 @@
 package kz.vainshtein.raftscore.auth.configurations;
 
+import kz.vainshtein.raftscore.api.ApiAccessDeniedHandler;
 import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -22,7 +24,10 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 
 /** Configures session-based authentication for the server API. */
 @Configuration(proxyBeanMethods = false)
+@RequiredArgsConstructor
 class SecurityConfiguration {
+
+    private final ApiAccessDeniedHandler accessDeniedHandler;
 
     @Bean
     HttpSessionSecurityContextRepository securityContextRepository() {
@@ -60,6 +65,7 @@ class SecurityConfiguration {
                         .access(AuthorizationPolicies.fullAccess())
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
+                        .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .build();
     }
