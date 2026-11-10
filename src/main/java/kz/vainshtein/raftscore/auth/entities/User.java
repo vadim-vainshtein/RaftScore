@@ -41,6 +41,10 @@ public class User extends VersionedEntity {
     @Setter
     private boolean enabled;
 
+    public void resetPassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     @Builder
     private User(String username, String passwordHash, UserRole role, boolean enabled) {
         this.username = username;
