@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0038-competitions" author="raftscore">
+        <createTable tableName="competitions">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="title" type="TEXT"><constraints nullable="false"/></column>
+            <column name="start_date" type="DATE"><constraints nullable="false"/></column>
+            <column name="end_date" type="DATE"><constraints nullable="false"/></column>
+            <column name="location" type="TEXT"><constraints nullable="false"/></column>
+            <column name="time_zone" type="TEXT"><constraints nullable="false"/></column>
+            <column name="description" type="TEXT"/>
+            <column name="admission_confirmation_required" type="BOOLEAN"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE competitions ADD CONSTRAINT competitions_date_range_check CHECK (end_date &gt;= start_date)</sql>
+    </changeSet>
+</databaseChangeLog>
