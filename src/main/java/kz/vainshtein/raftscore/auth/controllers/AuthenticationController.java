@@ -1,5 +1,8 @@
 package kz.vainshtein.raftscore.auth.controllers;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import kz.vainshtein.raftscore.auth.models.AuthenticatedPrincipal;
@@ -27,6 +30,11 @@ class AuthenticationController {
 
     private final AuthenticationService authenticationService;
 
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Authenticated"),
+            @ApiResponse(responseCode = "401", description = "Invalid credentials"),
+            @ApiResponse(responseCode = "403", description = "Invalid or missing CSRF token")
+    })
     @PostMapping(value = "/login", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
     ResponseEntity<Void> loginForm(
             @RequestParam String username,
@@ -36,6 +44,11 @@ class AuthenticationController {
         return login(username, password, request, response);
     }
 
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Authenticated"),
+            @ApiResponse(responseCode = "401", description = "Invalid credentials"),
+            @ApiResponse(responseCode = "403", description = "Invalid or missing CSRF token")
+    })
     @PostMapping(value = "/login", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<Void> loginJson(
             @RequestBody LoginRequest login,
@@ -50,7 +63,7 @@ class AuthenticationController {
     }
 
     @GetMapping("/csrf")
-    CsrfTokenResponse csrf(CsrfToken csrfToken) {
+    CsrfTokenResponse csrf(@Parameter(hidden = true) CsrfToken csrfToken) {
         return new CsrfTokenResponse(
                 csrfToken.getHeaderName(),
                 csrfToken.getParameterName(),
