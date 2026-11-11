@@ -40,7 +40,7 @@ class ParallelSprintBracketController {
     List<Heat> read(@PathVariable long competitionId, @PathVariable long disciplineId,
                     @PathVariable long categoryId, @PathVariable long bracketId) {
         checkScope(competitionId, disciplineId, categoryId, bracketId);
-        return heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracketId).stream().map(this::view).toList();
+        return heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracketId).stream().map(ParallelSprintBracketController::view).toList();
     }
 
     @PutMapping("/heats/{heatId}/result")
@@ -74,13 +74,13 @@ class ParallelSprintBracketController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
 
-    private Heat view(ParallelSprintHeat heat) {
+    static Heat view(ParallelSprintHeat heat) {
         return new Heat(heat.getId(), heat.getVersion(), heat.getRoundNumber(), heat.getHeatNumber(),
                 crew(heat.getCrew1()), crew(heat.getCrew2()), heat.getStatus1(), heat.getTime1Centiseconds(),
                 heat.getStatus2(), heat.getTime2Centiseconds(), heat.getWinnerSlot(), heat.isWinnerOverridden(),
                 heat.getNextHeat() == null ? null : heat.getNextHeat().getId(), heat.getNextSlot());
     }
-    private Crew crew(CrewEntry crew) {
+    private static Crew crew(CrewEntry crew) {
         return crew == null ? null : new Crew(crew.getId(), crew.getCrewName(), crew.getStartNumber());
     }
 }
