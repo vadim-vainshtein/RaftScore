@@ -24,6 +24,7 @@ public class StartListService {
     private final CompetitionCategoryRepository categories;
     private final CrewEntryRepository crews;
     private final CrewEligibilityService eligibility;
+    private final kz.vainshtein.raftscore.standings.OverallStandingsService standings;
     private final StartListRepository lists;
     private final StartSlotRepository slots;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
@@ -42,6 +43,12 @@ public class StartListService {
     @Transactional
     public View replace(long competitionId, long disciplineId, long categoryId, List<Long> order,
                         boolean random, Instant firstStart, Long intervalSeconds) {
+        return replace(competitionId, disciplineId, categoryId, order, random, false, firstStart, intervalSeconds);
+    }
+
+    @Transactional
+    public View replace(long competitionId, long disciplineId, long categoryId, List<Long> order,
+                        boolean random, boolean reverseOverall, Instant firstStart, Long intervalSeconds) {
         var discipline = selection(competitionId, disciplineId, categoryId, true);
         if (hasResults(disciplineId, categoryId))
             throw new ResponseStatusException(HttpStatus.CONFLICT, "remove source results before replacing the start list");
@@ -51,7 +58,16 @@ public class StartListService {
         var byId = eligible.stream().collect(java.util.stream.Collectors.toMap(c -> c.getId(), c -> c));
         var ids = eligible.stream().map(c -> c.getId()).toList();
         List<Long> selected;
-        if (random) {
+        if (reverseOverall) {
+            if (random || order != null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "reverse overall order must not include random or crew IDs");
+            var places = standings.standings(categoryId).stream().filter(s -> s.place() != null)
+                    .collect(java.util.stream.Collectors.toMap(s -> s.crewId(), s -> s.place()));
+            selected = eligible.stream().sorted(java.util.Comparator
+                    .comparing((kz.vainshtein.raftscore.entry.entities.CrewEntry c) -> places.get(c.getId()),
+                            java.util.Comparator.nullsFirst(java.util.Comparator.reverseOrder()))
+                    .thenComparing(c -> c.getStartNumber()).thenComparing(c -> c.getId()))
+                    .map(c -> c.getId()).toList();
+        } else if (random) {
             if (order != null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "random order must not include crew IDs");
             selected = new ArrayList<>(ids);
             Collections.shuffle(selected);

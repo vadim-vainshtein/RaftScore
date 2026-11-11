@@ -153,6 +153,55 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
                 .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{\"random\":true}"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
     }
+    @Test
+    void reverseOverallUsesEligibleCategoryStandingsAndStableTies() throws Exception {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var other = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Other").scoringGroupLabel("Other").crewSize(1).build());
+        var source = disciplines.save(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        var target = disciplines.save(Discipline.builder().competition(competition).name("Race").type(DisciplineType.LONG_RACE).build());
+        source.replaceCategories(List.of(category, other));
+        target.replaceCategories(List.of(category, other));
+        disciplines.flush();
+        var leader = crew(category, 1, true);
+        var tiedA = crew(category, 2, true);
+        var tiedB = crew(category, 3, true);
+        var unranked = crew(category, 4, true);
+        var ineligible = crew(category, 5, false);
+        var otherCrew = crew(other, 6, true);
+        for (var entry : List.of(leader, tiedA, tiedB, ineligible, otherCrew)) {
+            int points = entry == leader ? 100 : 50;
+            calculated.saveAndFlush(kz.vainshtein.raftscore.scoring.entities.CalculatedDisciplineResult.builder()
+                    .discipline(source).crewEntry(entry).status(kz.vainshtein.raftscore.scoring.entities.CalculatedResultStatus.FINISHED)
+                    .place(1).points(points).build());
+        }
+        var first = Instant.parse("2026-01-01T10:00:00Z");
+        var result = service.replace(competition.getId(), target.getId(), category.getId(), null, false, true, first, 30L);
+        assertThat(result.slots()).extracting(StartListService.Slot::crewId)
+                .containsExactly(unranked.getId(), tiedA.getId(), tiedB.getId(), leader.getId());
+        assertThat(result.slots()).extracting(StartListService.Slot::plannedTime)
+                .containsExactly(first, first.plusSeconds(30), first.plusSeconds(60), first.plusSeconds(90));
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+                .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        var url = "/api/competitions/" + competition.getId() + "/disciplines/" + target.getId() + "/categories/" + category.getId() + "/start-list";
+        var request = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(url)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{\"random\":false,\"reverseOverall\":true}")
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf());
+        mvc.perform(request.with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        mvc.perform(request.with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.slots[0].crewId").value(unranked.getId()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.slots[3].crewId").value(leader.getId()));
+        result = service.read(competition.getId(), target.getId(), category.getId());
+        assertThatThrownBy(() -> service.replace(competition.getId(), target.getId(), category.getId(), null, true, true, null, null))
+                .isInstanceOf(ResponseStatusException.class);
+        attempts.saveAndFlush(kz.vainshtein.raftscore.timing.entities.AttemptResult.builder().discipline(target).crewEntry(leader).attemptNumber(1)
+                .status(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.DNS).build());
+        assertThatThrownBy(() -> service.replace(competition.getId(), target.getId(), category.getId(), null, false, true, null, null))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(service.read(competition.getId(), target.getId(), category.getId())).isEqualTo(result);
+    }
     private CrewEntry crew(CompetitionCategory category, int number, boolean eligible) {
         var crew = crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build());
         if (eligible) {
