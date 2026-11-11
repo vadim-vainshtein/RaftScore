@@ -41,7 +41,11 @@ public class ParallelSprintResultService {
         // All result writers must acquire this lock before changing source results.
         disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
         entityManager.refresh(heat);
-        if (heat.getVersion() != expectedVersion) throw new IllegalStateException("heat has changed");
+        if (heat.getVersion() != expectedVersion) {
+            if (expectedVersion < Long.MAX_VALUE && heat.getVersion() == expectedVersion + 1
+                    && heat.getCrew1() != null && heat.getCrew2() != null && matches(heat, first, second, winnerCrewId)) return;
+            throw new IllegalStateException("heat has changed");
+        }
         if (heat.getCrew1() == null || heat.getCrew2() == null)
             throw new IllegalStateException("heat must have two crews; seeded byes cannot be edited");
         Integer winner = winnerCrewId == null ? winner(first, second) : overrideSlot(heat, winnerCrewId);
@@ -59,7 +63,15 @@ public class ParallelSprintResultService {
         }
         heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
         heats.flush();
+        if (heat.getVersion() == expectedVersion) entityManager.lock(heat, LockModeType.PESSIMISTIC_FORCE_INCREMENT);
         recalculation.recalculateLocked(heat.getBracket().getDiscipline(), heat.getBracket().getCategory().getId());
+    }
+
+    private boolean matches(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat heat, Result first, Result second, Long winnerCrewId) {
+        var winner = winnerCrewId == null ? winner(first, second) : overrideSlot(heat, winnerCrewId);
+        return heat.getStatus1() == first.status() && java.util.Objects.equals(heat.getTime1Centiseconds(), first.timeCentiseconds())
+                && heat.getStatus2() == second.status() && java.util.Objects.equals(heat.getTime2Centiseconds(), second.timeCentiseconds())
+                && java.util.Objects.equals(heat.getWinnerSlot(), winner) && heat.isWinnerOverridden() == (winnerCrewId != null);
     }
 
     private Integer overrideSlot(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat heat, long crewId) {
