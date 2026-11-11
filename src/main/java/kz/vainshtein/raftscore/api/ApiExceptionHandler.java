@@ -15,6 +15,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 class ApiExceptionHandler {
 
+    @ExceptionHandler({org.springframework.transaction.TransactionException.class, org.springframework.dao.DataAccessResourceFailureException.class, org.hibernate.exception.JDBCConnectionException.class, java.sql.SQLException.class})
+    ResponseEntity<ApiError> databaseUnavailable(Exception exception) throws Exception {
+        if (!DatabaseUnavailable.isCausedBy(exception)) {
+            throw exception;
+        }
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(DatabaseUnavailable.error());
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ResponseEntity<ApiError> malformedRequest() {
         return ResponseEntity.badRequest().body(ApiError.of("request.malformed"));
