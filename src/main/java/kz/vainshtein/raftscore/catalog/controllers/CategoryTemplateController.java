@@ -128,6 +128,25 @@ class CategoryTemplateController {
         return setArchived(id, request.version().longValueExact(), false);
     }
 
+    @GetMapping("/{id}")
+    @Transactional(readOnly = true)
+    Template get(@PathVariable Long id) {
+        return Template.from(repository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND)));
+    }
+
+    record Duplicate(boolean exists) { }
+
+    @GetMapping("/duplicate")
+    @Transactional(readOnly = true)
+    Duplicate duplicate(@RequestParam String classLabel, @RequestParam String scoringGroupLabel,
+                        @RequestParam(required = false) Long excludeId) {
+        if (classLabel.isBlank() || scoringGroupLabel.isBlank() || classLabel.indexOf('\0') >= 0 || scoringGroupLabel.indexOf('\0') >= 0
+                || (excludeId != null && excludeId < 1)) throw new InvalidPageException();
+        return new Duplicate(excludeId == null
+                ? repository.existsByClassLabelAndScoringGroupLabel(classLabel, scoringGroupLabel)
+                : repository.existsByClassLabelAndScoringGroupLabelAndIdNot(classLabel, scoringGroupLabel, excludeId));
+    }
+
     private static class InvalidPageException extends RuntimeException { }
 
     @ExceptionHandler(InvalidPageException.class)

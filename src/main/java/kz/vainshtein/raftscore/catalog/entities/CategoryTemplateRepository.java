@@ -7,4 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 /** Storage access for reusable category templates. */
 public interface CategoryTemplateRepository extends JpaRepository<CategoryTemplate, Long> {
     Page<CategoryTemplate> findByArchived(boolean archived, Pageable pageable);
+
+    boolean existsByClassLabelAndScoringGroupLabel(String classLabel, String scoringGroupLabel);
+    boolean existsByClassLabelAndScoringGroupLabelAndIdNot(String classLabel, String scoringGroupLabel, Long id);
 }

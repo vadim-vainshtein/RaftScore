@@ -1,6 +1,8 @@
-import {useEffect, useRef, useState} from 'react'
+import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {apiRequest, ApiError} from './api/client'
+import Categories from './Categories'
+import type {Draft} from './Categories'
 import {useTranslation} from 'react-i18next'
 import './i18n/index'
 import {locales, persistLocale, supportedLocale} from './i18n/supported-locales'
@@ -25,15 +27,13 @@ function App() {
 }
 
 type Principal = {username: string, role: 'FULL_ACCESS' | 'READ_ONLY'}
-type Csrf = {headerName: string, token: string}
-
 function safeRoute(path: string, role?: Principal['role']) {
   const route = routes.find(route => path === route.path || path.startsWith(`${route.path}/`))
   return route && (role !== 'READ_ONLY' || route.readOnly) ? path : '/competitions'
 }
 
 async function csrfPost(path: string, body?: object) {
-  const csrf = await apiRequest<Csrf>('/api/auth/csrf')
+  const csrf = await apiRequest<{headerName: string, token: string}>('/api/auth/csrf')
   await apiRequest(path, {method: 'POST', headers: {[csrf.headerName]: csrf.token, ...(body ? {'Content-Type': 'application/json'} : {})}, body: body ? JSON.stringify(body) : undefined})
 }
 
@@ -47,6 +47,10 @@ function Shell({locale}: {locale: Locale}) {
   const [busy, setBusy] = useState(false)
   const [returnRoute, setReturnRoute] = useState(() => safeRoute(window.location.hash.slice(1)))
   const generation = useRef(0)
+  const [categoryDraft, setCategoryDraft] = useState<{username: string, draft: Draft} | null>(null)
+  const saveDraft = useCallback((draft: Draft | null) => { setCategoryDraft(draft && principal ? {username: principal.username, draft} : null) }, [principal])
+  const historyIndex = useRef<number>(typeof window.history.state?.raftIndex === 'number' ? window.history.state.raftIndex : 0)
+  const revertingHistory = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -76,22 +80,24 @@ function Shell({locale}: {locale: Locale}) {
     try {
       await csrfPost('/api/auth/login', {username, password})
       const user = await apiRequest<Principal>('/api/auth/principal')
+      if (categoryDraft && (user.role !== 'FULL_ACCESS' || categoryDraft.username !== user.username)) setCategoryDraft(null)
       const destination = safeRoute(returnRoute, user.role)
       window.history.replaceState(window.history.state, '', `#${destination}`)
       generation.current++
-      setPath(destination); setPrincipal(user); setPassword('')
+      pathRef.current = destination; setPath(destination); setPrincipal(user); setPassword('')
     } catch (error) { setError(error instanceof ApiError && error.status === 401 ? 'invalid' : 'error') }
     finally { setBusy(false) }
   }
   const logout = async () => {
+    if (!window.dispatchEvent(new Event('category-navigation', {cancelable: true}))) return
     const current = ++generation.current
     setBusy(true); setError(null)
-    try { await csrfPost('/api/auth/logout'); generation.current++; setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null) }
+    try { await csrfPost('/api/auth/logout'); setCategoryDraft(null); generation.current++; setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null) }
     catch {
       try { await apiRequest<Principal>('/api/auth/principal'); if (generation.current === current) setError('error') }
       catch (error) {
         if (generation.current === current && error instanceof ApiError && error.status === 401) {
-          setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null)
+          setCategoryDraft(null); setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null)
         } else if (generation.current === current) setError('error')
       }
     }
@@ -105,6 +111,7 @@ function Shell({locale}: {locale: Locale}) {
     void i18n.changeLanguage(next)
   }
   const [path, setPath] = useState(window.location.hash.slice(1) || '/')
+  const pathRef = useRef(path)
   const [menuOpen, setMenuOpen] = useState(false)
   const theme = useTheme()
   const desktopQuery = theme.breakpoints.up('md').replace(/^@media\s*/, '')
@@ -120,9 +127,27 @@ function Shell({locale}: {locale: Locale}) {
   }, [desktopQuery])
 
   useEffect(() => {
-    const onPopState = () => setPath(window.location.hash.slice(1) || '/')
-    window.addEventListener('hashchange', onPopState)
-    return () => window.removeEventListener('hashchange', onPopState)
+    window.history.replaceState({...window.history.state, raftIndex: historyIndex.current}, '')
+    const onPopState = (event: PopStateEvent) => {
+      const target = event.state?.raftIndex
+      if (revertingHistory.current) { revertingHistory.current = false; return }
+      if (!window.dispatchEvent(new Event('category-navigation', {cancelable: true}))) {
+        if (typeof target === 'number') { revertingHistory.current = true; window.history.go(historyIndex.current - target) }
+        else window.history.pushState({...window.history.state, raftIndex: historyIndex.current}, '', `#${pathRef.current}`)
+        return
+      }
+      if (typeof target === 'number') historyIndex.current = target
+      const next = window.location.hash.slice(1) || '/'
+      pathRef.current = next; setPath(next)
+    }
+    const onHashChange = (event: HashChangeEvent) => {
+      if (window.location.hash.slice(1) === pathRef.current || revertingHistory.current) return
+      if (!window.dispatchEvent(new Event('category-navigation', {cancelable: true}))) { window.history.replaceState(window.history.state, '', event.oldURL); return }
+      const next = window.location.hash.slice(1) || '/'
+      pathRef.current = next; setPath(next)
+    }
+    window.addEventListener('popstate', onPopState); window.addEventListener('hashchange', onHashChange)
+    return () => { window.removeEventListener('popstate', onPopState); window.removeEventListener('hashchange', onHashChange) }
   }, [])
 
   const requestedRoute = routes.find(route => path === route.path || path.startsWith(`${route.path}/`))
@@ -166,8 +191,10 @@ function Shell({locale}: {locale: Locale}) {
             onClick={event => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
               event.preventDefault()
-              window.history.pushState(null, '', `#${route.path}`)
-              setPath(route.path)
+              if (!window.dispatchEvent(new Event('category-navigation', {cancelable: true}))) return
+              historyIndex.current++
+              window.history.pushState({raftIndex: historyIndex.current}, '', `#${route.path}`)
+              pathRef.current = route.path; setPath(route.path)
               setMenuOpen(false)
             }}
           >
@@ -204,7 +231,7 @@ function Shell({locale}: {locale: Locale}) {
         <Box sx={{height: {xs: 128, md: 80}}}/>
         <Typography component="h1" variant="h4">{title}</Typography>
         {error && <Typography role="alert">{auth(error)}</Typography>}
-        <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>
+        {activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )
