@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 class StartListController {
     private final StartListService service;
-    record ReplaceRequest(@NotNull Boolean random, List<@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal> crewIds, Instant firstStart, @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal intervalSeconds) { }
+    record ReplaceRequest(@NotNull Boolean random, Boolean reverseOverall, List<@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal> crewIds, Instant firstStart, @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal intervalSeconds) { }
 
     @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
     org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> error(org.springframework.web.server.ResponseStatusException ex) {
@@ -33,7 +33,7 @@ class StartListController {
     @PutMapping
     StartListService.View replace(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
                                   @Valid @RequestBody ReplaceRequest request) {
-        return service.replace(competitionId, disciplineId, categoryId, request.crewIds() == null ? null : request.crewIds().stream().map(BigDecimal::longValueExact).toList(), request.random(),
+        return service.replace(competitionId, disciplineId, categoryId, request.crewIds() == null ? null : request.crewIds().stream().map(BigDecimal::longValueExact).toList(), request.random(), Boolean.TRUE.equals(request.reverseOverall()),
                 request.firstStart(), request.intervalSeconds() == null ? null : request.intervalSeconds().longValueExact());
     }
 }
