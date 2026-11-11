@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0051-crew-entries" author="raftscore">
+        <createTable tableName="crew_entries">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="competition_category_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="crew_entries_category_fk"
+                             references="competition_categories(id)"/>
+            </column>
+            <column name="crew_name" type="TEXT"><constraints nullable="false"/></column>
+            <column name="region_or_club" type="TEXT"><constraints nullable="false"/></column>
+            <column name="representative" type="TEXT"><constraints nullable="false"/></column>
+            <column name="start_number" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE crew_entries ADD CONSTRAINT crew_entries_start_number_positive CHECK (start_number &gt; 0)</sql>
+    </changeSet>
+</databaseChangeLog>
