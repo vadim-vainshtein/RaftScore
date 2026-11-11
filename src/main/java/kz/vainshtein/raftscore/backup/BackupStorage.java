@@ -23,6 +23,8 @@ public interface BackupStorage {
      */
     BackupMetadata store(InputStream content, String formatVersion, String schemaVersion) throws IOException;
 
+    java.util.List<BackupMetadata> list() throws IOException;
+
     /** Returns published metadata, or empty if the ID is unknown. */
     Optional<BackupMetadata> find(UUID id) throws IOException;
 
