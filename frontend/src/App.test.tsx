@@ -201,3 +201,46 @@ test('ignores a delayed expiry confirmation after a new login', async () => {
   await act(async () => rejectCheck(new ApiError(401, undefined)))
   expect(screen.getByText('new')).toBeInTheDocument()
 })
+
+test('restricts an existing read-only session and preserves query and history state', async () => {
+  window.history.replaceState({marker: 7}, '', '/?lang=en&other=value#/users/12')
+  vi.mocked(apiRequest).mockResolvedValueOnce({username: 'reader', role: 'READ_ONLY'})
+  render(<App/>)
+  await screen.findByRole('heading', {name: 'Competitions'})
+  const nav = screen.getByRole('navigation', {name: 'Main navigation'})
+  expect(within(nav).getByRole('link', {name: 'Competitions'})).toHaveAttribute('aria-current', 'page')
+  for (const name of ['Users', 'Category directory', 'Backups']) expect(within(nav).queryByRole('link', {name})).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name: 'Users'})).not.toBeInTheDocument()
+  expect(window.location.hash).toBe('#/competitions')
+  expect(window.location.search).toBe('?lang=en&other=value')
+  expect(window.history.state).toEqual({marker: 7})
+  act(() => {
+    window.history.pushState({marker: 8}, '', '#/backups')
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  expect(screen.getByRole('heading', {name: 'Competitions'})).toBeInTheDocument()
+  expect(window.location.hash).toBe('#/competitions')
+  expect(window.history.state).toEqual({marker: 8})
+  expect(window.location.search).toBe('?lang=en&other=value')
+  act(() => {
+    window.history.replaceState(null, '', '#/unknown')
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  expect(screen.getByRole('heading', {name: 'Page not found'})).toBeInTheDocument()
+})
+
+test('guards a restricted browser history entry for a read-only session', async () => {
+  window.history.replaceState(null, '', '/?lang=en#/users')
+  window.history.pushState(null, '', '#/competitions')
+  vi.mocked(apiRequest).mockResolvedValueOnce({username: 'reader', role: 'READ_ONLY'})
+  render(<App/>)
+  await screen.findByRole('heading', {name: 'Competitions'})
+  await act(async () => {
+    const changed = new Promise<void>(resolve => window.addEventListener('hashchange', () => resolve(), {once: true}))
+    window.history.back()
+    await changed
+  })
+  expect(window.location.hash).toBe('#/competitions')
+  expect(screen.queryByRole('heading', {name: 'Users'})).not.toBeInTheDocument()
+  expect(window.location.search).toBe('?lang=en')
+})
