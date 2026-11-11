@@ -82,7 +82,7 @@ public class StartListService {
                 SELECT EXISTS (SELECT 1 FROM attempt_results a JOIN crew_entries c ON c.id = a.crew_entry_id
                                WHERE a.discipline_id = ? AND c.competition_category_id = ?)
                     OR EXISTS (SELECT 1 FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id
-                               WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL))
+                               WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL OR h.winner_overridden))
                 """, Boolean.class, disciplineId, categoryId, disciplineId, categoryId));
     }
 
@@ -94,7 +94,7 @@ public class StartListService {
         jdbc.update("DELETE FROM attempt_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);
         jdbc.update("DELETE FROM calculated_discipline_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);
         // A played bracket contains propagated winners, so discard it and require reseeding.
-        var played = Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL))", Boolean.class, disciplineId, categoryId));
+        var played = Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL OR h.winner_overridden))", Boolean.class, disciplineId, categoryId));
         if (played) {
             jdbc.update("DELETE FROM parallel_sprint_heats WHERE bracket_id IN (SELECT id FROM parallel_sprint_brackets WHERE discipline_id = ? AND category_id = ?)", disciplineId, categoryId);
             jdbc.update("DELETE FROM parallel_sprint_brackets WHERE discipline_id = ? AND category_id = ?", disciplineId, categoryId);

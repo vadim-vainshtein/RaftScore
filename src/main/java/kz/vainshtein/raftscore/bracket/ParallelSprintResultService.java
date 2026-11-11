@@ -30,6 +30,11 @@ public class ParallelSprintResultService {
 
     @Transactional
     public void record(long heatId, long expectedVersion, Result first, Result second) {
+        record(heatId, expectedVersion, first, second, null);
+    }
+
+    @Transactional
+    public void record(long heatId, long expectedVersion, Result first, Result second, Long winnerCrewId) {
         if (first == null || second == null) throw new IllegalArgumentException("both results are required");
         var heat = heats.findById(heatId).orElseThrow();
         // All result writers must acquire this lock before changing source results.
@@ -38,26 +43,37 @@ public class ParallelSprintResultService {
         if (heat.getVersion() != expectedVersion) throw new IllegalStateException("heat has changed");
         if (heat.getCrew1() == null || heat.getCrew2() == null)
             throw new IllegalStateException("heat must have two crews; seeded byes cannot be edited");
-        int winner = winner(first, second);
+        Integer winner = winnerCrewId == null ? winner(first, second) : overrideSlot(heat, winnerCrewId);
+        if (winnerCrewId != null) {
+            var status = winner == 1 ? first.status() : second.status();
+            if (status == AttemptResultStatus.DSQ_DISCIPLINE || status == AttemptResultStatus.DSQ_COMPETITION)
+                throw new IllegalArgumentException("disqualified crew cannot win");
+        }
         var oldWinner = heat.getWinnerSlot() == null ? null :
                 heat.getWinnerSlot() == 1 ? heat.getCrew1() : heat.getCrew2();
         var next = heat.getNextHeat();
-        if (next != null && (heat.getWinnerSlot() == null || heat.getWinnerSlot() != winner)) {
+        if (next != null && !java.util.Objects.equals(heat.getWinnerSlot(), winner)) {
             entityManager.lock(next, LockModeType.OPTIMISTIC);
-            next.advance(heat.getNextSlot(), oldWinner, winner == 1 ? heat.getCrew1() : heat.getCrew2());
+            next.advance(heat.getNextSlot(), oldWinner, winner == null ? null : winner == 1 ? heat.getCrew1() : heat.getCrew2());
         }
-        heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner);
+        heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
         heats.flush();
     }
 
-    private int winner(Result first, Result second) {
+    private Integer overrideSlot(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat heat, long crewId) {
+        if (heat.getCrew1().getId().equals(crewId)) return 1;
+        if (heat.getCrew2().getId().equals(crewId)) return 2;
+        throw new IllegalArgumentException("winner must be a crew in the heat");
+    }
+
+    private Integer winner(Result first, Result second) {
         boolean oneFinished = first.status() == AttemptResultStatus.FINISHED;
         boolean twoFinished = second.status() == AttemptResultStatus.FINISHED;
-        if (!oneFinished && !twoFinished) throw new IllegalArgumentException("heat has no valid winner");
+        if (!oneFinished && !twoFinished) return null;
         if (!oneFinished) return 2;
         if (!twoFinished) return 1;
         int comparison = Integer.compare(first.timeCentiseconds(), second.timeCentiseconds());
-        if (comparison == 0) throw new IllegalArgumentException("tied heat requires a judicial decision");
+        if (comparison == 0) return null;
         return comparison < 0 ? 1 : 2;
     }
 }

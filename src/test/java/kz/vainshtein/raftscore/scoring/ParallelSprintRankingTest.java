@@ -57,6 +57,14 @@ class ParallelSprintRankingTest {
         assertThat(results).extracting(ParallelSprintRanking.Result::place).containsExactly(1, 2, 3, 4, 5, 6, 7);
     }
 
+    @Test
+    void judicialWinnerWithNonFinishStatusStillWinsFinal() {
+        var a = crew(1); var b = crew(2);
+        var finalHeat = ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(1).crew1(a).crew2(b).build();
+        finalHeat.record(AttemptResultStatus.DNF, null, AttemptResultStatus.DNS, null, 1, true);
+        assertThat(ParallelSprintRanking.rank(List.of(finalHeat)))
+                .contains(new ParallelSprintRanking.Result(a, AttemptResultStatus.DNF, 1));
+    }
     private ParallelSprintHeat timedHeat(int round, CrewEntry winner, CrewEntry loser, int loserTime) {
         return ParallelSprintHeat.builder().bracket(bracket).roundNumber(round).heatNumber(1).crew1(winner).crew2(loser)
                 .status1(AttemptResultStatus.FINISHED).status2(AttemptResultStatus.FINISHED)

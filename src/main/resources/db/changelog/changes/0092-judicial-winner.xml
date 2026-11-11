@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0092-judicial-winner" author="raftscore">
+        <addColumn tableName="parallel_sprint_heats"><column name="winner_overridden" type="boolean" defaultValueBoolean="false"><constraints nullable="false"/></column></addColumn>
+    </changeSet>
+</databaseChangeLog>
