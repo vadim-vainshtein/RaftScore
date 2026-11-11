@@ -16,4 +16,7 @@ public interface CategoryTemplateRepository extends JpaRepository<CategoryTempla
     Optional<CategoryTemplate> findForSnapshot(@Param("id") Long id);
 
     Page<CategoryTemplate> findByArchived(boolean archived, Pageable pageable);
+
+    boolean existsByClassLabelAndScoringGroupLabel(String classLabel, String scoringGroupLabel);
+    boolean existsByClassLabelAndScoringGroupLabelAndIdNot(String classLabel, String scoringGroupLabel, Long id);
 }

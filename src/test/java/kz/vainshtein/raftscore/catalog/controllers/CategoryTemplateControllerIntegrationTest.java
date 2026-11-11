@@ -62,6 +62,27 @@ class CategoryTemplateControllerIntegrationTest extends PostgreSqlIntegrationTes
     }
 
     @Test
+    void duplicateLookupAndGetRespectExactValuesAndAuthorization() throws Exception {
+        var entity = repository.saveAndFlush(kz.vainshtein.raftscore.catalog.entities.CategoryTemplate.builder()
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(4).archived(true).build());
+        var admin = user("admin").roles("FULL_ACCESS");
+        var reader = user("reader").roles("READ_ONLY");
+        mvc.perform(get("/api/category-templates/duplicate").param("classLabel", "R4").param("scoringGroupLabel", "Open").with(admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exists").value(true));
+        mvc.perform(get("/api/category-templates/duplicate").param("classLabel", "R4").param("scoringGroupLabel", "Open")
+                .param("excludeId", entity.getId().toString()).with(admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exists").value(false));
+        mvc.perform(get("/api/category-templates/duplicate").param("classLabel", "r4").param("scoringGroupLabel", "Open").with(admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exists").value(false));
+        mvc.perform(get("/api/category-templates/{id}", entity.getId()).with(admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(entity.getId()))
+                .andExpect(jsonPath("$.archived").value(true));
+        mvc.perform(get("/api/category-templates/duplicate").param("classLabel", "R4").param("scoringGroupLabel", "Open").with(reader))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/category-templates/{id}", entity.getId()).with(reader)).andExpect(status().isForbidden());
+    }
+
+    @Test
     void rejectsFractionalVersionsAndMalformedParameters() throws Exception {
         var principal = user("admin").roles("FULL_ACCESS");
         var edit = "{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":4,\"version\":0.9}";

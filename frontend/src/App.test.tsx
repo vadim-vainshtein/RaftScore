@@ -1,4 +1,4 @@
-import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react'
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import App from './App'
 import {apiRequest, ApiError} from './api/client'
@@ -12,7 +12,7 @@ let listeners: Set<(event: MediaQueryListEvent) => void>
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 beforeEach(() => {
-  vi.mocked(apiRequest).mockReset().mockResolvedValue({username: 'admin', role: 'FULL_ACCESS'})
+  vi.mocked(apiRequest).mockReset().mockImplementation(async path => path.includes('/duplicate?') ? {exists: false} : path.startsWith('/api/category-templates') ? {content: [], totalPages: 0} : {username: 'admin', role: 'FULL_ACCESS'})
   window.history.replaceState(null, '', '/#/')
   desktop = false
   listeners = new Set()
@@ -91,7 +91,7 @@ test('switches language without navigation and persists the choice', async () =>
   expect(localStorage.getItem('raftscore.language')).toBe('ru')
   expect(window.location.hash).toBe('#/users')
   expect(window.location.search).toBe('?lang=ru&other=value')
-  expect(window.history.state).toEqual({marker: 42})
+  expect(window.history.state).toEqual(expect.objectContaining({marker: 42}))
   expect(initialLocale()).toBe('ru')
   expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/auth/principal')).toHaveLength(1)
   await i18n.changeLanguage('en')
@@ -213,14 +213,14 @@ test('restricts an existing read-only session and preserves query and history st
   expect(screen.queryByRole('heading', {name: 'Users'})).not.toBeInTheDocument()
   expect(window.location.hash).toBe('#/competitions')
   expect(window.location.search).toBe('?lang=en&other=value')
-  expect(window.history.state).toEqual({marker: 7})
+  expect(window.history.state).toEqual(expect.objectContaining({marker: 7}))
   act(() => {
     window.history.pushState({marker: 8}, '', '#/backups')
     window.dispatchEvent(new HashChangeEvent('hashchange'))
   })
   expect(screen.getByRole('heading', {name: 'Competitions'})).toBeInTheDocument()
   expect(window.location.hash).toBe('#/competitions')
-  expect(window.history.state).toEqual({marker: 8})
+  expect(window.history.state).toEqual(expect.objectContaining({marker: 8}))
   expect(window.location.search).toBe('?lang=en&other=value')
   act(() => {
     window.history.replaceState(null, '', '#/unknown')
@@ -243,4 +243,47 @@ test('guards a restricted browser history entry for a read-only session', async 
   expect(window.location.hash).toBe('#/competitions')
   expect(screen.queryByRole('heading', {name: 'Users'})).not.toBeInTheDocument()
   expect(window.location.search).toBe('?lang=en')
+})
+test('keeps category edits when navigation is declined', async () => {
+  window.history.replaceState(null, '', '/#/categories')
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  render(<App/>)
+  await screen.findByRole('button', {name: 'Create template'})
+  fireEvent.click(screen.getByRole('button', {name: 'Create template'}))
+  fireEvent.change(screen.getByLabelText(/Class/), {target: {value: 'R4'}})
+  fireEvent.click(within(screen.getByRole('navigation', {name: 'Main navigation'})).getByRole('link', {name: 'Users'}))
+  expect(window.confirm).toHaveBeenCalled()
+  expect(screen.getByLabelText(/Class/)).toHaveValue('R4')
+  expect(window.location.hash).toBe('#/categories')
+  vi.restoreAllMocks()
+})
+test('restores category draft after the same user reauthenticates', async () => {
+  window.history.replaceState(null, '', '/#/categories')
+  render(<App/>); await screen.findByRole('button', {name: 'Create template'})
+  fireEvent.click(screen.getByRole('button', {name: 'Create template'}))
+  fireEvent.change(screen.getByLabelText(/Class/), {target: {value: 'Draft'}})
+  vi.mocked(apiRequest).mockRejectedValueOnce(new ApiError(401, undefined))
+  act(() => window.dispatchEvent(new Event('session-check')))
+  await screen.findByLabelText(/Username/)
+  vi.mocked(apiRequest).mockResolvedValueOnce({headerName: 'X-CSRF', token: 'token'}).mockResolvedValueOnce(undefined).mockResolvedValueOnce({username: 'admin', role: 'FULL_ACCESS'})
+  fireEvent.change(screen.getByLabelText(/Username/), {target: {value: 'admin'}})
+  fireEvent.change(screen.getByLabelText(/Password/), {target: {value: 'secret'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Sign in'}))
+  expect(await screen.findByLabelText(/Class/)).toHaveValue('Draft')
+})
+test('cancelling Back preserves the destination for the next Back', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  render(<App/>); await screen.findByRole('heading', {name: 'Competitions'})
+  const nav = screen.getByRole('navigation', {name: 'Main navigation'})
+  fireEvent.click(within(nav).getByRole('link', {name: 'Category directory'}))
+  await screen.findByRole('button', {name: 'Create template'})
+  fireEvent.click(screen.getByRole('button', {name: 'Create template'}))
+  fireEvent.change(screen.getByLabelText(/Class/), {target: {value: 'Draft'}})
+  act(() => window.history.back())
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(window.location.hash).toBe('#/categories'))
+  act(() => window.history.back())
+  await screen.findByRole('heading', {name: 'Competitions'})
+  expect(confirm).toHaveBeenCalledTimes(2)
+  vi.restoreAllMocks()
 })

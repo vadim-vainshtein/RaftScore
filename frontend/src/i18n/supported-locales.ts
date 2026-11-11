@@ -3,10 +3,12 @@ import en from './locales/en/common.json'
 import ru from './locales/ru/common.json'
 import enAuth from './locales/en/auth.json'
 import ruAuth from './locales/ru/auth.json'
+import enCategories from './locales/en/categories.json'
+import ruCategories from './locales/ru/categories.json'
 
 export const locales = {
-  en: {autonym: 'English', mui: enUS, common: en, auth: enAuth},
-  ru: {autonym: 'Русский', mui: ruRU, common: ru, auth: ruAuth},
+  en: {autonym: 'English', mui: enUS, common: en, auth: enAuth, categories: enCategories},
+  ru: {autonym: 'Русский', mui: ruRU, common: ru, auth: ruAuth, categories: ruCategories},
 } as const
 export type Locale = keyof typeof locales
 export const localeStorageKey = 'raftscore.language'
