@@ -26,9 +26,11 @@ public class SlalomRankingService {
         if (list.getDiscipline().getType() != DisciplineType.SLALOM)
             throw new IllegalArgumentException("start list must belong to a slalom");
         var disciplineId = list.getDiscipline().getId();
+        var recordedAttempts = attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(disciplineId, list.getCategory().getId());
+        if (recordedAttempts.isEmpty()) return List.of();
         var configuration = configurations.findByDisciplineId(disciplineId).orElseThrow();
         return SlalomRanking.rank(configuration, startSlots.findByStartListIdOrderByPositionAsc(startListId),
-                attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(disciplineId, list.getCategory().getId()),
+                recordedAttempts,
                 penalties.findByConfigurationIdAndAttemptCrewEntryCompetitionCategoryId(configuration.getId(), list.getCategory().getId()));
     }
 }

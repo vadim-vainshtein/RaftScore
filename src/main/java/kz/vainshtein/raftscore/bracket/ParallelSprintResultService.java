@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ParallelSprintResultService {
     private final ParallelSprintHeatRepository heats;
     private final EntityManager entityManager;
+    private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
     private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
 
     public record Result(AttemptResultStatus status, Integer timeCentiseconds) {
@@ -58,6 +59,7 @@ public class ParallelSprintResultService {
         }
         heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
         heats.flush();
+        recalculation.recalculateLocked(heat.getBracket().getDiscipline(), heat.getBracket().getCategory().getId());
     }
 
     private Integer overrideSlot(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat heat, long crewId) {

@@ -8,5 +8,8 @@ public interface DisciplineRepository extends JpaRepository<Discipline, Long> {
     @org.springframework.data.jpa.repository.Query("select d from Discipline d where d.id = :id")
     java.util.Optional<Discipline> findForStartListUpdate(@org.springframework.data.repository.query.Param("id") Long id);
 
+    @org.springframework.data.jpa.repository.Query("select d.id from Discipline d where d.competition.id = :competitionId order by d.id")
+    java.util.List<Long> findIdsByCompetitionId(@org.springframework.data.repository.query.Param("competitionId") Long competitionId);
+
     java.util.List<Discipline> findByCompetitionIdAndTypeOrderByDisplayOrderAscIdAsc(Long competitionId, DisciplineType type);
 }
