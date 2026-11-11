@@ -26,6 +26,7 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
     @Autowired private PlacementPointsTableRepository tables;
     @Autowired private CalculatedDisciplineResultRepository results;
     @Autowired private EntityManager entityManager;
+    @Autowired private kz.vainshtein.raftscore.standings.OverallStandingsService standings;
 
     @Test
     @Transactional
@@ -80,6 +81,46 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
         assertPoints(tied, 0);
     }
 
+    @Test
+    @Transactional
+    void standingsUseCurrentAssignedResultsAndSharedPlaces() {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Race")
+                .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = category(competition, "Open");
+        var otherCategory = category(competition, "Women");
+        var sprint = discipline(competition, category, otherCategory);
+        var otherDiscipline = discipline(competition, category);
+        var first = result(sprint, category, 1, 1, CalculatedResultStatus.FINISHED);
+        var tied = result(sprint, category, 2, 1, CalculatedResultStatus.FINISHED);
+        var third = result(sprint, category, 3, 3, CalculatedResultStatus.FINISHED);
+        result(sprint, category, 4, null, CalculatedResultStatus.DSQ_COMPETITION);
+        result(sprint, otherCategory, 5, 1, CalculatedResultStatus.FINISHED);
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(otherDiscipline)
+                .crewEntry(third.getCrewEntry()).place(1).status(CalculatedResultStatus.FINISHED).points(10).build());
+        var table = tables.saveAndFlush(new PlacementPointsTable(competition, "Points",
+                TiePointsPolicy.SHARED_PLACE_SAME_POINTS, List.of(new PlacementPointsRow(1, 100), new PlacementPointsRow(3, 50))));
+        sprint.setPointsTable(table);
+        entityManager.flush(); entityManager.clear();
+        assignment.assign(sprint.getId(), category.getId());
+        entityManager.flush(); entityManager.clear();
+        var current = standings.standings(category.getId());
+        assertThat(current).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::totalPoints)
+                .containsExactly(100L, 100L, 60L, 0L);
+        assertThat(current).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
+                .containsExactly(1, 1, 3, null);
+        assertThat(current.get(2).disciplines()).hasSize(2);
+        assertThat(current.get(3).disqualified()).isTrue();
+        disciplines.findById(otherDiscipline.getId()).orElseThrow().replaceCategories(List.of());
+        entityManager.flush(); entityManager.clear();
+        assertThat(standings.standings(category.getId()).get(2).totalPoints()).isEqualTo(50);
+        var currentTable = tables.findById(table.getId()).orElseThrow();
+        currentTable.replace("Updated", TiePointsPolicy.SHARED_PLACE_SAME_POINTS, List.of(new PlacementPointsRow(1, 35)));
+        entityManager.flush(); entityManager.clear();
+        assignment.assign(sprint.getId(), category.getId());
+        entityManager.flush(); entityManager.clear();
+        assertThat(standings.standings(category.getId())).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::totalPoints)
+                .containsExactly(35L, 35L, 0L, 0L);
+    }
     private CompetitionCategory category(Competition competition, String label) {
         return categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
                 .classLabel(label).scoringGroupLabel(label).crewSize(4).build());
