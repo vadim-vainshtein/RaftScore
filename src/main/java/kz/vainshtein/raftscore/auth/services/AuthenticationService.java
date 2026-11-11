@@ -2,6 +2,7 @@ package kz.vainshtein.raftscore.auth.services;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import kz.vainshtein.raftscore.auth.configurations.SessionEpoch;
 import kz.vainshtein.raftscore.auth.models.AuthenticatedPrincipal;
 import kz.vainshtein.raftscore.auth.models.UserRole;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
     private final HttpSessionSecurityContextRepository securityContextRepository;
     private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
+    private final SessionEpoch sessionEpoch;
 
     public boolean authenticate(
             String username,
@@ -38,6 +40,7 @@ public class AuthenticationService {
             context.setAuthentication(authentication);
             SecurityContextHolder.setContext(context);
             securityContextRepository.saveContext(context, request, response);
+            sessionEpoch.stamp(request.getSession());
             return true;
         } catch (AuthenticationException exception) {
             return false;

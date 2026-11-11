@@ -30,4 +30,19 @@ class BackupServiceTest {
             org.assertj.core.api.Assertions.assertThatCode(() -> BackupTemporaryFiles.cleanup(directory)).doesNotThrowAnyException();
         }
     }
+    @Test
+    void schemaConnectionIsBoundedWhenServerDoesNotRespond() throws Exception {
+        try (var server = new java.net.ServerSocket(0)) {
+            var peer = Thread.ofVirtual().start(() -> {
+                try (var socket = server.accept()) { Thread.sleep(5000); }
+                catch (Exception ignored) { }
+            });
+            try {
+                var connection = new DatabaseConnection("jdbc:postgresql://127.0.0.1:" + server.getLocalPort() + "/test", "user", "secret", Duration.ofSeconds(1));
+                var start = System.nanoTime();
+                assertThatThrownBy(connection::schemaFingerprints).isInstanceOf(java.io.IOException.class);
+                assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(4));
+            } finally { peer.interrupt(); peer.join(); }
+        }
+    }
 }

@@ -44,7 +44,8 @@ class SecurityConfiguration {
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             HttpSessionSecurityContextRepository securityContextRepository,
-            UserRepository userRepository) throws Exception {
+            UserRepository userRepository,
+            SessionEpoch sessionEpoch) throws Exception {
         return http
                 .csrf(Customizer.withDefaults())
                 .logout(logout -> logout.logoutUrl("/api/auth/logout")
@@ -79,7 +80,8 @@ class SecurityConfiguration {
                 .exceptionHandling(exceptions -> exceptions
                         .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
-                .addFilterAfter(new UserSessionValidityFilter(userRepository), SecurityContextHolderFilter.class)
+                .addFilterBefore(new RestoreGateFilter(), SecurityContextHolderFilter.class)
+                .addFilterAfter(new UserSessionValidityFilter(userRepository, sessionEpoch), SecurityContextHolderFilter.class)
                 .build();
     }
 

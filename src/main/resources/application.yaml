@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 2050MB
+      max-request-size: 2051MB
   datasource:
     url: ${RAFT_SCORE_DATABASE_URL:jdbc:postgresql://localhost:5432/raftscore}
     username: ${RAFT_SCORE_DATABASE_USERNAME:raftscore}

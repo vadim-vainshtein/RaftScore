@@ -15,6 +15,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 class UserSessionValidityFilter extends OncePerRequestFilter {
 
     private final UserRepository userRepository;
+    private final SessionEpoch sessionEpoch;
 
     @Override
     protected void doFilterInternal(
@@ -22,13 +23,15 @@ class UserSessionValidityFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
         var authentication = SecurityContextHolder.getContext().getAuthentication();
-        var blocked = authentication != null && authentication.isAuthenticated()
+        var session = request.getSession(false);
+        var stale = authentication != null && authentication.isAuthenticated() && session != null
+                && sessionEpoch.isStale(session);
+        var blocked = !stale && authentication != null && authentication.isAuthenticated()
                 && userRepository.findByUsername(authentication.getName())
                 .map(user -> !user.isEnabled())
                 .orElse(false);
-        if (blocked) {
+        if (blocked || stale) {
             SecurityContextHolder.clearContext();
-            var session = request.getSession(false);
             if (session != null) {
                 try {
                     session.invalidate();
