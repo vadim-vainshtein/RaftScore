@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0073-attempt-results" author="raftscore">
+        <createTable tableName="attempt_results">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="discipline_id" type="BIGINT"><constraints nullable="false" foreignKeyName="attempt_results_discipline_fk" references="disciplines(id)"/></column>
+            <column name="crew_entry_id" type="BIGINT"><constraints nullable="false" foreignKeyName="attempt_results_crew_fk" references="crew_entries(id)"/></column>
+            <column name="attempt_number" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="duration_centiseconds" type="INTEGER"/>
+            <column name="start_instant" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="finish_instant" type="TIMESTAMP WITH TIME ZONE"/>
+            <column name="penalty_centiseconds" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="status" type="TEXT"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="attempt_results" columnNames="discipline_id, crew_entry_id, attempt_number" constraintName="attempt_results_identity_unique"/>
+        <sql>ALTER TABLE attempt_results ADD CONSTRAINT attempt_results_number_positive CHECK (attempt_number &gt; 0)</sql>
+        <sql>ALTER TABLE attempt_results ADD CONSTRAINT attempt_results_duration_nonnegative CHECK (duration_centiseconds &gt;= 0)</sql>
+        <sql>ALTER TABLE attempt_results ADD CONSTRAINT attempt_results_penalty_nonnegative CHECK (penalty_centiseconds &gt;= 0)</sql>
+        <sql>ALTER TABLE attempt_results ADD CONSTRAINT attempt_results_status_valid CHECK (status IN ('FINISHED', 'DNS', 'DNF', 'DSQ_ATTEMPT', 'DSQ_DISCIPLINE', 'DSQ_COMPETITION'))</sql>
+    </changeSet>
+</databaseChangeLog>
