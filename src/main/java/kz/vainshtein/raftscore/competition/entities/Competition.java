@@ -63,6 +63,19 @@ public class Competition extends VersionedEntity {
         this.admissionConfirmationRequired = admissionConfirmationRequired;
     }
 
+    /** Replaces editable details while enforcing creation invariants. */
+    public void updateDetails(String title, LocalDate startDate, LocalDate endDate, String location,
+                              String timeZone, String description, boolean admissionConfirmationRequired) {
+        var validated = new Competition(title, startDate, endDate, location, timeZone, description,
+                admissionConfirmationRequired);
+        this.title = validated.title;
+        this.startDate = validated.startDate;
+        this.endDate = validated.endDate;
+        this.location = validated.location;
+        this.timeZone = validated.timeZone;
+        this.description = validated.description;
+        this.admissionConfirmationRequired = validated.admissionConfirmationRequired;
+    }
     private static String requireText(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");
