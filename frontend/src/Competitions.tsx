@@ -2,7 +2,8 @@ import {useEffect, useState} from 'react'
 import type {FormEvent} from 'react'
 import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
-import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiRequest, csrfRequest} from './api/client'
+import {apiErrorKey} from './api/errors'
 import CompetitionWizard from './CompetitionWizard'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
@@ -21,18 +22,18 @@ export default function Competitions({readOnly}: {readOnly: boolean}) {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [creating, setCreating] = useState(false)
   useEffect(() => { let active = true
     const query = new URLSearchParams({search, sort, page: String(page), size: '20'})
-    apiRequest<Page>(`/api/competitions?${query}`).then(value => {if (!Array.isArray(value.content)) throw new Error('Invalid competition page'); if (active) {setResult(value); setError('')}}).catch(() => {if (active) {setResult(null); setError(t('competition.error'))}})
+    apiRequest<Page>(`/api/competitions?${query}`).then(value => {if (!Array.isArray(value.content)) throw new Error('Invalid competition page'); if (active) {setResult(value); setError('')}}).catch(e => {if (active) {setResult(null); setError(apiErrorKey(e))}})
     return () => {active = false}
   }, [search, sort, page, revision, t])
-  const open = async (id: number) => {setBusy(true); setError(''); try {setDetails(await apiRequest<Details>(`/api/competitions/${id}`))} catch {setError(t('competition.error'))} finally {setBusy(false)}}
-  const edit = async (id: number) => {setBusy(true); setError(''); try {setDraft(await apiRequest<Details>(`/api/competitions/${id}`))} catch {setError(t('competition.error'))} finally {setBusy(false)}}
+  const open = async (id: number) => {setBusy(true); setError(''); try {setDetails(await apiRequest<Details>(`/api/competitions/${id}`))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
+  const edit = async (id: number) => {setBusy(true); setError(''); try {setDraft(await apiRequest<Details>(`/api/competitions/${id}`))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   const save = async (event: FormEvent) => {event.preventDefault(); if (!draft || busy) return
     setBusy(true); setError('')
     try {const {id, ...body} = draft; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); setDetails(saved); setRevision(v => v + 1)}
-    catch (e) {setError(e instanceof ApiError && e.status === 409 ? t('competition.conflict') : t('competition.error'))} finally {setBusy(false)}
+    catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    {error && <Typography role="alert">{error}</Typography>}
+    {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
     {creating ? <CompetitionWizard onCancel={() => setCreating(false)} onSaved={saved => {setCreating(false); setDetails(saved); setRevision(v => v + 1)}}/> : draft ? <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
       <TextField required label={t('competition.title')} value={draft.title} onChange={e => setDraft({...draft, title: e.target.value})}/>
       <TextField required type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={draft.startDate} onChange={e => setDraft({...draft, startDate: e.target.value})}/>
