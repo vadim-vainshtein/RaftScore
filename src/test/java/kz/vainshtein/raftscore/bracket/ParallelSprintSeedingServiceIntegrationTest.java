@@ -137,18 +137,26 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
             var fast = new ParallelSprintResultService.Result(finished, 100);
             var slow = new ParallelSprintResultService.Result(finished, 120);
             resultService.record(firstId, 0, fast, slow);
+            var replayVersion = heats.findById(firstId).orElseThrow().getVersion();
+            resultService.record(firstId, 0, fast, slow);
+            assertThat(heats.findById(firstId).orElseThrow().getVersion()).isEqualTo(replayVersion);
+            assertThatThrownBy(() -> resultService.record(firstId, 0, slow, fast)).isInstanceOf(IllegalStateException.class);
+            var winnerId = transactionTemplate.execute(status -> heats.findById(firstId).orElseThrow().getCrew2().getId());
+            resultService.record(firstId, replayVersion, fast, slow, winnerId);
+            resultService.record(firstId, replayVersion, fast, slow, winnerId);
+            assertThatThrownBy(() -> resultService.record(firstId, replayVersion, fast, slow)).isInstanceOf(IllegalStateException.class);
             resultService.record(secondId, 0, fast, slow);
             var finalVersion = heats.findById(finalId).orElseThrow().getVersion();
             resultService.record(finalId, finalVersion, fast, slow);
             var version = heats.findById(firstId).orElseThrow().getVersion();
-            assertThatThrownBy(() -> resultService.record(firstId, version, slow, fast)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> resultService.record(firstId, version, fast, slow)).isInstanceOf(IllegalStateException.class);
             TestTransaction.start();
             var persisted = heats.findById(firstId).orElseThrow();
-            assertThat(persisted.getWinnerSlot()).isEqualTo(1);
+            assertThat(persisted.getWinnerSlot()).isEqualTo(2);
             assertThat(persisted.getTime1Centiseconds()).isEqualTo(100);
             var destination = heats.findById(finalId).orElseThrow();
             var advanced = persisted.getNextSlot() == 1 ? destination.getCrew1() : destination.getCrew2();
-            assertThat(advanced.getId()).isEqualTo(persisted.getCrew1().getId());
+            assertThat(advanced.getId()).isEqualTo(persisted.getCrew2().getId());
         } finally {
             if (TestTransaction.isActive()) TestTransaction.end();
             transactionTemplate.executeWithoutResult(status -> {
@@ -173,6 +181,12 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var first = crew(category, 1);
         var second = crew(category, 2);
         var heat = heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(1).crew1(first).crew2(second).build());
+        var half = heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(2).crew1(first).build());
+        jdbc.update("update parallel_sprint_heats set version = 1 where id = ?", half.getId());
+        entityManager.clear();
+        var tied = new ParallelSprintResultService.Result(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED, 100);
+        assertThatThrownBy(() -> resultService.record(half.getId(), 0, tied, tied, first.getId()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("heat has changed");
         var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
                 .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
         var path = "/api/competitions/" + competition.getId() + "/disciplines/" + parallel.getId() + "/categories/" + category.getId() + "/brackets/" + bracket.getId();
@@ -186,7 +200,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body.replace("true", "false"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body.replace("\"winnerCrewId\":" + second.getId(), "\"winnerCrewId\":999999"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
-        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path.replace("/competitions/" + competition.getId(), "/competitions/999999") ).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Person"))));
     }

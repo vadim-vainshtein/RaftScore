@@ -52,11 +52,13 @@ class AttemptRecalculationIntegrationTest extends PostgreSqlIntegrationTest {
             var auth = user("admin").roles("FULL_ACCESS");
             var create = "{\"durationCentiseconds\":100,\"penaltyCentiseconds\":0,\"status\":\"FINISHED\",\"gates\":[{\"number\":1,\"penaltySeconds\":0}]}";
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(create)).andExpect(status().isOk());
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(create)).andExpect(status().isOk());
             var attempt = attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(discipline.getId(), crew.getId(), 1).orElseThrow();
             var version = attempt.getVersion();
             var update = "{\"version\":" + version + ",\"durationCentiseconds\":100,\"penaltyCentiseconds\":0,\"status\":\"FINISHED\",\"gates\":[{\"number\":1,\"penaltySeconds\":5}]}";
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(version + 1));
-            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isConflict());
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(version + 1));
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update.replace("\"penaltySeconds\":5", "\"penaltySeconds\":0"))).andExpect(status().isConflict());
             var invalid = update.replace("\"version\":" + version, "\"version\":" + (version + 1)).replace("\"durationCentiseconds\":100", "\"durationCentiseconds\":90").replace("[{\"number\":1,\"penaltySeconds\":5}]", "[]");
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(invalid)).andExpect(status().isBadRequest());
             var unchanged = attempts.findById(attempt.getId()).orElseThrow();

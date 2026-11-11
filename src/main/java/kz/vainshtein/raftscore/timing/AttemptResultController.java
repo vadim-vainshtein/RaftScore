@@ -3,6 +3,7 @@ package kz.vainshtein.raftscore.timing;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import kz.vainshtein.raftscore.discipline.entities.*;
@@ -58,10 +59,17 @@ class AttemptResultController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "crew must have a start slot in a timed discipline");
         try {
             var existing = attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(disciplineId, crewId, attemptNumber);
-            if (existing.isPresent() ? request.version() == null || existing.get().getVersion() != request.version().longValueExact() : request.version() != null)
-                throw new OptimisticLockingFailureException("stale attempt version");
             var duration = request.durationCentiseconds() == null ? null : request.durationCentiseconds().intValueExact();
             var penalty = request.penaltyCentiseconds().intValueExact();
+            if (existing.isPresent() && (request.version() == null || existing.get().getVersion() != request.version().longValueExact())) {
+                var saved = existing.get();
+                boolean immediate = request.version() == null ? saved.getVersion() == 0
+                        : request.version().longValueExact() < Long.MAX_VALUE && saved.getVersion() == request.version().longValueExact() + 1;
+                if (immediate && matches(saved, discipline, crew, attemptNumber, duration, penalty, request))
+                    return new View(saved.getId(), saved.getVersion());
+                throw new OptimisticLockingFailureException("stale attempt version");
+            }
+            if (existing.isEmpty() && request.version() != null) throw new OptimisticLockingFailureException("stale attempt version");
             var attempt = existing.orElseGet(() -> attempts.save(AttemptResult.builder().discipline(discipline).crewEntry(crew)
                     .attemptNumber(attemptNumber).durationCentiseconds(duration).startInstant(request.startInstant())
                     .finishInstant(request.finishInstant()).penaltyCentiseconds(penalty).status(request.status()).build()));
@@ -79,8 +87,7 @@ class AttemptResultController {
             } else if (request.gates() != null && !request.gates().isEmpty()) throw new IllegalArgumentException("gates require slalom");
             attempts.flush();
             // Increment the parent version for gate-only changes, once per update.
-            if (existing.isPresent() && discipline.getType() == DisciplineType.SLALOM
-                    && attempt.getVersion() == request.version().longValueExact()) {
+            if (existing.isPresent() && attempt.getVersion() == request.version().longValueExact()) {
                 entityManager.lock(attempt, jakarta.persistence.LockModeType.PESSIMISTIC_FORCE_INCREMENT);
             }
             penalties.flush();
@@ -90,4 +97,27 @@ class AttemptResultController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
     }
+    private boolean matches(AttemptResult saved, Discipline discipline, kz.vainshtein.raftscore.entry.entities.CrewEntry crew,
+                            int attemptNumber, Integer duration, int penalty, Request request) {
+        var candidate = AttemptResult.builder().discipline(discipline).crewEntry(crew).attemptNumber(attemptNumber)
+                .durationCentiseconds(duration).startInstant(request.startInstant()).finishInstant(request.finishInstant())
+                .penaltyCentiseconds(penalty).status(request.status()).build();
+        if (!Objects.equals(saved.getDurationCentiseconds(), candidate.getDurationCentiseconds())
+                || !Objects.equals(saved.getStartInstant(), candidate.getStartInstant())
+                || !Objects.equals(saved.getFinishInstant(), candidate.getFinishInstant())
+                || saved.getPenaltyCentiseconds() != candidate.getPenaltyCentiseconds() || saved.getStatus() != candidate.getStatus()) return false;
+        if (discipline.getType() != DisciplineType.SLALOM) return request.gates() == null || request.gates().isEmpty();
+        var config = configurations.findByDisciplineId(discipline.getId()).orElseThrow();
+        var submitted = new java.util.HashMap<Integer, Integer>();
+        if (request.gates() != null) for (var gate : request.gates()) {
+            var number = gate.number().intValueExact();
+            var value = gate.penaltySeconds().intValueExact();
+            new SlalomGatePenalty(saved, config, number, value);
+            if (submitted.put(number, value) != null) throw new IllegalArgumentException("duplicate gate number");
+        }
+        var stored = penalties.findByAttemptId(saved.getId()).stream()
+                .collect(java.util.stream.Collectors.toMap(SlalomGatePenalty::getGateNumber, SlalomGatePenalty::getPenaltySeconds));
+        return stored.equals(submitted);
+    }
+
 }
