@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0046-entry-requirements" author="raftscore">
+        <createTable tableName="entry_requirements">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="competition_id" type="BIGINT">
+                <constraints nullable="false" foreignKeyName="entry_requirements_competition_fk" references="competitions(id)"/>
+            </column>
+            <column name="name" type="TEXT"><constraints nullable="false"/></column>
+            <column name="value_type" type="TEXT"><constraints nullable="false"/></column>
+            <column name="required" type="BOOLEAN"><constraints nullable="false"/></column>
+            <column name="display_order" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE entry_requirements ADD CONSTRAINT entry_requirements_display_order_nonnegative CHECK (display_order &gt;= 0)</sql>
+        <sql>ALTER TABLE entry_requirements ADD CONSTRAINT entry_requirements_value_type_valid CHECK (value_type IN ('YES_NO', 'TEXT', 'DATE', 'NUMBER'))</sql>
+    </changeSet>
+</databaseChangeLog>
