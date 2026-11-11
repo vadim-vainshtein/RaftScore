@@ -85,3 +85,15 @@ test('shows a safe localized API error on results refresh', async () => {
   expect(await screen.findByRole('alert')).toHaveTextContent('The server could not complete the request.')
   expect(screen.queryByText(/secret/)).not.toBeInTheDocument()
 })
+
+test('warns when a seeded parallel crew has no calculated result', async () => {
+  window.location.hash = '#/results?competition=1&discipline=3&category=2'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => {
+    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/bracket')) return {id: 8, heats: [{round: 1, first: {id: 4}, second: {id: 5}}]}
+    return original(p)
+  })
+  render(<Results readOnly/>)
+  expect(await screen.findByText(/Standings use available calculated results/)).toBeInTheDocument()
+})

@@ -15,7 +15,8 @@
     "disciplines": "Disciplines",
     "startLists": "Start lists",
     "resultGrid": "Result entry",
-    "results": "Results"
+    "results": "Results",
+    "parallelSprint": "Parallel sprint"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -239,6 +240,25 @@
     "showFilters": "Show filters",
     "fullscreen": "Toggle fullscreen",
     "appliedTiebreak": "Applied tiebreak discipline"
+  },
+  "parallel": {
+    "slot": "Position {{number}}",
+    "winner": "Winner",
+    "manual": "manual",
+    "override": "Winner override",
+    "automatic": "Automatic",
+    "confirmWinner": "Confirm the manual winner?",
+    "save": "Save heat",
+    "seed": "Seed bracket",
+    "empty": "No bracket has been seeded.",
+    "error": "Could not load or save the bracket.",
+    "invalid": "Enter a valid time for each finished crew.",
+    "conflict": "This heat changed. Your draft has been kept; review the latest result before editing again.",
+    "useLatest": "Discard draft and use latest",
+    "round": "Round {{round}}",
+    "heat": "Heat {{heat}}",
+    "bye": "Bye",
+    "pending": "Awaiting qualifier"
   },
   "apiError": {
     "network": "Connection failed. Please try again.",

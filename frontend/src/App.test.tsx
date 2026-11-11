@@ -331,4 +331,3 @@ test('successful restore rechecks the session and returns to sign-in after expir
   expect(restored).toBe(true)
   expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/auth/principal')).toHaveLength(2)
 })
-
