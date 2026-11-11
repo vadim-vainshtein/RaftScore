@@ -22,7 +22,7 @@ export default function ResultGrid() {
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
   const [competition, setCompetition] = useState(params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState(params.get('category') ?? '')
   const [attempt, setAttempt] = useState(1)
   const [competitions, setCompetitions] = useState<Competition[]>([])
   const [disciplines, setDisciplines] = useState<Discipline[]>([])

@@ -22,7 +22,7 @@ public class OverallStandingsService {
                                    CalculatedResultStatus status, int points) { }
     public record Standing(long crewId, String crewName, String regionOrClub, int startNumber,
                            Integer place, long totalPoints, boolean disqualified,
-                           List<DisciplineResult> disciplines) { }
+                           List<DisciplineResult> disciplines, Long appliedTiebreakDisciplineId) { }
 
     @Transactional(readOnly = true)
     public List<Standing> standings(Long categoryId) {
@@ -38,7 +38,7 @@ public class OverallStandingsService {
             var breakdown = rows.stream().map(row -> new DisciplineResult(row.getDiscipline().getId(),
                     row.getDiscipline().getName(), row.getPlace(), row.getStatus(), row.getPoints())).toList();
             standings.add(new Standing(crew.getId(), crew.getCrewName(), crew.getRegionOrClub(), crew.getStartNumber(),
-                    null, total, disqualified, breakdown));
+                    null, total, disqualified, breakdown, null));
         }
         var category = categories.findById(categoryId).orElseThrow();
         var selected = category.getCompetition().getTiebreakDiscipline();
@@ -58,6 +58,8 @@ public class OverallStandingsService {
                 group.sort(Comparator.comparing((Standing standing) -> tiebreakPlace(standing, selectedId))
                         .thenComparing(Standing::crewId));
             }
+            boolean applied = resolve && group.size() > 1
+                    && group.stream().map(standing -> tiebreakPlace(standing, selectedId)).distinct().count() > 1;
             Integer previous = null;
             int place = first + 1;
             for (int index = 0; index < group.size(); index++) {
@@ -66,7 +68,7 @@ public class OverallStandingsService {
                 if (resolve && index > 0 && !current.equals(previous)) place = first + index + 1;
                 previous = current;
                 ranked.add(new Standing(standing.crewId(), standing.crewName(), standing.regionOrClub(), standing.startNumber(),
-                        standing.disqualified() ? null : place, standing.totalPoints(), standing.disqualified(), standing.disciplines()));
+                        standing.disqualified() ? null : place, standing.totalPoints(), standing.disqualified(), standing.disciplines(), applied ? selectedId : null));
             }
             first = end;
         }
