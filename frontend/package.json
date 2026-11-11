@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/validate-locales.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "pretest": "node scripts/validate-locales.mjs && node --test scripts/validate-locales.check.mjs",
     "test": "vitest run"
   },
   "dependencies": {
