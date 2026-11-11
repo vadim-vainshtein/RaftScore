@@ -102,14 +102,44 @@ class CrewEntryController {
             List<@NotNull @Valid RequirementAnswer> requirementAnswers) { }
 
     record EntryResponse(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub,
-                         String representative, int startNumber, long version, List<MemberResponse> roster, boolean eligible) {
+                         String representative, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible) {
         static EntryResponse from(CrewEntry entry, List<CrewMembership> roster, boolean eligible) {
             var category = entry.getCompetitionCategory();
             return new EntryResponse(entry.getId(), category.getCompetition().getId(), category.getId(),
-                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), eligible);
+                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligible);
         }
     }
 
+    record AdmissionRequest(@NotNull Boolean admitted,
+            @NotNull @PositiveOrZero @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
+            @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal version) { }
+
+    @GetMapping("/{entryId}")
+    @Transactional(readOnly = true)
+    EntryResponse get(@PathVariable Long competitionId, @PathVariable Long entryId) {
+        var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
+        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry));
+    }
+
+    @Operation(summary = "Set crew admission decision", description = "Requires FULL_ACCESS, CSRF, confirmation mode and the current entry version.")
+    @PutMapping("/{entryId}/admission")
+    @Transactional
+    EntryResponse admission(@PathVariable Long competitionId, @PathVariable Long entryId, @Valid @RequestBody AdmissionRequest request) {
+        var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
+        var competition = entry.getCompetitionCategory().getCompetition();
+        entityManager.refresh(competition, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if (!competition.isAdmissionConfirmationRequired()) throw new AdmissionNotRequired();
+        var updated = entityManager.createNativeQuery("update crew_entries set admission_decision = :decision, version = version + 1 where id = :id and version = :version")
+                .setParameter("decision", request.admitted()).setParameter("id", entryId)
+                .setParameter("version", request.version().longValueExact()).executeUpdate();
+        if (updated != 1) throw new OptimisticLockingFailureException("Stale entry version");
+        entityManager.refresh(entry);
+        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry));
+    }
+
+    @ExceptionHandler(AdmissionNotRequired.class)
+    ResponseEntity<ApiError> admissionNotRequired() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.admission_not_required")); }
+    private static class AdmissionNotRequired extends RuntimeException { }
     @Operation(summary = "Create a crew entry", description = "Requires FULL_ACCESS and a CSRF token.")
     @ApiResponse(responseCode = "201", description = "Created", content = @Content(schema = @Schema(implementation = EntryResponse.class)))
     @ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(schema = @Schema(implementation = ApiError.class)))
