@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.*;
 @Transactional
 class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired ParallelSprintSeedingService service;
+    @Autowired ParallelSprintResultService resultService;
     @Autowired CompetitionRepository competitions;
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
@@ -57,6 +58,77 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         assertThatThrownBy(() -> service.seed(parallel.getId(), category.getId(), sprint.getId())).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void recordsResultsAndAdvancesOnlyValidWinners() {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT);
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        for (int n = 1; n <= 4; n++) {
+            results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        }
+        var bracket = service.seed(parallel.getId(), category.getId(), null);
+        entityManager.flush();
+        entityManager.clear();
+        var first = heats.findAll().stream().filter(h -> h.getBracket().getId().equals(bracket.getId()) && h.getRoundNumber() == 1).findFirst().orElseThrow();
+        var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        var dnf = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.DNF;
+        var fast = new ParallelSprintResultService.Result(finished, 100);
+        var slow = new ParallelSprintResultService.Result(finished, 120);
+        assertThatThrownBy(() -> new ParallelSprintResultService.Result(dnf, 20)).isInstanceOf(IllegalArgumentException.class);
+        var heatId = first.getId();
+        var version = first.getVersion();
+        assertThatThrownBy(() -> resultService.record(heatId, version, fast, fast)).isInstanceOf(IllegalArgumentException.class);
+        resultService.record(first.getId(), first.getVersion(), fast, slow);
+        entityManager.flush();
+        entityManager.clear();
+        first = heats.findById(first.getId()).orElseThrow();
+        assertThat(first.getWinnerSlot()).isEqualTo(1);
+        assertThat(first.getTime2Centiseconds()).isEqualTo(120);
+        var advanced = first.getNextSlot() == 1 ? first.getNextHeat().getCrew1() : first.getNextHeat().getCrew2();
+        assertThat(advanced.getId()).isEqualTo(first.getCrew1().getId());
+        var sibling = heats.findAll().stream().filter(h -> h.getBracket().getId().equals(bracket.getId()) && h.getRoundNumber() == 1 && !h.getId().equals(heatId)).findFirst().orElseThrow();
+        resultService.record(sibling.getId(), sibling.getVersion(), fast, slow);
+        var finalHeat = first.getNextHeat();
+        resultService.record(finalHeat.getId(), finalHeat.getVersion(), fast, slow);
+        resultService.record(heatId, first.getVersion(), new ParallelSprintResultService.Result(finished, 90), slow);
+        assertThat(first.getTime1Centiseconds()).isEqualTo(90);
+        var correctedVersion = first.getVersion();
+        assertThatThrownBy(() -> resultService.record(heatId, correctedVersion, slow, fast))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("already been played");
+    }
+    @Test
+    void rejectedWinnerChangeLeavesCommittedResultsAndDestinationUnchanged() {
+        var competition = competitions.save(Competition.builder().title("Rollback race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT);
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        for (int n = 1; n <= 4; n++)
+            results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        var bracket = service.seed(parallel.getId(), category.getId(), null);
+        var firstRound = heats.findAll().stream().filter(h -> h.getBracket().getId().equals(bracket.getId()) && h.getRoundNumber() == 1).toList();
+        var firstId = firstRound.get(0).getId();
+        var secondId = firstRound.get(1).getId();
+        var finalId = firstRound.get(0).getNextHeat().getId();
+        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
+        org.springframework.test.context.transaction.TestTransaction.end();
+        var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        var fast = new ParallelSprintResultService.Result(finished, 100);
+        var slow = new ParallelSprintResultService.Result(finished, 120);
+        resultService.record(firstId, 0, fast, slow);
+        resultService.record(secondId, 0, fast, slow);
+        var finalVersion = heats.findById(finalId).orElseThrow().getVersion();
+        resultService.record(finalId, finalVersion, fast, slow);
+        var version = heats.findById(firstId).orElseThrow().getVersion();
+        assertThatThrownBy(() -> resultService.record(firstId, version, slow, fast)).isInstanceOf(IllegalStateException.class);
+        org.springframework.test.context.transaction.TestTransaction.start();
+        var persisted = heats.findById(firstId).orElseThrow();
+        assertThat(persisted.getWinnerSlot()).isEqualTo(1);
+        assertThat(persisted.getTime1Centiseconds()).isEqualTo(100);
+        var destination = heats.findById(finalId).orElseThrow();
+        var advanced = persisted.getNextSlot() == 1 ? destination.getCrew1() : destination.getCrew2();
+        assertThat(advanced.getId()).isEqualTo(persisted.getCrew1().getId());
+    }
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var d = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());
         d.replaceCategories(List.of(category));
