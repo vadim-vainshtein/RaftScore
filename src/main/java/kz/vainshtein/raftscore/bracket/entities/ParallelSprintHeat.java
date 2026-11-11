@@ -28,6 +28,7 @@ public class ParallelSprintHeat extends VersionedEntity {
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "next_heat_id") private ParallelSprintHeat nextHeat;
     @Column(name = "next_slot") private Integer nextSlot;
     @Column(name = "winner_slot") private Integer winnerSlot;
+    @Column(name = "winner_overridden", nullable = false) private boolean winnerOverridden;
 
     @Builder
     private ParallelSprintHeat(ParallelSprintBracket bracket, int roundNumber, int heatNumber, CrewEntry crew1, CrewEntry crew2,
@@ -52,12 +53,13 @@ public class ParallelSprintHeat extends VersionedEntity {
         this.nextSlot = nextSlot;
     }
     /** Records an already validated result. */
-    public void record(AttemptResultStatus firstStatus, Integer firstTime, AttemptResultStatus secondStatus, Integer secondTime, int winner) {
+    public void record(AttemptResultStatus firstStatus, Integer firstTime, AttemptResultStatus secondStatus, Integer secondTime, Integer winner, boolean overridden) {
         this.status1 = firstStatus;
         this.time1Centiseconds = firstTime;
         this.status2 = secondStatus;
         this.time2Centiseconds = secondTime;
         this.winnerSlot = winner;
+        this.winnerOverridden = overridden;
     }
 
     /** Changes only the feeder's own slot, before this heat has been played. */

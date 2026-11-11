@@ -32,6 +32,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactionTemplate;
+    @Autowired org.springframework.web.context.WebApplicationContext context;
 
     @Test
     void seedsTiesAndByesWithoutAdvancingUnresolvedHeats() {
@@ -83,7 +84,16 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         assertThatThrownBy(() -> new ParallelSprintResultService.Result(dnf, 20)).isInstanceOf(IllegalArgumentException.class);
         var heatId = first.getId();
         var version = first.getVersion();
-        assertThatThrownBy(() -> resultService.record(heatId, version, fast, fast)).isInstanceOf(IllegalArgumentException.class);
+        resultService.record(heatId, version, fast, fast);
+        assertThat(first.getWinnerSlot()).isNull();
+        assertThat(first.getStatus1()).isEqualTo(finished);
+        var noFinish = new ParallelSprintResultService.Result(dnf, null);
+        resultService.record(heatId, first.getVersion(), noFinish, noFinish);
+        assertThat(first.getWinnerSlot()).isNull();
+        assertThat(first.getStatus2()).isEqualTo(dnf);
+        resultService.record(heatId, first.getVersion(), fast, fast, first.getCrew2().getId());
+        assertThat(first.getWinnerSlot()).isEqualTo(2);
+        assertThat(first.isWinnerOverridden()).isTrue();
         resultService.record(first.getId(), first.getVersion(), fast, slow);
         entityManager.flush();
         entityManager.clear();
@@ -152,6 +162,33 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
                 jdbc.update("delete from competitions where id = ?", competitionId);
             });
         }
+    }
+    @Test
+    void resultApiEnforcesScopeConfirmationAndAuthorization() throws Exception {
+        var competition = competitions.save(Competition.builder().title("API race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var bracket = kz.vainshtein.raftscore.bracket.entities.ParallelSprintBracket.builder().discipline(parallel).category(category).build();
+        entityManager.persist(bracket);
+        var first = crew(category, 1);
+        var second = crew(category, 2);
+        var heat = heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(1).crew1(first).crew2(second).build());
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+                .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        var path = "/api/competitions/" + competition.getId() + "/disciplines/" + parallel.getId() + "/categories/" + category.getId() + "/brackets/" + bracket.getId();
+        var body = "{\"version\":0,\"first\":{\"status\":\"FINISHED\",\"timeCentiseconds\":100},\"second\":{\"status\":\"FINISHED\",\"timeCentiseconds\":100},\"winnerCrewId\":" + second.getId() + ",\"confirmed\":true}";
+        var admin = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS");
+        var reader = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY");
+        var csrf = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(reader).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body.replace("\"version\":0", "\"version\":0.5"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body.replace("true", "false"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body.replace("\"winnerCrewId\":" + second.getId(), "\"winnerCrewId\":999999"))).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path.replace("/competitions/" + competition.getId(), "/competitions/999999") ).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Person"))));
     }
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var d = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());

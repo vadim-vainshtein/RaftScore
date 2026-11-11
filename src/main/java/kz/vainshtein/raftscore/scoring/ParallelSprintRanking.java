@@ -31,7 +31,7 @@ public final class ParallelSprintRanking {
             if (heat.getRoundNumber() == finalRound && heat.getNextHeat() == null) {
                 var winner = firstWon ? heat.getCrew1() : heat.getCrew2();
                 var winnerStatus = firstWon ? heat.getStatus1() : heat.getStatus2();
-                if (winnerStatus == AttemptResultStatus.FINISHED) results.add(new Result(winner, winnerStatus, 1));
+                if (winnerStatus == AttemptResultStatus.FINISHED || heat.isWinnerOverridden()) results.add(new Result(winner, winnerStatus, 1));
             }
         }
         eliminations.sort(Comparator.comparingInt(Elimination::stagePlace)
