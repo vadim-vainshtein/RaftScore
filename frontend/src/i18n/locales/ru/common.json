@@ -1,6 +1,58 @@
 {
-  "app": {"name":"RaftScore", "navigation":"Главная навигация", "openNavigation":"Открыть меню", "menu":"Меню", "language":"Язык"},
-  "navigation": {"competitions":"Соревнования", "categories":"Справочник категорий", "users":"Пользователи", "backups":"Резервные копии"},
-  "placeholder": {"unavailable":"Этот раздел пока недоступен.", "notFound":"Страница не найдена", "notFoundDescription":"Запрошенная страница не найдена."},
-  "format": {"items_one":"{{count}} элемент", "items_few":"{{count}} элемента", "items_many":"{{count}} элементов", "items_other":"{{count}} элемента"}
+  "app": {
+    "name": "RaftScore",
+    "navigation": "Главная навигация",
+    "openNavigation": "Открыть меню",
+    "menu": "Меню",
+    "language": "Язык"
+  },
+  "navigation": {
+    "competitions": "Соревнования",
+    "categories": "Справочник категорий",
+    "users": "Пользователи",
+    "backups": "Резервные копии",
+    "crews": "Экипажи"
+  },
+  "placeholder": {
+    "unavailable": "Этот раздел пока недоступен.",
+    "notFound": "Страница не найдена",
+    "notFoundDescription": "Запрошенная страница не найдена."
+  },
+  "format": {
+    "items_one": "{{count}} элемент",
+    "items_few": "{{count}} элемента",
+    "items_many": "{{count}} элементов",
+    "items_other": "{{count}} элемента"
+  },
+  "crew": {
+    "crews": "Экипажи",
+    "competition": "Соревнование",
+    "category": "Категория",
+    "all": "Все",
+    "search": "Поиск экипажей",
+    "admission": "Допуск",
+    "pending": "Ожидает",
+    "admitted": "Допущен",
+    "rejected": "Не допущен",
+    "create": "Создать экипаж",
+    "edit": "Изменить",
+    "admit": "Допустить",
+    "reject": "Отклонить",
+    "crewName": "Название экипажа",
+    "regionOrClub": "Регион или клуб",
+    "representative": "Представитель",
+    "startNumber": "Стартовый номер",
+    "member": "Участник {{number}}",
+    "surname": "Фамилия",
+    "givenName": "Имя",
+    "patronymic": "Отчество",
+    "yes": "Да",
+    "no": "Нет",
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "connection": "Ошибка соединения",
+    "existingParticipant": "Существующий участник",
+    "newParticipant": "Новый участник",
+    "participantConflict": "Уже состоит в экипаже {{name}} этой категории."
+  }
 }

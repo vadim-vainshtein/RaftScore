@@ -45,6 +45,13 @@ class CompetitionCategoryController {
         }
     }
 
+    @GetMapping
+    @Transactional(readOnly = true)
+    java.util.List<CategorySnapshot> list(@PathVariable Long competitionId) {
+        if (!competitions.existsById(competitionId)) throw new CompetitionNotFound();
+        return categories.findByCompetitionId(competitionId).stream().map(CategorySnapshot::from).toList();
+    }
+
     @Operation(summary = "Create a category from an active template", description = "Requires FULL_ACCESS and a CSRF token. The category is an independent snapshot.")
     @ApiResponse(responseCode = "201", description = "Created", content = @Content(schema = @Schema(implementation = CategorySnapshot.class)))
     @ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(schema = @Schema(implementation = ApiError.class)))

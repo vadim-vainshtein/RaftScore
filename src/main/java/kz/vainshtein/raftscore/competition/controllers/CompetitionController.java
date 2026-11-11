@@ -84,6 +84,12 @@ class CompetitionController {
                     item.getLocation(), item.getTimeZone(), state, item.getCategoryCount(), item.getCrewCount());
         }
     }
+    @GetMapping("/{id}")
+    @Transactional(readOnly = true)
+    CompetitionResponse get(@PathVariable Long id) {
+        return CompetitionResponse.from(repository.findById(id).orElseThrow(NotFound::new));
+    }
+
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping
     @Transactional

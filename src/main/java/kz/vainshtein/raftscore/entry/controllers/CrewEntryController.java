@@ -64,7 +64,15 @@ class CrewEntryController {
         }
     }
 
-    record RequirementAnswer(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal requirementId, @NotNull @JsonDeserialize(using = AnswerValueDeserializer.class) Object value) { }
+    record RequirementAnswer(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal requirementId, @JsonDeserialize(using = AnswerValueDeserializer.class) Object value, @JsonDeserialize(using = DecimalStringDeserializer.class) String decimalValue) { }
+
+    static class DecimalStringDeserializer extends ValueDeserializer<String> {
+        @Override
+        public String deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.currentToken() != tools.jackson.core.JsonToken.VALUE_STRING) throw new InvalidAnswers();
+            return parser.getString();
+        }
+    }
 
     static class AnswerValueDeserializer extends ValueDeserializer<Object> {
         @Override
@@ -102,12 +110,52 @@ class CrewEntryController {
             List<@NotNull @Valid RequirementAnswer> requirementAnswers) { }
 
     record EntryResponse(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub,
-                         String representative, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible) {
-        static EntryResponse from(CrewEntry entry, List<CrewMembership> roster, boolean eligible) {
+                         String representative, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible, List<AnswerResponse> requirementAnswers) {
+        static EntryResponse from(CrewEntry entry, List<CrewMembership> roster, boolean eligible, List<CrewRequirementValue> answers) {
             var category = entry.getCompetitionCategory();
             return new EntryResponse(entry.getId(), category.getCompetition().getId(), category.getId(),
-                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligible);
+                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligible, answers.stream().map(AnswerResponse::from).toList());
         }
+    }
+
+    record AnswerResponse(Long requirementId, Object value) {
+        static AnswerResponse from(CrewRequirementValue answer) {
+            Object value = switch (answer.getValueType()) {
+                case YES_NO -> answer.getBooleanValue();
+                case TEXT -> answer.getTextValue();
+                case DATE -> answer.getDateValue();
+                case NUMBER -> answer.getNumericValue().toPlainString();
+            };
+            return new AnswerResponse(answer.getRequirement().getId(), value);
+        }
+    }
+    record PublicEntry(Long id, Long categoryId, String crewName, String regionOrClub, int startNumber) { }
+    record PrivateSummary(Long id, Long categoryId, String crewName, String regionOrClub, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible) { }
+    record Requirement(Long id, String name, String valueType, boolean required) { }
+
+    @GetMapping
+    @Transactional(readOnly = true)
+    List<PublicEntry> list(@PathVariable Long competitionId) {
+        if (!competitions.existsById(competitionId)) throw new CompetitionNotFound();
+        return entries.findByCompetitionCategoryCompetitionId(competitionId).stream().map(entry ->
+                new PublicEntry(entry.getId(), entry.getCompetitionCategory().getId(), entry.getCrewName(), entry.getRegionOrClub(), entry.getStartNumber())).toList();
+    }
+
+    @GetMapping("/private")
+    @Transactional(readOnly = true)
+    List<PrivateSummary> privateList(@PathVariable Long competitionId) {
+        if (!competitions.existsById(competitionId)) throw new CompetitionNotFound();
+        return entries.findByCompetitionCategoryCompetitionId(competitionId).stream().map(entry ->
+                new PrivateSummary(entry.getId(), entry.getCompetitionCategory().getId(), entry.getCrewName(), entry.getRegionOrClub(), entry.getStartNumber(), entry.getVersion(),
+                        memberships.findByCrewEntryIdOrderByPositionAsc(entry.getId()).stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligibility.isEligible(entry))).toList();
+    }
+
+    @GetMapping("/requirements")
+    @Transactional(readOnly = true)
+    List<Requirement> listRequirements(@PathVariable Long competitionId) {
+        if (!competitions.existsById(competitionId)) throw new CompetitionNotFound();
+        return requirements.findByCompetitionId(competitionId).stream().sorted(java.util.Comparator.comparingInt(r -> r.getDisplayOrder()))
+                .map(r -> new Requirement(r.getId(), r.getName(), r.getValueType().name(), r.isRequired())).toList();
     }
 
     record AdmissionRequest(@NotNull Boolean admitted,
@@ -118,7 +166,7 @@ class CrewEntryController {
     @Transactional(readOnly = true)
     EntryResponse get(@PathVariable Long competitionId, @PathVariable Long entryId) {
         var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
-        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry));
+        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }
 
     @Operation(summary = "Set crew admission decision", description = "Requires FULL_ACCESS, CSRF, confirmation mode and the current entry version.")
@@ -134,7 +182,7 @@ class CrewEntryController {
                 .setParameter("version", request.version().longValueExact()).executeUpdate();
         if (updated != 1) throw new OptimisticLockingFailureException("Stale entry version");
         entityManager.refresh(entry);
-        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry));
+        return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }
 
     @ExceptionHandler(AdmissionNotRequired.class)
@@ -157,7 +205,7 @@ class CrewEntryController {
                 .regionOrClub(request.regionOrClub()).representative(request.representative()).startNumber(request.startNumber().intValueExact()).build());
         var roster = replaceRoster(entry, request.roster());
         replaceAnswers(entry, request.requirementAnswers());
-        return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, roster, eligibility.isEligible(entry)));
+        return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId())));
     }
 
     @Operation(summary = "Update crew entry and roster", description = "Requires FULL_ACCESS, a CSRF token and the current version. Category cannot be changed.")
@@ -186,7 +234,7 @@ class CrewEntryController {
             if (request.roster() != null) roster = replaceRoster(entry, request.roster());
             replaceAnswers(entry, request.requirementAnswers());
         }
-        return EntryResponse.from(entry, roster, eligibility.isEligible(entry));
+        return EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }
 
     private void replaceAnswers(CrewEntry entry, List<RequirementAnswer> answers) {
@@ -199,12 +247,14 @@ class CrewEntryController {
                 if (!seen.add(answer.requirementId().longValueExact())) throw new InvalidAnswers();
                 var requirement = available.stream().filter(r -> r.getId().equals(answer.requirementId().longValueExact()))
                         .findFirst().orElseThrow(InvalidAnswers::new);
+                if (answer.value() != null && answer.decimalValue() != null) throw new InvalidAnswers();
                 var raw = answer.value();
+                if (answer.decimalValue() != null && requirement.getValueType() != kz.vainshtein.raftscore.competition.entities.EntryRequirementValueType.NUMBER) throw new InvalidAnswers();
                 Object value = switch (requirement.getValueType()) {
                     case YES_NO -> raw instanceof Boolean ? raw : null;
                     case TEXT -> raw instanceof String ? raw : null;
                     case DATE -> raw instanceof String text ? LocalDate.parse(text) : null;
-                    case NUMBER -> raw instanceof BigDecimal ? raw : null;
+                    case NUMBER -> answer.decimalValue() != null ? new BigDecimal(answer.decimalValue()) : raw instanceof BigDecimal ? raw : null;
                 };
                 if (value == null) throw new InvalidAnswers();
                 replacements.add(CrewRequirementValue.builder().crewEntry(entry).requirement(requirement).value(value).build());
