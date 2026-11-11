@@ -19,7 +19,7 @@ public class CrewEligibilityService {
     public boolean isEligible(CrewEntry entry) {
         var category = entry.getCompetitionCategory();
         var competition = category.getCompetition();
-        if (competition.isAdmissionConfirmationRequired()) return false;
+        if (competition.isAdmissionConfirmationRequired() && !Boolean.TRUE.equals(entry.getAdmissionDecision())) return false;
         var roster = memberships.findByCrewEntryIdOrderByPositionAsc(entry.getId());
         if (roster.size() != category.getCrewSize()
                 || !IntStream.range(0, roster.size()).allMatch(i -> roster.get(i).getPosition() == i + 1)

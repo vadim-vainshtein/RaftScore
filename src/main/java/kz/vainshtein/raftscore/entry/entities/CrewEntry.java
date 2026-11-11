@@ -36,6 +36,9 @@ public class CrewEntry extends VersionedEntity {
     @Column(name = "start_number", nullable = false)
     private int startNumber;
 
+    @Column(name = "admission_decision")
+    private Boolean admissionDecision;
+
     @Builder
     private CrewEntry(CompetitionCategory competitionCategory, String crewName, String regionOrClub,
                       String representative, int startNumber) {

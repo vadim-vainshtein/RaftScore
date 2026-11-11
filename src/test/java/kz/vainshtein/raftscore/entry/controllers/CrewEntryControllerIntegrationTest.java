@@ -303,6 +303,74 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         }
     }
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrentAdmissionWritesAllowOnlyOneVersionWinner() throws Exception {
+        competition.updateDetails("Race", LocalDate.of(2026, 1, 1), null, "River", "UTC", null, true);
+        competitions.saveAndFlush(competition);
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isCreated()).andReturn().getResponse();
+            Number id = JsonPath.read(created.getContentAsString(), "$.id");
+            var gate = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.Callable<Integer> write = () -> {
+                gate.await();
+                return mvc.perform(put(url + "/" + id + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":0}")).andReturn().getResponse().getStatus();
+            };
+            var first = executor.submit(write);
+            var second = executor.submit(write);
+            gate.countDown();
+            assertThat(java.util.List.of(first.get(), second.get())).containsExactlyInAnyOrder(200, 409);
+            assertThat(jdbc.queryForObject("select version from crew_entries where id = ?", Long.class, id.longValue())).isEqualTo(1L);
+        } finally {
+            executor.shutdownNow();
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+    @Test
+    void admissionDecisionControlsEligibilityAndRequiresCurrentVersion() throws Exception {
+        competition.updateDetails("Race", LocalDate.of(2026, 1, 1), null, "River", "UTC", null, true);
+        competitions.flush();
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
+                .name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());
+        var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eligible").value(false))
+                .andExpect(jsonPath("$.admissionDecision").value(org.hamcrest.Matchers.nullValue())).andReturn().getResponse();
+        Number id = JsonPath.read(created.getContentAsString(), "$.id");
+        var admissionUrl = url + "/" + id + "/admission";
+        var admitted = "{\"admitted\":true,\"version\":0}";
+        mvc.perform(put(admissionUrl).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(admitted)).andExpect(status().isForbidden());
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).contentType(MediaType.APPLICATION_JSON).content(admitted)).andExpect(status().isForbidden());
+        mvc.perform(put(admissionUrl).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(admitted)).andExpect(status().isUnauthorized());
+        mvc.perform(put("/api/competitions/" + other.getId() + "/entries/" + id + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(admitted)).andExpect(status().isNotFound());
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}")).andExpect(status().isBadRequest());
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(admitted))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1)).andExpect(jsonPath("$.admissionDecision").value(true)).andExpect(jsonPath("$.eligible").value(false));
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(admitted)).andExpect(status().isConflict());
+        var answer = updateBody("1").replace("}", ",\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":false}]}");
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(answer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(true)).andExpect(jsonPath("$.version").value(2));
+        category.setCrewSize(5); categories.flush();
+        assertThat(eligibility.isEligible(entries.findById(id.longValue()).orElseThrow())).isFalse();
+        category.setCrewSize(4); categories.flush();
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":false,\"version\":2}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(false)).andExpect(jsonPath("$.admissionDecision").value(false)).andExpect(jsonPath("$.version").value(3));
+        mvc.perform(get(url + "/" + id).with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.admissionDecision").value(false));
+        mvc.perform(get(url + "/" + id).with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        mvc.perform(head(url + "/" + id).with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        competition.updateDetails("Race", LocalDate.of(2026, 1, 1), null, "River", "UTC", null, false); competitions.flush();
+        mvc.perform(get(url + "/" + id).with(user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(true));
+        mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":3}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.admission_not_required"));
+    }
+    @Test
     void validatesAndEnforcesSecurity() throws Exception {
         mvc.perform(post(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isForbidden());
         mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isForbidden());
