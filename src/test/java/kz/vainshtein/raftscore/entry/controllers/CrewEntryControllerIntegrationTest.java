@@ -43,8 +43,97 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         url = "/api/competitions/" + competition.getId() + "/entries";
     }
-    String createBody() { return "{\"categoryId\":" + category.getId() + ",\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1}"; }
+    String createBody() { return "{\"categoryId\":" + category.getId() + ",\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1,\"roster\":[{\"surname\":\"A\",\"givenName\":\"A\"},{\"surname\":\"B\",\"givenName\":\"B\"},{\"surname\":\"C\",\"givenName\":\"C\"},{\"surname\":\"D\",\"givenName\":\"D\"}]}"; }
     String updateBody(String version) { return "{\"crewName\":\"Changed\",\"regionOrClub\":\"Region\",\"representative\":\"Rep\",\"startNumber\":2,\"version\":" + version + "}"; }
+    void cleanupParticipants(Long... categoryIds) {
+        for (var categoryId : categoryIds) {
+            var ids = jdbc.queryForList("select participant_id from crew_memberships where competition_category_id = ?", Long.class, categoryId);
+            jdbc.update("delete from crew_memberships where competition_category_id = ?", categoryId);
+            for (var id : ids) jdbc.update("delete from participants where id = ?", id);
+        }
+    }
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void duplicateParticipantRollsBackRosterReplacement() throws Exception {
+        try {
+            var first = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isCreated()).andReturn().getResponse();
+            var second = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                            .content(createBody().replace("\"startNumber\":1", "\"startNumber\":2")))
+                    .andExpect(status().isCreated()).andReturn().getResponse();
+            Number firstId = JsonPath.read(first.getContentAsString(), "$.id");
+            Number secondId = JsonPath.read(second.getContentAsString(), "$.id");
+            var person = jdbc.queryForObject("select participant_id from crew_memberships where crew_entry_id = ? and position = 1", Long.class, firstId.longValue());
+            var before = jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, secondId.longValue());
+            var count = jdbc.queryForObject("select count(*) from participants", Integer.class);
+            var body = updateBody("0").replace("}", ",\"roster\":[{\"surname\":\"New\",\"givenName\":\"One\"},{\"participantId\":" + person
+                    + "},{\"participantId\":" + before.get(2) + "},{\"participantId\":" + before.get(3) + "}]}");
+            mvc.perform(put(url + "/" + secondId).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.participant_duplicate"));
+            var unchanged = entries.findById(secondId.longValue()).orElseThrow();
+            assertThat(unchanged.getVersion()).isZero();
+            assertThat(unchanged.getCrewName()).isEqualTo("Crew");
+            assertThat(unchanged.getRegionOrClub()).isEqualTo("Club");
+            assertThat(unchanged.getRepresentative()).isEqualTo("Coach");
+            assertThat(unchanged.getStartNumber()).isEqualTo(2);
+            assertThat(jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, secondId.longValue())).isEqualTo(before);
+            assertThat(jdbc.queryForObject("select count(*) from participants", Integer.class)).isEqualTo(count);
+        } finally {
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void rejectsWrongRosterSizesWithoutChangingCommittedEntry() throws Exception {
+        try {
+            var shortBody = createBody().replace(", {", ",{");
+            shortBody = shortBody.replace(",{\"surname\":\"D\",\"givenName\":\"D\"}", "");
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(shortBody))
+                    .andExpect(status().isBadRequest());
+            var longBody = createBody().replace("]}", ",{\"surname\":\"E\",\"givenName\":\"E\"}]}");
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(longBody))
+                    .andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForObject("select count(*) from crew_entries where competition_category_id = ?", Integer.class, category.getId())).isZero();
+            var response = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.roster[0].surname").value("A")).andReturn().getResponse();
+            Number id = JsonPath.read(response.getContentAsString(), "$.id");
+            var badUpdate = updateBody("0").replace("}", ",\"roster\":[]}");
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(badUpdate))
+                    .andExpect(status().isBadRequest());
+            var longUpdate = updateBody("0").replace("}", ",\"roster\":[{},{},{},{},{}]}");
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(longUpdate))
+                    .andExpect(status().isBadRequest());
+            assertThat(entries.findById(id.longValue()).orElseThrow().getVersion()).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from crew_memberships where crew_entry_id = ?", Integer.class, id.longValue())).isEqualTo(4);
+            var ids = jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, id.longValue());
+            var replacement = "{\"crewName\":\"Changed\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1,\"version\":0,\"roster\":["
+                    + "{\"participantId\":" + ids.get(3) + "},{\"participantId\":" + ids.get(2) + "},{\"participantId\":" + ids.get(1) + "},{\"participantId\":" + ids.get(0) + "}]}";
+            var fractional = replacement.replace("\"participantId\":" + ids.get(3), "\"participantId\":" + ids.get(3) + ".9");
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(fractional))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(replacement))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1))
+                    .andExpect(jsonPath("$.crewName").value("Changed")).andExpect(jsonPath("$.roster[0].surname").value("D"));
+            assertThat(entries.findById(id.longValue()).orElseThrow().getVersion()).isEqualTo(1);
+            assertThat(jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, id.longValue()))
+                    .containsExactly(ids.get(3), ids.get(2), ids.get(1), ids.get(0));
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(replacement))
+                    .andExpect(status().isConflict());
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                            .content(replacement.replace("\"version\":0", "\"version\":1")))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+        } finally {
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void createsUpdatesAndRejectsStaleOrWrongCompetition() throws Exception {
@@ -68,6 +157,7 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
             assertThat(persisted.getStartNumber()).isEqualTo(2);
             assertThat(persisted.getVersion()).isEqualTo(1);
         } finally {
+            cleanupParticipants(category.getId());
             jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
             categories.deleteById(category.getId());
             competitions.deleteById(competition.getId());
@@ -78,7 +168,7 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void duplicateStartNumbersConflictWithinCategoryAndPreserveEntries() throws Exception {
         var secondCategory = categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
-                .classLabel("R6").scoringGroupLabel("Open").crewSize(6).build());
+                .classLabel("R6").scoringGroupLabel("Open").crewSize(4).build());
         try {
             var first = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
                     .andExpect(status().isCreated()).andReturn().getResponse();
@@ -103,6 +193,7 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
             assertThat(unchanged.getCrewName()).isEqualTo("Crew");
             assertThat(unchanged.getVersion()).isZero();
         } finally {
+            cleanupParticipants(category.getId(), secondCategory.getId());
             jdbc.update("delete from crew_entries where competition_category_id in (?, ?)", category.getId(), secondCategory.getId());
             categories.deleteById(secondCategory.getId());
             categories.deleteById(category.getId());
