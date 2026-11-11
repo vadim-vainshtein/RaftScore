@@ -12,7 +12,7 @@ let listeners: Set<(event: MediaQueryListEvent) => void>
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 beforeEach(() => {
-  vi.mocked(apiRequest).mockReset().mockImplementation(async path => path.includes('/duplicate?') ? {exists: false} : path.startsWith('/api/category-templates') ? {content: [], totalPages: 0} : {username: 'admin', role: 'FULL_ACCESS'})
+  vi.mocked(apiRequest).mockReset().mockImplementation(async path => path.includes('/duplicate?') ? {exists: false} : path.startsWith('/api/category-templates') || path.startsWith('/api/competitions?') ? {content: [], totalPages: 0, totalElements: 0} : {username: 'admin', role: 'FULL_ACCESS'})
   window.history.replaceState(null, '', '/#/')
   desktop = false
   listeners = new Set()
@@ -100,10 +100,19 @@ test('switches language without navigation and persists the choice', async () =>
 
 test('authenticates with CSRF, restores a route, and logs out', async () => {
   window.history.replaceState(null, '', '/#/competitions/12')
-  vi.mocked(apiRequest).mockRejectedValueOnce(new ApiError(401, undefined))
-    .mockResolvedValueOnce({headerName: 'X-CSRF-TOKEN', token: 'token'}).mockResolvedValueOnce(undefined)
-    .mockResolvedValueOnce({username: 'reader', role: 'READ_ONLY'})
-    .mockResolvedValueOnce({headerName: 'X-CSRF-TOKEN', token: 'new-token'}).mockResolvedValueOnce(undefined)
+  let signedIn = false
+  let csrfCount = 0
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') {
+      if (!signedIn) throw new ApiError(401, undefined)
+      return {username: 'reader', role: 'READ_ONLY'}
+    }
+    if (path === '/api/auth/csrf') return {headerName: 'X-CSRF-TOKEN', token: csrfCount++ === 0 ? 'token' : 'new-token'}
+    if (path === '/api/auth/login') { signedIn = true; return undefined }
+    if (path === '/api/auth/logout') return undefined
+    if (path.startsWith('/api/competitions?')) return {content: [], totalPages: 0, totalElements: 0}
+    throw new Error(`Unexpected request: ${path}`)
+  })
   render(<App/>)
   fireEvent.change(await screen.findByLabelText(/Username/), {target: {value: 'reader'}})
   fireEvent.change(screen.getByLabelText(/Password/), {target: {value: 'secret'}})
