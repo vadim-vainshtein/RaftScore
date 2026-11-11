@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0055-participants-and-crew-memberships" author="raftscore">
+        <createTable tableName="participants">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="surname" type="TEXT"><constraints nullable="false"/></column>
+            <column name="given_name" type="TEXT"><constraints nullable="false"/></column>
+            <column name="patronymic" type="TEXT"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <createTable tableName="crew_memberships">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="crew_entry_id" type="BIGINT"><constraints nullable="false" foreignKeyName="crew_memberships_crew_fk" references="crew_entries(id)"/></column>
+            <column name="participant_id" type="BIGINT"><constraints nullable="false" foreignKeyName="crew_memberships_participant_fk" references="participants(id)"/></column>
+            <column name="position" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="crew_memberships" columnNames="crew_entry_id, position" constraintName="crew_memberships_crew_position_uk"/>
+        <addUniqueConstraint tableName="crew_memberships" columnNames="crew_entry_id, participant_id" constraintName="crew_memberships_crew_participant_uk"/>
+        <sql>ALTER TABLE crew_memberships ADD CONSTRAINT crew_memberships_position_positive CHECK (position &gt; 0)</sql>
+    </changeSet>
+</databaseChangeLog>
