@@ -8,6 +8,10 @@ import org.springframework.data.repository.query.Param;
 
 /** Storage access for competitions. */
 public interface CompetitionRepository extends JpaRepository<Competition, Long> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from Competition c where c.id = :id")
+    java.util.Optional<Competition> findForDisciplineConfiguration(@Param("id") Long id);
+
     @Query(value = """
             select c.id as id, c.title as title, c.startDate as startDate, c.endDate as endDate,
                    c.location as location, c.timeZone as timeZone,
