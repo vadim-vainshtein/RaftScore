@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0044-unique-competition-category" author="raftscore">
+        <!-- Keep existing writers blocked from the duplicate check through trigger installation. -->
+        <sql>LOCK TABLE competition_categories IN SHARE ROW EXCLUSIVE MODE</sql>
+        <sql splitStatements="false"><![CDATA[
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM competition_categories
+                           GROUP BY competition_id, class_label, scoring_group_label
+                           HAVING COUNT(*) > 1) THEN
+                    RAISE EXCEPTION 'Duplicate competition category combinations exist; resolve them before applying 0044.';
+                END IF;
+            END;
+            $$;
+        ]]></sql>
+        <!-- Serialize category writes per competition; compare the unrestricted labels exactly. -->
+        <sql splitStatements="false"><![CDATA[
+            CREATE TABLE competition_category_guards (
+                competition_id BIGINT PRIMARY KEY REFERENCES competitions(id) ON DELETE CASCADE
+            );
+            CREATE FUNCTION enforce_competition_category_combination() RETURNS trigger AS $$
+            BEGIN
+                INSERT INTO competition_category_guards (competition_id)
+                VALUES (NEW.competition_id)
+                ON CONFLICT (competition_id)
+                DO UPDATE SET competition_id = EXCLUDED.competition_id;
+
+                IF EXISTS (SELECT 1 FROM competition_categories
+                           WHERE competition_id = NEW.competition_id
+                             AND class_label = NEW.class_label
+                             AND scoring_group_label = NEW.scoring_group_label
+                             AND id IS DISTINCT FROM NEW.id) THEN
+                    RAISE unique_violation USING CONSTRAINT = 'competition_categories_combination_uk',
+                        MESSAGE = 'duplicate key value violates unique constraint "competition_categories_combination_uk"';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER competition_categories_combination_guard
+                BEFORE INSERT OR UPDATE OF competition_id, class_label, scoring_group_label ON competition_categories
+                FOR EACH ROW EXECUTE FUNCTION enforce_competition_category_combination();
+        ]]></sql>
+    </changeSet>
+</databaseChangeLog>
