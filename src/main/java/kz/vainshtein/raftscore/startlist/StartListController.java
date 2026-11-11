@@ -25,6 +25,11 @@ class StartListController {
         return service.read(competitionId, disciplineId, categoryId);
     }
 
+    @DeleteMapping("/source-results")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    void clearResults(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+        service.clearResults(competitionId, disciplineId, categoryId);
+    }
     @PutMapping
     StartListService.View replace(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
                                   @Valid @RequestBody ReplaceRequest request) {

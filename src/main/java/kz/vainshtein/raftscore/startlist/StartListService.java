@@ -26,6 +26,7 @@ public class StartListService {
     private final CrewEligibilityService eligibility;
     private final StartListRepository lists;
     private final StartSlotRepository slots;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public record Slot(long crewId, String crewName, int startNumber, int position, Instant plannedTime) { }
     public record View(Long id, List<Slot> slots) { }
@@ -42,6 +43,8 @@ public class StartListService {
     public View replace(long competitionId, long disciplineId, long categoryId, List<Long> order,
                         boolean random, Instant firstStart, Long intervalSeconds) {
         var discipline = selection(competitionId, disciplineId, categoryId, true);
+        if (hasResults(disciplineId, categoryId))
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "remove source results before replacing the start list");
         if ((firstStart == null) != (intervalSeconds == null) || (intervalSeconds != null && intervalSeconds < 0))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "firstStart and non-negative intervalSeconds must be supplied together");
         var eligible = crews.findByCompetitionCategoryId(categoryId).stream().filter(eligibility::isEligible).toList();
@@ -74,6 +77,29 @@ public class StartListService {
         return view(list);
     }
 
+    private boolean hasResults(long disciplineId, long categoryId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM attempt_results a JOIN crew_entries c ON c.id = a.crew_entry_id
+                               WHERE a.discipline_id = ? AND c.competition_category_id = ?)
+                    OR EXISTS (SELECT 1 FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id
+                               WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL))
+                """, Boolean.class, disciplineId, categoryId, disciplineId, categoryId));
+    }
+
+    /** Clears source results and their derived data under the same lock as replacements and result entry. */
+    @Transactional
+    public void clearResults(long competitionId, long disciplineId, long categoryId) {
+        selection(competitionId, disciplineId, categoryId, true);
+        jdbc.update("DELETE FROM slalom_gate_penalties WHERE attempt_result_id IN (SELECT a.id FROM attempt_results a JOIN crew_entries c ON c.id = a.crew_entry_id WHERE a.discipline_id = ? AND c.competition_category_id = ?)", disciplineId, categoryId);
+        jdbc.update("DELETE FROM attempt_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);
+        jdbc.update("DELETE FROM calculated_discipline_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);
+        // A played bracket contains propagated winners, so discard it and require reseeding.
+        var played = Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id WHERE b.discipline_id = ? AND b.category_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL))", Boolean.class, disciplineId, categoryId));
+        if (played) {
+            jdbc.update("DELETE FROM parallel_sprint_heats WHERE bracket_id IN (SELECT id FROM parallel_sprint_brackets WHERE discipline_id = ? AND category_id = ?)", disciplineId, categoryId);
+            jdbc.update("DELETE FROM parallel_sprint_brackets WHERE discipline_id = ? AND category_id = ?", disciplineId, categoryId);
+        }
+    }
     private Discipline selection(long competitionId, long disciplineId, long categoryId, boolean lock) {
         var discipline = (lock ? disciplines.findForStartListUpdate(disciplineId) : disciplines.findById(disciplineId))
                 .filter(d -> d.getCompetition().getId().equals(competitionId))

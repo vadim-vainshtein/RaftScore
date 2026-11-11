@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ParallelSprintResultService {
     private final ParallelSprintHeatRepository heats;
     private final EntityManager entityManager;
+    private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
 
     public record Result(AttemptResultStatus status, Integer timeCentiseconds) {
         public Result {
@@ -31,6 +32,9 @@ public class ParallelSprintResultService {
     public void record(long heatId, long expectedVersion, Result first, Result second) {
         if (first == null || second == null) throw new IllegalArgumentException("both results are required");
         var heat = heats.findById(heatId).orElseThrow();
+        // All result writers must acquire this lock before changing source results.
+        disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
+        entityManager.refresh(heat);
         if (heat.getVersion() != expectedVersion) throw new IllegalStateException("heat has changed");
         if (heat.getCrew1() == null || heat.getCrew2() == null)
             throw new IllegalStateException("heat must have two crews; seeded byes cannot be edited");
