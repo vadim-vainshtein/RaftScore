@@ -12,6 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.context.transaction.TestTransaction;
 import testsupport.PostgreSqlIntegrationTest;
 import static org.assertj.core.api.Assertions.*;
 
@@ -27,6 +30,8 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
     @Autowired CalculatedDisciplineResultRepository results;
     @Autowired ParallelSprintHeatRepository heats;
     @Autowired EntityManager entityManager;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired TransactionTemplate transactionTemplate;
 
     @Test
     void seedsTiesAndByesWithoutAdvancingUnresolvedHeats() {
@@ -110,24 +115,43 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var firstId = firstRound.get(0).getId();
         var secondId = firstRound.get(1).getId();
         var finalId = firstRound.get(0).getNextHeat().getId();
-        org.springframework.test.context.transaction.TestTransaction.flagForCommit();
-        org.springframework.test.context.transaction.TestTransaction.end();
-        var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
-        var fast = new ParallelSprintResultService.Result(finished, 100);
-        var slow = new ParallelSprintResultService.Result(finished, 120);
-        resultService.record(firstId, 0, fast, slow);
-        resultService.record(secondId, 0, fast, slow);
-        var finalVersion = heats.findById(finalId).orElseThrow().getVersion();
-        resultService.record(finalId, finalVersion, fast, slow);
-        var version = heats.findById(firstId).orElseThrow().getVersion();
-        assertThatThrownBy(() -> resultService.record(firstId, version, slow, fast)).isInstanceOf(IllegalStateException.class);
-        org.springframework.test.context.transaction.TestTransaction.start();
-        var persisted = heats.findById(firstId).orElseThrow();
-        assertThat(persisted.getWinnerSlot()).isEqualTo(1);
-        assertThat(persisted.getTime1Centiseconds()).isEqualTo(100);
-        var destination = heats.findById(finalId).orElseThrow();
-        var advanced = persisted.getNextSlot() == 1 ? destination.getCrew1() : destination.getCrew2();
-        assertThat(advanced.getId()).isEqualTo(persisted.getCrew1().getId());
+        var bracketId = bracket.getId();
+        var categoryId = category.getId();
+        var competitionId = competition.getId();
+        var sprintId = sprint.getId();
+        var parallelId = parallel.getId();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        try {
+            var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+            var fast = new ParallelSprintResultService.Result(finished, 100);
+            var slow = new ParallelSprintResultService.Result(finished, 120);
+            resultService.record(firstId, 0, fast, slow);
+            resultService.record(secondId, 0, fast, slow);
+            var finalVersion = heats.findById(finalId).orElseThrow().getVersion();
+            resultService.record(finalId, finalVersion, fast, slow);
+            var version = heats.findById(firstId).orElseThrow().getVersion();
+            assertThatThrownBy(() -> resultService.record(firstId, version, slow, fast)).isInstanceOf(IllegalStateException.class);
+            TestTransaction.start();
+            var persisted = heats.findById(firstId).orElseThrow();
+            assertThat(persisted.getWinnerSlot()).isEqualTo(1);
+            assertThat(persisted.getTime1Centiseconds()).isEqualTo(100);
+            var destination = heats.findById(finalId).orElseThrow();
+            var advanced = persisted.getNextSlot() == 1 ? destination.getCrew1() : destination.getCrew2();
+            assertThat(advanced.getId()).isEqualTo(persisted.getCrew1().getId());
+        } finally {
+            if (TestTransaction.isActive()) TestTransaction.end();
+            transactionTemplate.executeWithoutResult(status -> {
+                jdbc.update("delete from parallel_sprint_heats where bracket_id = ?", bracketId);
+                jdbc.update("delete from parallel_sprint_brackets where id = ?", bracketId);
+                jdbc.update("delete from calculated_discipline_results where discipline_id = ?", sprintId);
+                jdbc.update("delete from crew_entries where competition_category_id = ?", categoryId);
+                jdbc.update("delete from discipline_categories where discipline_id in (?, ?)", sprintId, parallelId);
+                jdbc.update("delete from disciplines where id in (?, ?)", sprintId, parallelId);
+                jdbc.update("delete from competition_categories where id = ?", categoryId);
+                jdbc.update("delete from competitions where id = ?", competitionId);
+            });
+        }
     }
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var d = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());
