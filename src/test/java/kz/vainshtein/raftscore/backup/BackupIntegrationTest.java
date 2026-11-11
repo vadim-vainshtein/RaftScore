@@ -20,7 +20,7 @@ class BackupIntegrationTest extends PostgreSqlIntegrationTest {
 
     private BackupService service(String executable) {
         return new BackupService(directory.toString(), executable, environment.getProperty("spring.datasource.url").split("\\?", 2)[0],
-                environment.getProperty("spring.datasource.username"), environment.getProperty("spring.datasource.password"), Duration.ofSeconds(30));
+                environment.getProperty("spring.datasource.username"), environment.getProperty("spring.datasource.password"), Duration.ofSeconds(30), "test-signing-key");
     }
 
     @Test

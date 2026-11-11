@@ -29,7 +29,7 @@ class UserSessionValidityFilterTest {
     void blockedRequestsReturnUnauthorizedEvenWhenSessionWasAlreadyInvalidated() throws Exception {
         var repository = mock(UserRepository.class);
         when(repository.findByUsername("reader")).thenReturn(Optional.of(User.builder().enabled(false).build()));
-        var filter = new UserSessionValidityFilter(repository);
+        var filter = new UserSessionValidityFilter(repository, new SessionEpoch());
         var session = mock(HttpSession.class);
         doThrow(new IllegalStateException("already invalidated")).when(session).invalidate();
         var chain = mock(FilterChain.class);
@@ -45,4 +45,27 @@ class UserSessionValidityFilterTest {
             verify(chain, never()).doFilter(request, response);
         }
     }
-}
+    @Test
+    void invalidatesStampedSessionsButAllowsUnstampedSyntheticAuthentication() throws Exception {
+        var repository = mock(UserRepository.class);
+        var epoch = new SessionEpoch();
+        var filter = new UserSessionValidityFilter(repository, epoch);
+        var stale = new MockHttpServletRequest();
+        epoch.stamp(stale.getSession());
+        epoch.invalidateAll();
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated("reader", "", java.util.List.of()));
+        var response = new MockHttpServletResponse();
+        var chain = mock(FilterChain.class);
+        filter.doFilterInternal(stale, response, chain);
+        assertThat(response.getStatus()).isEqualTo(401);
+        verify(chain, never()).doFilter(stale, response);
+
+        var synthetic = new MockHttpServletRequest();
+        synthetic.getSession();
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated("reader", "", java.util.List.of()));
+        var allowed = new MockHttpServletResponse();
+        filter.doFilterInternal(synthetic, allowed, chain);
+        verify(chain).doFilter(synthetic, allowed);
+    }}

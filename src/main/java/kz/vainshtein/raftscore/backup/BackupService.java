@@ -20,24 +20,28 @@ public class BackupService {
     private final Path directory;
     private final BackupStorage storage;
     private final String executable;
-    private final String url;
-    private final String username;
-    private final String password;
+    private final DatabaseConnection connection;
+    private final String signingKey;
     private final Duration timeout;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public BackupService(@Value("${raftscore.backup.directory:./backups}") String directory,
                          @Value("${raftscore.backup.pg-dump:}") String executable,
                          @Value("${spring.datasource.url}") String url,
                          @Value("${spring.datasource.username}") String username,
                          @Value("${spring.datasource.password:}") String password,
-                         @Value("${raftscore.backup.timeout:PT10M}") Duration timeout) {
+                         @Value("${raftscore.backup.timeout:PT10M}") Duration timeout,
+                         @Value("${raftscore.backup.signing-key:}") String signingKey) {
         this.directory = Path.of(directory).toAbsolutePath().normalize();
         this.storage = new FileBackupStorage(this.directory);
         this.executable = executable;
-        this.url = url;
-        this.username = username;
-        this.password = password;
+        this.connection = new DatabaseConnection(url, username, password, timeout);
+        this.signingKey = signingKey;
         this.timeout = timeout;
+    }
+
+    BackupService(String directory, String executable, String url, String username, String password, Duration timeout) {
+        this(directory, executable, url, username, password, timeout, "");
     }
 
     public BackupMetadata create() throws IOException, InterruptedException {
@@ -45,21 +49,15 @@ public class BackupService {
             throw new IOException("A trusted absolute pg_dump executable must be configured");
         }
         if (timeout.isNegative() || timeout.isZero()) throw new IOException("Backup timeout must be positive");
-        var connection = databaseAddress();
+        connection.databaseAddress();
         Files.createDirectories(directory);
         var temporary = Files.createTempDirectory(directory, ".pending-");
         try {
-            var schema = schemaFingerprint();
+            var schema = connection.schemaFingerprints();
             var archive = temporary.resolve("archive.dump");
             var process = new ProcessBuilder(executable, "--format=custom", "--no-password", "--file", archive.toString())
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD);
-            var env = process.environment();
-            env.keySet().removeIf(key -> key.toUpperCase(Locale.ROOT).startsWith("PG"));
-            env.put("PGHOST", connection.getHost());
-            env.put("PGPORT", Integer.toString(connection.getPort() < 0 ? 5432 : connection.getPort()));
-            env.put("PGDATABASE", databaseName(connection));
-            env.put("PGUSER", username);
-            env.put("PGPASSWORD", password);
+            connection.configure(process);
             var child = process.start();
             try {
                 if (!child.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
@@ -78,12 +76,14 @@ public class BackupService {
                 Thread.currentThread().interrupt();
                 throw e;
             }
-            if (!schema.equals(schemaFingerprint())) throw new IOException("Database schema changed during backup");
+            if (!schema.equals(connection.schemaFingerprints())) throw new IOException("Database schema changed during backup");
             var manifest = new Properties();
             manifest.setProperty("sizeBytes", Long.toString(Files.size(archive)));
             manifest.setProperty("formatVersion", FORMAT);
-            manifest.setProperty("schemaVersion", schema);
+            manifest.setProperty("schemaVersion", schema.history());
+            manifest.setProperty("catalogVersion", schema.catalog());
             manifest.setProperty("sha256", fileHash(archive));
+            if (!signingKey.isBlank()) manifest.setProperty("hmacSha256", BundleAuthentication.sign(manifest, signingKey));
             var bundle = temporary.resolve("bundle.zip");
             try (var zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(bundle))) {
                 zip.putNextEntry(new java.util.zip.ZipEntry("manifest.properties"));
@@ -94,50 +94,14 @@ public class BackupService {
                 zip.closeEntry();
             }
             try (var in = Files.newInputStream(bundle)) {
-                return storage.store(in, FORMAT, schema);
+                return storage.store(in, FORMAT, schema.history());
             }
         } finally {
             BackupTemporaryFiles.cleanup(temporary);
         }
     }
 
-    private URI databaseAddress() throws IOException {
-        try {
-            if (!url.startsWith("jdbc:postgresql://")) throw new IllegalArgumentException();
-            var uri = URI.create(url.substring(5));
-            if (uri.getHost() == null || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null
-                    || uri.getPath() == null || uri.getPath().length() < 2 || uri.getPath().substring(1).contains("/")) throw new IllegalArgumentException();
-            return uri;
-        } catch (IllegalArgumentException e) {
-            throw new IOException("Backup requires a simple PostgreSQL JDBC URL without options");
-        }
-    }
-
-    static String databaseName(URI connection) {
-        return java.net.URLDecoder.decode(connection.getRawPath().substring(1), StandardCharsets.UTF_8);
-    }
-    private String schemaFingerprint() throws IOException {
-        try (var connection = java.sql.DriverManager.getConnection(url, username, password);
-             var statement = connection.createStatement();
-             var rows = statement.executeQuery("SELECT id, author, filename, md5sum FROM databasechangelog ORDER BY orderexecuted")) {
-            var digest = MessageDigest.getInstance("SHA-256");
-            var count = 0;
-            while (rows.next()) {
-                count++;
-                for (var index = 1; index <= 4; index++) {
-                    var value = rows.getString(index);
-                    if (value == null) throw new IOException("Incomplete Liquibase schema history");
-                    var bytes = value.getBytes(StandardCharsets.UTF_8);
-                    digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array());
-                    digest.update(bytes);
-                }
-            }
-            if (count == 0) throw new IOException("Empty Liquibase schema history");
-            return "liquibase-sha256:" + HexFormat.of().formatHex(digest.digest());
-        } catch (java.sql.SQLException e) {
-            throw new IOException("Could not read database schema history");
-        } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
-    }
+    static String databaseName(URI connection) { return DatabaseConnection.databaseName(connection); }
 
     private static String fileHash(Path path) throws IOException {
         try {
