@@ -28,3 +28,9 @@ server:
         http-only: ${RAFT_SCORE_COOKIE_HTTP_ONLY:true}
         secure: ${RAFT_SCORE_COOKIE_SECURE:false}
         same-site: ${RAFT_SCORE_COOKIE_SAME_SITE:Lax}
+
+springdoc:
+  paths-to-match: /api/**
+  swagger-ui:
+    disable-swagger-default-url: true
+    supported-submit-methods: []
