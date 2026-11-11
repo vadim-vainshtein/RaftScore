@@ -74,7 +74,7 @@ class ParallelSprintBracketController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
     }
 
-    private Heat view(ParallelSprintHeat heat) {
+    Heat view(ParallelSprintHeat heat) {
         return new Heat(heat.getId(), heat.getVersion(), heat.getRoundNumber(), heat.getHeatNumber(),
                 crew(heat.getCrew1()), crew(heat.getCrew2()), heat.getStatus1(), heat.getTime1Centiseconds(),
                 heat.getStatus2(), heat.getTime2Centiseconds(), heat.getWinnerSlot(), heat.isWinnerOverridden(),
