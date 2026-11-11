@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0059-crew-requirement-values" author="raftscore">
+        <addUniqueConstraint tableName="entry_requirements" columnNames="id, value_type" constraintName="entry_requirements_id_type_unique"/>
+        <createTable tableName="crew_requirement_values">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="crew_entry_id" type="BIGINT"><constraints nullable="false" foreignKeyName="crew_requirement_values_crew_fk" references="crew_entries(id)"/></column>
+            <column name="requirement_id" type="BIGINT"><constraints nullable="false" foreignKeyName="crew_requirement_values_requirement_fk" references="entry_requirements(id)"/></column>
+            <column name="value_type" type="TEXT"><constraints nullable="false"/></column>
+            <column name="boolean_value" type="BOOLEAN"/>
+            <column name="text_value" type="TEXT"/>
+            <column name="date_value" type="DATE"/>
+            <column name="numeric_value" type="NUMERIC"/>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="crew_requirement_values" columnNames="crew_entry_id, requirement_id" constraintName="crew_requirement_values_pair_unique"/>
+        <addForeignKeyConstraint baseTableName="crew_requirement_values" baseColumnNames="requirement_id, value_type" referencedTableName="entry_requirements" referencedColumnNames="id, value_type" constraintName="crew_requirement_values_requirement_type_fk"/>
+        <sql>ALTER TABLE crew_requirement_values ADD CONSTRAINT crew_requirement_values_typed_value CHECK (num_nonnulls(boolean_value, text_value, date_value, numeric_value) = 1 AND ((value_type = 'YES_NO' AND boolean_value IS NOT NULL) OR (value_type = 'TEXT' AND text_value IS NOT NULL) OR (value_type = 'DATE' AND date_value IS NOT NULL) OR (value_type = 'NUMBER' AND numeric_value IS NOT NULL)))</sql>
+    </changeSet>
+</databaseChangeLog>
