@@ -1,6 +1,8 @@
 package kz.vainshtein.raftscore.competition.entities;
 
 import java.util.Objects;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -69,6 +71,25 @@ public class EntryRequirement extends VersionedEntity {
 
     public void setRequired(boolean required) {
         this.required = required;
+    }
+
+    /** Validates a typed answer, with null representing an absent answer. */
+    public void validateValue(Object value) {
+        if (value == null) {
+            if (required) {
+                throw new IllegalArgumentException("value is required");
+            }
+            return;
+        }
+        var valid = switch (valueType) {
+            case YES_NO -> value instanceof Boolean;
+            case TEXT -> value instanceof String text && !text.isBlank() && text.indexOf('\0') < 0;
+            case DATE -> value instanceof LocalDate date && date.getYear() >= 1 && date.getYear() <= 9999;
+            case NUMBER -> value instanceof BigDecimal;
+        };
+        if (!valid) {
+            throw new IllegalArgumentException("invalid value for " + valueType);
+        }
     }
 
     public void setDisplayOrder(int displayOrder) {
