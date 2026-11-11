@@ -21,6 +21,7 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 
 /** Configures session-based authentication for the server API. */
 @Configuration(proxyBeanMethods = false)
@@ -42,7 +43,8 @@ class SecurityConfiguration {
     @Bean
     SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            HttpSessionSecurityContextRepository securityContextRepository) throws Exception {
+            HttpSessionSecurityContextRepository securityContextRepository,
+            UserRepository userRepository) throws Exception {
         return http
                 .csrf(Customizer.withDefaults())
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
@@ -69,6 +71,7 @@ class SecurityConfiguration {
                 .exceptionHandling(exceptions -> exceptions
                         .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .addFilterAfter(new UserSessionValidityFilter(userRepository), SecurityContextHolderFilter.class)
                 .build();
     }
 
