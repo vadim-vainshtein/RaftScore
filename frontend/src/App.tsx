@@ -125,8 +125,19 @@ function Shell({locale}: {locale: Locale}) {
     return () => window.removeEventListener('hashchange', onPopState)
   }, [])
 
-  const activeRoute = routes.find(route => path === route.path || path.startsWith(`${route.path}/`))
-  const title = path === '/' ? t('navigation.competitions') : activeRoute ? t(activeRoute.label) : t('placeholder.notFound')
+  const requestedRoute = routes.find(route => path === route.path || path.startsWith(`${route.path}/`))
+  const restricted = principal?.role === 'READ_ONLY' && requestedRoute && !requestedRoute.readOnly
+  const visiblePath = restricted ? '/competitions' : path
+
+  useEffect(() => {
+    if (restricted) {
+      window.history.replaceState(window.history.state, '', '#/competitions')
+      setPath('/competitions')
+    }
+  }, [restricted])
+
+  const activeRoute = routes.find(route => visiblePath === route.path || visiblePath.startsWith(`${route.path}/`))
+  const title = visiblePath === '/' ? t('navigation.competitions') : activeRoute ? t(activeRoute.label) : t('placeholder.notFound')
 
   if (checking) return <Typography>{auth('loading')}</Typography>
   if (!principal) return <Box component="main" sx={{maxWidth: 400, mx: 'auto', p: 3}}>
@@ -144,14 +155,14 @@ function Shell({locale}: {locale: Locale}) {
     <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth}}>
       <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
       <List>
-        {routes.map(route => (
+        {routes.filter(route => principal.role !== 'READ_ONLY' || route.readOnly).map(route => (
           <ListItem key={route.path} disablePadding>
           <ListItemButton
             component="a"
             href={`#${route.path}`}
-            selected={activeRoute?.path === route.path || (path === '/' && route.path === '/competitions')}
+            selected={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions')}
             sx={{borderLeft: '4px solid transparent', '&.Mui-selected': {borderLeftColor: 'currentColor', '& .MuiListItemText-primary': {fontWeight: 'bold'}}}}
-            aria-current={activeRoute?.path === route.path || (path === '/' && route.path === '/competitions') ? 'page' : undefined}
+            aria-current={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions') ? 'page' : undefined}
             onClick={event => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
               event.preventDefault()
@@ -193,7 +204,7 @@ function Shell({locale}: {locale: Locale}) {
         <Box sx={{height: {xs: 128, md: 80}}}/>
         <Typography component="h1" variant="h4">{title}</Typography>
         {error && <Typography role="alert">{auth(error)}</Typography>}
-        <Typography sx={{mt: 2}}>{activeRoute || path === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>
+        <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>
       </Box>
     </Box>
   )
