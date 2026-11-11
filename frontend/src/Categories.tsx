@@ -3,12 +3,12 @@ import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Box, Button, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography} from '@mui/material'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
-import {apiErrorKey, fieldErrorKey} from './api/errors'
+import {apiErrorKey, fieldErrorKey, type FieldErrorKey} from './api/errors'
 type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean, version: number}
 type Page = {content: Template[], totalPages: number}
 type Form = {classLabel: string, scoringGroupLabel: string, crewSize: string}
 export type Draft = {form: Form, editing: Template | null, dirty: boolean}
-type Fields = Partial<Record<keyof Form, boolean | string>>
+type Fields = Partial<Record<keyof Form, boolean | FieldErrorKey>>
 const blank: Form = {classLabel: '', scoringGroupLabel: '', crewSize: ''}
 const endpoint = '/api/category-templates'
 const validLabel = (value: string) => !!value.trim() && !value.includes('\0')
@@ -27,9 +27,13 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
   const setDraft = (value: Draft | null) => { setDraftState(value); onDraft(value) }
   const fail = useCallback((e: unknown) => {
     if (e instanceof ApiError && e.status === 400 && e.body && typeof e.body === 'object') {
-      const entries = (e.body as {fieldErrors?: {field: string, code?: unknown}[]}).fieldErrors
+      const entries = (e.body as {fieldErrors?: unknown}).fieldErrors
       const next: Fields = {}
-      entries?.forEach(({field, code}) => { if (field === 'classLabel' || field === 'scoringGroupLabel' || field === 'crewSize') next[field] = fieldErrorKey(code) })
+      if (Array.isArray(entries)) entries.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return
+        const {field, code} = entry as {field?: unknown, code?: unknown}
+        if (field === 'classLabel' || field === 'scoringGroupLabel' || field === 'crewSize') next[field] = fieldErrorKey(code)
+      })
       setFields(next); setError('invalid'); return
     }
     setError(e instanceof ApiError && e.status === 409 ? 'conflict' : `common:${apiErrorKey(e)}`)
@@ -96,7 +100,7 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
     <Button variant="contained" onClick={() => start()} disabled={busy}>{t('create')}</Button>
     {form && <Box component="form" onSubmit={save} noValidate sx={{display: 'grid', gap: 2, my: 2, maxWidth: 500}}>
       {dirty && <Typography>{t('dirty')}</Typography>}
-      {(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} label={t(key === 'classLabel' ? 'class' : key === 'scoringGroupLabel' ? 'group' : 'size')} value={form[key]} disabled={busy} error={!!fields[key]} helperText={fields[key] ? typeof fields[key] === 'string' ? common(fields[key] as 'apiError.required') : t(key === 'crewSize' ? 'sizeError' : 'labelError') : undefined} onChange={e => {if (draft) setDraft({...draft, form: {...form, [key]: e.target.value}, dirty: true})}} required/>)}
+      {(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} label={t(key === 'classLabel' ? 'class' : key === 'scoringGroupLabel' ? 'group' : 'size')} value={form[key]} disabled={busy} error={!!fields[key]} helperText={fields[key] ? typeof fields[key] === 'string' ? common(fields[key] as FieldErrorKey) : t(key === 'crewSize' ? 'sizeError' : 'labelError') : undefined} onChange={e => {if (draft) setDraft({...draft, form: {...form, [key]: e.target.value}, dirty: true})}} required/>)}
       <Typography>{t('preview')}: {form.classLabel} / {form.scoringGroupLabel}</Typography>
       {duplicate && <Typography role="status">{t('duplicate')}</Typography>}{lookup?.key === lookupKey && lookup.failed && <Typography role="alert">{t('lookupFailed')} <Button onClick={() => {setLookup(null); setLookupRevision(v => v + 1)}}>{t('retry')}</Button></Typography>}
       <Box><Button type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>

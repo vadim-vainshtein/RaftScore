@@ -25,6 +25,7 @@ export function apiErrorKey(error: unknown): ApiErrorKey {
   if (error.status >= 500) return 'apiError.server'
   return 'apiError.generic'
 }
-export function fieldErrorKey(code: unknown): string {
+export type FieldErrorKey = 'apiError.required' | 'apiError.invalidField'
+export function fieldErrorKey(code: unknown): FieldErrorKey {
   return code === 'validation.required' ? 'apiError.required' : 'apiError.invalidField'
 }

@@ -139,6 +139,7 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
         competition.setTiebreakDiscipline(selected);
         entityManager.flush(); entityManager.clear();
         var unresolved = standings.standings(category.getId());
+        assertThat(unresolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::appliedTiebreakDisciplineId).containsOnlyNulls();
         assertThat(unresolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
                 .containsExactly(1, 1, 1);
         assertThat(unresolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::crewId)
@@ -148,10 +149,15 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
                 .place(2).status(CalculatedResultStatus.FINISHED).points(0).build());
         entityManager.flush(); entityManager.clear();
         var resolved = standings.standings(category.getId());
+        assertThat(resolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::appliedTiebreakDisciplineId).containsOnly(selected.getId());
         assertThat(resolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::crewId)
                 .containsExactly(third.getCrewEntry().getId(), first.getCrewEntry().getId(), missing.getCrewEntry().getId());
         assertThat(resolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
                 .containsExactly(1, 2, 2);
+        for (var row : results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(selected.getId(), category.getId()))
+            row.updateResult(1, null, null, CalculatedResultStatus.FINISHED, 0);
+        entityManager.flush(); entityManager.clear();
+        assertThat(standings.standings(category.getId())).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::appliedTiebreakDisciplineId).containsOnlyNulls();
         disciplines.findById(selected.getId()).orElseThrow().replaceCategories(List.of());
         entityManager.flush(); entityManager.clear();
         assertThat(standings.standings(category.getId())).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)

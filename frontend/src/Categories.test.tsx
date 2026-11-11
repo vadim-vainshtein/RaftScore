@@ -97,3 +97,12 @@ test('validates invalid labels without issuing a duplicate lookup', async () => 
   expect(vi.mocked(apiRequest).mock.calls.some(([path]) => path.includes('/duplicate?'))).toBe(false)
   expect(csrfRequest).not.toHaveBeenCalled()
 })
+
+test.each([null, {}, [null, 42, {field: 'crewSize', code: 'validation.required'}]])('handles malformed field errors safely', async fieldErrors => {
+  vi.mocked(csrfRequest).mockRejectedValueOnce(new ApiError(400, {fieldErrors}))
+  render(<Categories/>); await screen.findByText('R4 / Open')
+  fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
+  await waitFor(() => expect(screen.getByRole('button', {name: 'Save'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByRole('alert')).toBeInTheDocument()
+})
