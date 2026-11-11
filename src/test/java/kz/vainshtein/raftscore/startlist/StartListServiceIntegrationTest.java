@@ -73,7 +73,9 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
                     .status(status).durationCentiseconds(status == kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED ? 100 : null).build());
             assertThatThrownBy(() -> service.replace(competition.getId(), discipline.getId(), category.getId(), null, true, null, null)).isInstanceOf(ResponseStatusException.class);
             assertThatThrownBy(() -> service.replace(competition.getId(), discipline.getId(), category.getId(), List.of(b.getId(), a.getId()), false, null, null)).isInstanceOf(ResponseStatusException.class);
-            assertThat(service.read(competition.getId(), discipline.getId(), category.getId())).isEqualTo(original);
+            var locked = service.read(competition.getId(), discipline.getId(), category.getId());
+            assertThat(locked.locked()).isTrue();
+            assertThat(locked.slots()).isEqualTo(original.slots());
             service.replace(competition.getId(), discipline.getId(), other.getId(), List.of(), false, null, null);
             service.clearResults(competition.getId(), discipline.getId(), category.getId());
         }
@@ -200,7 +202,9 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
                 .status(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.DNS).build());
         assertThatThrownBy(() -> service.replace(competition.getId(), target.getId(), category.getId(), null, false, true, null, null))
                 .isInstanceOf(ResponseStatusException.class);
-        assertThat(service.read(competition.getId(), target.getId(), category.getId())).isEqualTo(result);
+        var locked = service.read(competition.getId(), target.getId(), category.getId());
+        assertThat(locked.locked()).isTrue();
+        assertThat(locked.slots()).isEqualTo(result.slots());
     }
     private CrewEntry crew(CompetitionCategory category, int number, boolean eligible) {
         var crew = crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build());

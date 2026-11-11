@@ -30,13 +30,13 @@ public class StartListService {
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     public record Slot(long crewId, String crewName, int startNumber, int position, Instant plannedTime) { }
-    public record View(Long id, List<Slot> slots) { }
+    public record View(Long id, List<Slot> slots, boolean locked) { }
 
     @Transactional(readOnly = true)
     public View read(long competitionId, long disciplineId, long categoryId) {
         selection(competitionId, disciplineId, categoryId, false);
         return lists.findByDisciplineIdAndCategoryId(disciplineId, categoryId)
-                .map(this::view).orElseGet(() -> new View(null, List.of()));
+                .map(this::view).orElseGet(() -> new View(null, List.of(), hasResults(disciplineId, categoryId)));
     }
 
     /** Serializes replacements on the discipline, including initial list creation. */
@@ -128,6 +128,6 @@ public class StartListService {
     private View view(StartList list) {
         return new View(list.getId(), slots.findByStartListIdOrderByPositionAsc(list.getId()).stream()
                 .map(s -> new Slot(s.getCrew().getId(), s.getCrew().getCrewName(), s.getCrew().getStartNumber(),
-                        s.getPosition(), s.getPlannedTime())).toList());
+                        s.getPosition(), s.getPlannedTime())).toList(), hasResults(list.getDiscipline().getId(), list.getCategory().getId()));
     }
 }

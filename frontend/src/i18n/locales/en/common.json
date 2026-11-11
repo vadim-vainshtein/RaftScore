@@ -12,7 +12,8 @@
     "users": "Users",
     "backups": "Backups",
     "crews": "Crews",
-    "disciplines": "Disciplines"
+    "disciplines": "Disciplines",
+    "startLists": "Start lists"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -152,5 +153,31 @@
     "step4": "Review",
     "noRequirements": "No requirements",
     "blankPoints": "Create empty points table"
+  },
+  "startList": {
+    "locked": "Locked: results have been entered.",
+    "down": "Move down",
+    "regenerate": "Replace the existing start list?",
+    "up": "Move up",
+    "crew": "Crew",
+    "discipline": "Discipline",
+    "category": "Category",
+    "planned": "Planned time",
+    "random": "Random",
+    "reverse": "Reverse overall standings",
+    "position": "Position",
+    "invalid": "Enter both a first start and a non-negative whole-second interval.",
+    "clear": "Clear results",
+    "error": "Could not load or save the start list.",
+    "generate": "Generate start list",
+    "confirmClear": "Clear all source results and derived data for this selection?",
+    "interval": "Interval (seconds)",
+    "competition": "Competition",
+    "empty": "No start list yet.",
+    "mode": "Order",
+    "number": "Start number",
+    "manual": "Manual",
+    "first": "First start",
+    "timePolicy": "Times use the competition time zone. If a clock time occurs twice, the earlier instant is used; nonexistent times are rejected."
   }
 }
