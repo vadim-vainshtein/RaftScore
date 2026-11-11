@@ -70,6 +70,37 @@ class CompetitionCategoryRepositoryIntegrationTest extends PostgreSqlIntegration
         });
     }
 
+    @Test
+    void databaseEnforcesUniqueCombinationPerCompetition() {
+        transactionTemplate.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            var first = competitions.saveAndFlush(Competition.builder().title("First")
+                    .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+            var second = competitions.saveAndFlush(Competition.builder().title("Second")
+                    .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+            insertCategory(first.getId(), 4);
+            insertCategory(second.getId(), 4);
+            assertThatThrownBy(() -> insertCategory(first.getId(), 6))
+                    .isInstanceOf(DataIntegrityViolationException.class)
+                    .hasStackTraceContaining("competition_categories_combination_uk");
+        });
+    }
+    @Test
+    void databaseAcceptsLongDistinctLabelsAndRejectsExactDuplicates() {
+        transactionTemplate.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            var competition = competitions.saveAndFlush(Competition.builder().title("Long labels")
+                    .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+            var label = java.util.stream.IntStream.range(0, 300).mapToObj(i -> java.util.UUID.randomUUID().toString())
+                    .collect(java.util.stream.Collectors.joining());
+            var sql = "INSERT INTO competition_categories (competition_id, class_label, scoring_group_label, crew_size) VALUES (?, ?, ?, 4)";
+            jdbcTemplate.update(sql, competition.getId(), label, label);
+            jdbcTemplate.update(sql, competition.getId(), label + "different", label);
+            assertThatThrownBy(() -> jdbcTemplate.update(sql, competition.getId(), label, label))
+                    .isInstanceOf(DataIntegrityViolationException.class)
+                    .hasStackTraceContaining("competition_categories_combination_uk");
+        });
+    }
     private void insertCategory(Long competitionId, int crewSize) {
         jdbcTemplate.update("INSERT INTO competition_categories (competition_id, class_label, scoring_group_label, crew_size) VALUES (?, ?, ?, ?)",
                 competitionId, "R4", "Open", crewSize);

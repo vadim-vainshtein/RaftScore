@@ -18,6 +18,8 @@ import kz.vainshtein.raftscore.competition.entities.CompetitionCategoryRepositor
 import kz.vainshtein.raftscore.competition.entities.CompetitionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -49,7 +51,7 @@ class CompetitionCategoryController {
     @ApiResponse(responseCode = "401", description = "Authentication required")
     @ApiResponse(responseCode = "403", description = "Forbidden or missing CSRF token", content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "404", description = "Competition or template not found", content = @Content(schema = @Schema(implementation = ApiError.class)))
-    @ApiResponse(responseCode = "409", description = "Template is archived", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "Template is archived or the category combination already exists", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping
     @Transactional
     ResponseEntity<CategorySnapshot> create(@PathVariable Long competitionId, @Valid @RequestBody CreateCategoryRequest request) {
@@ -71,6 +73,16 @@ class CompetitionCategoryController {
     ResponseEntity<ApiError> templateNotFound() { return ResponseEntity.status(404).body(ApiError.of("category_template.not_found")); }
     @ExceptionHandler(TemplateArchived.class)
     ResponseEntity<ApiError> templateArchived() { return ResponseEntity.status(409).body(ApiError.of("category_template.archived")); }
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ResponseEntity<ApiError> integrityViolation(DataIntegrityViolationException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation
+                    && "competition_categories_combination_uk".equals(violation.getConstraintName())) {
+                return ResponseEntity.status(409).body(ApiError.of("competition_category.duplicate"));
+            }
+        }
+        throw exception;
+    }
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ApiError> malformedPath() { return ResponseEntity.badRequest().body(ApiError.of("request.malformed")); }
 

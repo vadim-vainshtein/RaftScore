@@ -75,6 +75,27 @@ class CompetitionCategoryControllerIntegrationTest extends PostgreSqlIntegration
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void rejectsDuplicateCombinationButAllowsAnotherCompetition() throws Exception {
+        var other = competitions.saveAndFlush(Competition.builder().title("Other race").startDate(LocalDate.of(2026, 1, 2))
+                .location("River").timeZone("UTC").build());
+        try {
+            var body = "{\"templateId\":" + template.getId() + "}";
+            var url = "/api/competitions/" + competition.getId() + "/categories";
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated());
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("competition_category.duplicate"));
+            mvc.perform(post("/api/competitions/{id}/categories", other.getId()).with(user("admin").roles("FULL_ACCESS"))
+                    .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        } finally {
+            jdbc.update("delete from competition_categories where competition_id in (?, ?)", competition.getId(), other.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+            templates.deleteById(template.getId());
+        }
+    }
+    @Test
     void rejectsInvalidRequestsAndEnforcesSecurity() throws Exception {
         var url = "/api/competitions/" + competition.getId() + "/categories";
         var admin = user("admin").roles("FULL_ACCESS");
