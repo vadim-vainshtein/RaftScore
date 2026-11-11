@@ -3,6 +3,7 @@ package kz.vainshtein.raftscore.entry.entities;
 import java.util.Objects;
 
 import jakarta.persistence.*;
+import kz.vainshtein.raftscore.competition.entities.CompetitionCategory;
 import kz.vainshtein.raftscore.persistence.VersionedEntity;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -24,6 +25,10 @@ public class CrewMembership extends VersionedEntity {
     private CrewEntry crewEntry;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "competition_category_id", nullable = false, updatable = false)
+    private CompetitionCategory competitionCategory;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "participant_id", nullable = false)
     private Participant participant;
 
@@ -33,6 +38,7 @@ public class CrewMembership extends VersionedEntity {
     @Builder
     private CrewMembership(CrewEntry crewEntry, Participant participant, int position) {
         this.crewEntry = Objects.requireNonNull(crewEntry, "crewEntry");
+        this.competitionCategory = crewEntry.getCompetitionCategory();
         this.participant = Objects.requireNonNull(participant, "participant");
         changePosition(position);
     }
