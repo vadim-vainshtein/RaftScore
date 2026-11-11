@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0086-slalom-configuration" author="raftscore">
+        <addUniqueConstraint tableName="disciplines" columnNames="id, type" constraintName="disciplines_id_type_unique"/>
+        <createTable tableName="slalom_configurations">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="discipline_id" type="BIGINT"><constraints nullable="false" unique="true" foreignKeyName="slalom_config_discipline_fk" references="disciplines(id)"/></column>
+            <column name="discipline_type" type="TEXT" defaultValue="SLALOM"><constraints nullable="false"/></column>
+            <column name="gate_count" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="attempt_count" type="INTEGER" defaultValueNumeric="2"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE slalom_configurations ADD CONSTRAINT slalom_config_type CHECK (discipline_type = 'SLALOM')</sql>
+        <addForeignKeyConstraint baseTableName="slalom_configurations" baseColumnNames="discipline_id, discipline_type" referencedTableName="disciplines" referencedColumnNames="id, type" constraintName="slalom_config_type_fk"/>
+        <sql>ALTER TABLE slalom_configurations ADD CONSTRAINT slalom_config_counts_positive CHECK (gate_count &gt; 0 AND attempt_count &gt; 0)</sql>
+        <createTable tableName="slalom_gate_penalties">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="attempt_result_id" type="BIGINT"><constraints nullable="false" foreignKeyName="slalom_penalty_attempt_fk" references="attempt_results(id)"/></column>
+            <column name="configuration_id" type="BIGINT"><constraints nullable="false" foreignKeyName="slalom_penalty_config_fk" references="slalom_configurations(id)"/></column>
+            <column name="gate_number" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="penalty_seconds" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="slalom_gate_penalties" columnNames="attempt_result_id, gate_number" constraintName="slalom_penalty_attempt_gate_unique"/>
+        <sql>ALTER TABLE slalom_gate_penalties ADD CONSTRAINT slalom_penalty_value_valid CHECK (gate_number &gt; 0 AND penalty_seconds IN (0, 5, 50))</sql>
+        <sql splitStatements="false"><![CDATA[
+            CREATE FUNCTION validate_slalom_gate_penalty() RETURNS trigger AS $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM slalom_configurations c
+                    JOIN attempt_results a ON a.id = NEW.attempt_result_id
+                    WHERE c.id = NEW.configuration_id
+                      AND c.discipline_id = a.discipline_id
+                      AND NEW.gate_number <= c.gate_count
+                ) THEN
+                    RAISE EXCEPTION 'slalom penalty must match attempt discipline and configured gate range'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        ]]></sql>
+        <sql>CREATE TRIGGER slalom_penalty_validate BEFORE INSERT OR UPDATE ON slalom_gate_penalties FOR EACH ROW EXECUTE FUNCTION validate_slalom_gate_penalty()</sql>
+    </changeSet>
+</databaseChangeLog>
