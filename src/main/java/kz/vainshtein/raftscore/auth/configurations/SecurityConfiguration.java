@@ -57,6 +57,8 @@ class SecurityConfiguration {
                                 "/api/auth/csrf",
                                 "/api/auth/login")
                         .permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/auth/password")
+                        .access(AuthorizationPolicies.authenticated())
                         .requestMatchers(HttpMethod.GET, "/api/**")
                         .access(AuthorizationPolicies.authenticated())
                         .requestMatchers(HttpMethod.HEAD, "/api/**")
