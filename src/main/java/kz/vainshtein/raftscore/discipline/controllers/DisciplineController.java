@@ -25,6 +25,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 class DisciplineController {
     private final DisciplineRepository disciplines;
     private final PlacementPointsTableRepository tables;
+    private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
 
     record UpdateRequest(
             @NotNull @DecimalMin("0") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0)
@@ -46,7 +47,7 @@ class DisciplineController {
     @Transactional
     DisciplineResponse update(@PathVariable Long competitionId, @PathVariable Long disciplineId,
                               @Valid @RequestBody UpdateRequest request) {
-        var discipline = disciplines.findById(disciplineId).filter(d -> d.getCompetition().getId().equals(competitionId))
+        var discipline = disciplines.findForStartListUpdate(disciplineId).filter(d -> d.getCompetition().getId().equals(competitionId))
                 .orElseThrow(NotFound::new);
         if (discipline.getVersion() != request.version().longValueExact()) {
             throw new OptimisticLockingFailureException("Stale discipline version");
@@ -56,6 +57,7 @@ class DisciplineController {
         discipline.setDisplayOrder(request.displayOrder().intValueExact());
         discipline.setPointsTable(table);
         disciplines.saveAndFlush(discipline);
+        recalculation.recalculateDisciplineLocked(discipline);
         return new DisciplineResponse(discipline.getId(), competitionId, discipline.getDisplayOrder(),
                 table == null ? null : table.getId(), discipline.getVersion());
     }

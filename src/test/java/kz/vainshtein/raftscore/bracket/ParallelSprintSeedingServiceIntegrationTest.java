@@ -154,7 +154,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
             transactionTemplate.executeWithoutResult(status -> {
                 jdbc.update("delete from parallel_sprint_heats where bracket_id = ?", bracketId);
                 jdbc.update("delete from parallel_sprint_brackets where id = ?", bracketId);
-                jdbc.update("delete from calculated_discipline_results where discipline_id = ?", sprintId);
+                jdbc.update("delete from calculated_discipline_results where discipline_id in (?, ?)", sprintId, parallelId);
                 jdbc.update("delete from crew_entries where competition_category_id = ?", categoryId);
                 jdbc.update("delete from discipline_categories where discipline_id in (?, ?)", sprintId, parallelId);
                 jdbc.update("delete from disciplines where id in (?, ?)", sprintId, parallelId);
