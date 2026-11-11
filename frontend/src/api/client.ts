@@ -89,7 +89,7 @@ export function createApiClient(baseUrl = '') {
 
 export const apiRequest = createApiClient()
 
-export async function csrfRequest<T>(path: string, method: 'POST' | 'PUT' | 'PATCH', body?: object): Promise<T> {
+export async function csrfRequest<T>(path: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', body?: object): Promise<T> {
   const csrf = await apiRequest<{headerName: string, token: string}>('/api/auth/csrf')
   return apiRequest<T>(path, {method, headers: {[csrf.headerName]: csrf.token, ...(body ? {'Content-Type': 'application/json'} : {})}, body: body ? JSON.stringify(body) : undefined})
 }
