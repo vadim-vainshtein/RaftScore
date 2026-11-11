@@ -44,3 +44,16 @@ test('conflict refreshes server heat while preserving the draft', async () => {
   expect(screen.getByLabelText('Time 1')).toHaveValue('1:14.25')
   expect(screen.getByText('Save heat')).toBeDisabled()
 })
+
+test('locks selection and inputs while a save is pending', async () => {
+  let finish!: (value: unknown) => void
+  vi.mocked(csrfRequest).mockImplementation(() => new Promise(resolve => {finish = resolve}))
+  render(<ParallelSprint readOnly={false}/>)
+  fireEvent.change(await screen.findByLabelText('Time 1'), {target: {value: '1:14.25'}})
+  fireEvent.change(screen.getByLabelText('Time 2'), {target: {value: '1:15.00'}})
+  fireEvent.click(screen.getByText('Save heat'))
+  expect(screen.getByLabelText('Competition')).toHaveAttribute('aria-disabled', 'true')
+  expect(screen.getByLabelText('Time 1')).toBeDisabled()
+  finish({})
+  await waitFor(() => expect(screen.getByLabelText('Time 1')).not.toBeDisabled())
+})

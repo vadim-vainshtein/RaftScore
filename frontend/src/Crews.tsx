@@ -2,7 +2,8 @@ import {useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
-import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiRequest, csrfRequest} from './api/client'
+import {apiErrorKey} from './api/errors'
 
 type Competition = {id: number, title: string, admissionConfirmationRequired: boolean}
 type Category = {id: number, displayName: string, crewSize: number}
@@ -23,7 +24,7 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
   const selection = useRef(0), editSelection = useRef(0)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0)
   const base = competition ? `/api/competitions/${competition.id}/entries` : ''
-  const fail = (e: unknown) => setError(e instanceof ApiError ? e.code ?? `HTTP ${e.status}` : t('crew.connection'))
+  const fail = (e: unknown) => setError(apiErrorKey(e))
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -71,7 +72,7 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
   const visible = crews.filter(c => (!category || String(c.categoryId) === category) && `${c.crewName} ${c.regionOrClub} ${c.startNumber} ${c.roster.map(m => `${m.surname} ${m.givenName} ${m.patronymic ?? ''}`).join(' ')}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (admission === 'all' || String(c.admissionDecision) === admission))
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     <TextField select disabled={busy} label={t('crew.competition')} value={competition?.id ?? ''} onChange={e => void changeCompetition(e.target.value)}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}</TextField>
-    {error && <Typography role="alert">{error}</Typography>}
+    {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
     {competition && <><TextField select label={t('crew.category')} value={category} onChange={e => setCategory(e.target.value)}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
       <TextField label={t('crew.search')} value={search} onChange={e => setSearch(e.target.value)}/>
       {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}

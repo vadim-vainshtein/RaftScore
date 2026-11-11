@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiErrorKey} from './api/errors'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 import {wallTimeToInstant} from './i18n/wall-time'
@@ -39,7 +40,7 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
       const pages = await Promise.all(Array.from({length: Math.max(0, firstPage.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`)))
       if (active) setCompetitions([...firstPage.content, ...pages.flatMap(page => page.content)])
     }
-    void load().catch(() => {if (active) setError('error')})
+    void load().catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
   }, [])
   useEffect(() => {
@@ -47,22 +48,22 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
     let active = true
     Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`), readOnly ? Promise.resolve([] as Crew[]) : apiRequest<Crew[]>(`/api/competitions/${competition}/entries/private`)])
       .then(([ds, cs, entries]) => {if (active) {setDisciplines(ds); setCategories(cs); setCrews(entries)}})
-      .catch(() => {if (active) setError('error')})
+      .catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
   }, [competition, readOnly])
   useEffect(() => {
     if (!competition || !discipline || !category) return
     let active = true
-    apiRequest<StartList>(base).then(value => {if (active) setList(value)}).catch(() => {if (active) setError('error')})
+    apiRequest<StartList>(base).then(value => {if (active) setList(value)}).catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
   }, [base, competition, discipline, category])
   const eligible = crews.filter(c => c.categoryId === Number(category) && c.eligible)
-  const [order, setOrder] = useState<number[]>([])
-  useEffect(() => {
-    const ids = eligible.map(c => c.id)
-    const existing = list?.slots.map(s => s.crewId).filter(id => ids.includes(id)) ?? []
-    setOrder([...existing, ...ids.filter(id => !existing.includes(id))])
-  }, [crews, category, list])
+  const ids = eligible.map(c => c.id)
+  const existing = list?.slots.map(s => s.crewId).filter(id => ids.includes(id)) ?? []
+  const orderKey = JSON.stringify([category, ids, existing, list?.id])
+  const [manualOrder, setManualOrder] = useState<{key: string, value: number[]} | null>(null)
+  const order = manualOrder?.key === orderKey ? manualOrder.value : [...existing, ...ids.filter(id => !existing.includes(id))]
+  const setOrder = (value: number[]) => setManualOrder({key: orderKey, value})
   const move = (from: number, to: number) => {
     if (to < 0 || to >= order.length || from === to) return
     const next = [...order]; const [item] = next.splice(from, 1); next.splice(to, 0, item); setOrder(next)
@@ -81,13 +82,13 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
         crewIds: mode === 'manual' ? order : null,
         firstStart: firstInstant?.toISOString() ?? null, intervalSeconds: interval ? Number(interval) : null,
       })
-      setList(result)
+      setManualOrder(null); setList(result)
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         setList({...list, locked: true})
-        try {setList(await apiRequest<StartList>(base))} catch {setError('error')}
+        try {setList(await apiRequest<StartList>(base)); setManualOrder(null); setError(apiErrorKey(e))} catch (error) {setError(apiErrorKey(error))}
       }
-      else setError('error')
+      else setError(apiErrorKey(e))
     } finally {setBusy(false)}
   }
   const clear = async () => {
@@ -97,22 +98,22 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
       await csrfRequest(`${base}/source-results`, 'DELETE')
       setList(await apiRequest<StartList>(base))
     }
-    catch {setError('error')} finally {setBusy(false)}
+    catch (error) {setError(apiErrorKey(error))} finally {setBusy(false)}
   }
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    <TextField select disabled={busy} label={t('startList.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
+    <TextField select disabled={busy} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
       <MenuItem value="">—</MenuItem>
       {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
-    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); setCategory(''); setList(null)}}>
+    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); setCategory(''); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name}</MenuItem>)}</TextField>
     }
-    {discipline && <TextField select disabled={busy} label={t('startList.category')} value={category} onChange={e => {setCategory(e.target.value); setList(null)}}>
+    {discipline && <TextField select disabled={busy} label={t('startList.category')} value={category} onChange={e => {setManualOrder(null); setCategory(e.target.value); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
     }
-    {error && <Typography role="alert">{t(error === 'invalid' ? 'startList.invalid' : 'startList.error')}</Typography>}
+    {error && <Typography role="alert">{t(error === 'invalid' ? 'startList.invalid' : error as 'apiError.network')}</Typography>}
     {list && <>
       {list.locked && <Typography role="status">{t('startList.locked')}</Typography>}
       {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box component="table">

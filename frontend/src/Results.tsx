@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, csrfRequest} from './api/client'
+import {apiErrorKey, type ApiErrorKey} from './api/errors'
 import {formatNumber} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
@@ -24,7 +25,7 @@ export default function Results({readOnly}: {readOnly: boolean}) {
   const [categories, setCategories] = useState<Category[]>([])
   const [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [rows, setRows] = useState<Result[] | null>(null)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<ApiErrorKey | 'results.error' | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState(false)
   const [filtersVisible, setFiltersVisible] = useState(true)
@@ -39,14 +40,14 @@ export default function Results({readOnly}: {readOnly: boolean}) {
       const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`)))
       if (active) setCompetitions([...first.content, ...rest.flatMap(page => page.content)])
     }
-    void load().catch(() => active && setError(true))
+    void load().catch(e => active && setError(apiErrorKey(e)))
     return () => {active = false}
   }, [])
   useEffect(() => {
     if (!competition) return
     let active = true
     Promise.all([apiRequest<Category[]>(`/api/competitions/${competition}/categories`), apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`)])
-      .then(([cs, ds]) => {if (active) {setCategories(cs); setDisciplines(ds)}}).catch(() => active && setError(true))
+      .then(([cs, ds]) => {if (active) {setCategories(cs); setDisciplines(ds)}}).catch(e => active && setError(apiErrorKey(e)))
     return () => {active = false}
   }, [competition])
   useEffect(() => {
@@ -59,16 +60,21 @@ export default function Results({readOnly}: {readOnly: boolean}) {
       pending = true
       try {
         const data = await apiRequest<Result[]>(path)
-        if (active) {setRows(data); setError(false)}
+        if (active) {setRows(data); setError(null)}
         const scoped = disciplines.filter(d => d.categoryIds.includes(Number(category)) && (!discipline || String(d.id) === discipline))
-        const lists = await Promise.all(scoped.filter(d => d.type !== 'PARALLEL_SPRINT').map(async d => ({
-          id: d.id, list: await apiRequest<{slots: {crewId: number}[]}>(
-            `/api/competitions/${competition}/disciplines/${d.id}/categories/${category}/start-list`),
-        })))
+        const lists = await Promise.all(scoped.map(async d => {
+          const base = `/api/competitions/${competition}/disciplines/${d.id}/categories/${category}`
+          if (d.type === 'PARALLEL_SPRINT') {
+            const bracket = await apiRequest<{heats: {round: number, first: {id: number} | null, second: {id: number} | null}[]}>(`${base}/bracket`)
+            const slots = bracket.heats.filter(h => h.round === 1).flatMap(h => [h.first, h.second]).filter(c => c !== null).map(c => ({crewId: c.id}))
+            return {id: d.id, list: {slots}}
+          }
+          return {id: d.id, list: await apiRequest<{slots: {crewId: number}[]}>(`${base}/start-list`)}
+        }))
         const missing = lists.some(({id, list}) => list.slots.some(slot => !data.some(row => row.crewId === slot.crewId && (discipline || row.disciplines?.some(part => part.disciplineId === id)))))
         if (active) setIncomplete(missing)
       }
-      catch {if (active) setError(true)} finally {pending = false}
+      catch (e) {if (active) setError(apiErrorKey(e))} finally {pending = false}
     }
     void load()
     const timer = readOnly ? window.setInterval(() => void load(), 10000) : undefined
@@ -76,13 +82,13 @@ export default function Results({readOnly}: {readOnly: boolean}) {
   }, [competition, category, discipline, readOnly, refresh, disciplines])
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box ref={display} sx={{display: 'grid', gap: 2, mt: 2, bgcolor: 'background.paper', overflow: 'auto'}}>
-    <Box><Button onClick={() => setFiltersVisible(value => !value)}>{t(filtersVisible ? 'results.hideFilters' : 'results.showFilters')}</Button><Button onClick={() => {if (document.fullscreenElement) void document.exitFullscreen(); else if (display.current?.requestFullscreen) void display.current.requestFullscreen().catch(() => setError(true))}}>{t('results.fullscreen')}</Button></Box>
-    {filtersVisible && <><TextField select label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(false)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
-    {competition && <TextField select label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(false)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
-    {competition && <TextField select label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(false)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name}</MenuItem>)}</TextField>}</>}
-    {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`#/result-grid?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch {setError(true)} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
+    <Box><Button onClick={() => setFiltersVisible(value => !value)}>{t(filtersVisible ? 'results.hideFilters' : 'results.showFilters')}</Button><Button onClick={() => {if (document.fullscreenElement) void document.exitFullscreen(); else if (display.current?.requestFullscreen) void display.current.requestFullscreen().catch(() => setError('results.error'))}}>{t('results.fullscreen')}</Button></Box>
+    {filtersVisible && <><TextField select label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(null)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
+    {competition && <TextField select label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {competition && <TextField select label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name}</MenuItem>)}</TextField>}</>}
+    {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`#/result-grid?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
     {rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
-    {error && <Typography role="alert">{t('results.error')}</Typography>}
+    {error && <Typography role="alert">{t(error)}</Typography>}
     {category && !rows && !error && <Typography>{t('results.loading')}</Typography>}
     {rows && rows.length === 0 && <Typography>{t('results.empty')}</Typography>}
     {rows?.map(row => <Box component="article" key={row.crewId} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere'}}>

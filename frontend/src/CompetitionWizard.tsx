@@ -1,11 +1,12 @@
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiErrorKey, fieldErrorKey} from './api/errors'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
-type FieldIssue = {step: number, field: string, label: string}
+type FieldIssue = {step: number, field: string, label: string, message?: string}
 type Competition = {title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}
 type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean}
 type Category = {templateId?: number, classLabel: string, scoringGroupLabel: string, crewSize: number}
@@ -24,13 +25,15 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
   const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>([])
   const [requirements, setRequirements] = useState<Requirement[]>([]), [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [issues, setIssues] = useState<FieldIssue[]>([])
-  const [focusField, setFocusField] = useState<string | null>(null)
-  useEffect(() => { if (focusField) { document.getElementById(focusField)?.focus(); setFocusField(null) } }, [step, focusField])
-  const [tiebreak, setTiebreak] = useState<number | null>(null)
+  const [focusField, setFocusField] = useState<{field: string} | null>(null)
+  const handledFocus = useRef<typeof focusField>(null)
+  useEffect(() => { if (focusField && focusField !== handledFocus.current) { document.getElementById(focusField.field)?.focus(); handledFocus.current = focusField } }, [step, focusField])
+  const [explicitTiebreak, setTiebreak] = useState<number | null>(null)
   const [presetSelected, setPresetSelected] = useState(false)
   const [tiebreakExplicit, setTiebreakExplicit] = useState(false)
-  useEffect(() => { if (presetSelected && !tiebreakExplicit) { const slalom = disciplines.findIndex(d => d.type === 'SLALOM'); setTiebreak(slalom < 0 ? null : slalom) } }, [disciplines, presetSelected, tiebreakExplicit])
-  useEffect(() => {let active = true; (async () => {try {let page = 0, total = 1; const all: Template[] = []; while (page < total) {const result = await apiRequest<{content: Template[], totalPages: number}>(`/api/category-templates?archived=false&page=${page}&size=100`); all.push(...result.content.filter(item => !item.archived)); total = result.totalPages; page++} if (active) setTemplates(all)} catch {if (active) setError(t('wizard.templatesError'))}})(); return () => {active = false}}, [t])
+  const slalom = disciplines.findIndex(d => d.type === 'SLALOM')
+  const tiebreak = presetSelected && !tiebreakExplicit ? (slalom < 0 ? null : slalom) : explicitTiebreak
+  useEffect(() => {let active = true; (async () => {try {let page = 0, total = 1; const all: Template[] = []; while (page < total) {const result = await apiRequest<{content: Template[], totalPages: number}>(`/api/category-templates?archived=false&page=${page}&size=100`); all.push(...result.content.filter(item => !item.archived)); total = result.totalPages; page++} if (active) setTemplates(all)} catch {if (active) setError('wizard.templatesError')}})(); return () => {active = false}}, [t])
   const updateDiscipline = (i: number, patch: Partial<Discipline>) => setDisciplines(items => items.map((d, index) => index === i ? {...d, ...patch} : d))
   const fieldIssues = (currentStep: number): FieldIssue[] => {
     const found: FieldIssue[] = []
@@ -78,7 +81,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       const targetStep = field.startsWith('competition.') ? 0 : field.startsWith('categories[') ? 1 : field.startsWith('requirements[') ? 2 : field.startsWith('disciplines[') ? 3 : -1
       const name = field.split('.').at(-1) ?? ''
       const labels: Record<string, string> = {title: t('competition.title'), startDate: t('competition.startDate'), endDate: t('competition.endDate'), location: t('competition.location'), timeZone: t('competition.timeZone'), description: t('competition.description'), classLabel: t('wizard.classLabel'), scoringGroupLabel: t('wizard.scoringGroupLabel'), crewSize: t('wizard.crewSize'), name: targetStep === 2 ? t('wizard.requirementName') : t('discipline.name'), gateCount: t('discipline.gateCount'), attemptCount: t('discipline.attemptCount'), qualificationDisciplineIndex: t('discipline.qualification'), displayOrder: t('discipline.order'), place: t('wizard.place'), points: t('wizard.points')}
-      return targetStep < 0 || !document.getElementById(field) && !/^(competition\.(title|startDate|endDate|location|timeZone|description)|categories\[\d+\]\.(classLabel|scoringGroupLabel|crewSize)|requirements\[\d+\]\.name|disciplines\[\d+\]\.(name|gateCount|attemptCount|qualificationDisciplineIndex|displayOrder|pointsTable\.rows\[\d+\]\.(place|points)))$/.test(field) ? [] : [{step: targetStep, field, label: labels[name] ?? field}]
+      return targetStep < 0 || !document.getElementById(field) && !/^(competition\.(title|startDate|endDate|location|timeZone|description)|categories\[\d+\]\.(classLabel|scoringGroupLabel|crewSize)|requirements\[\d+\]\.name|disciplines\[\d+\]\.(name|gateCount|attemptCount|qualificationDisciplineIndex|displayOrder|pointsTable\.rows\[\d+\]\.(place|points)))$/.test(field) ? [] : [{step: targetStep, field, label: labels[name] ?? t('apiError.invalidField'), message: fieldErrorKey(item?.code)}]
     })
   }
   const applyPreset = (index: number, discipline: Discipline) => {
@@ -86,12 +89,12 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
     updateDiscipline(index, {pointsTable: {name: t('wizard.preset'), tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows}})
     setPresetSelected(true)
   }
-  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories, requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(t('competition.error'))} finally {setBusy(false)}}
+  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories, requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
   return <Box sx={{display: 'grid', gap: 2, maxWidth: 850}}>
     <Typography variant="h5">{t(("wizard.step" + step) as "wizard.step0")}
       </Typography>
-      <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert">{error}</Typography>}
-      {issues.length > 0 && <Box role="alert">{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Button key={index} onClick={() => {setStep(issue.step); setFocusField(issue.field)}}>{issue.label}</Button>)}</Box>)}</Box>}
+      <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
+      {issues.length > 0 && <Box role="alert">{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button onClick={() => {setStep(issue.step); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
     {step === 0 && <>
       <TextField id="competition.title" label={t('competition.title')} value={competition.title} onChange={e => setCompetition({...competition, title: e.target.value})}/>
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>

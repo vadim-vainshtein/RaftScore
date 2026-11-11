@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiErrorKey, type ApiErrorKey} from './api/errors'
 import {parseTime} from './result-time'
 import {supportedLocale} from './i18n/supported-locales'
 
@@ -31,28 +32,28 @@ export default function ParallelSprint({readOnly}: {readOnly: boolean}) {
   const [bracket, setBracket] = useState<Bracket | null>(null)
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [conflict, setConflict] = useState<number | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<ApiErrorKey | 'parallel.invalid' | ''>('')
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}`
-  useEffect(() => {let active = true; const load = async () => {const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(() => active && setError('error')); return () => {active = false}}, [])
-  useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([ds, cs]) => {if (active) {setDisciplines(ds.filter(d => d.type === 'PARALLEL_SPRINT')); setCategories(cs)}}).catch(() => active && setError('error')); return () => {active = false}}, [competition])
-  useEffect(() => {if (!competition || !discipline || !category) return; let active = true; apiRequest<Bracket>(`${base}/bracket`).then(b => {if (active) {setBracket(b); setDrafts({}); setConflict(null)}}).catch(() => active && setError('error')); return () => {active = false}}, [base, competition, discipline, category])
+  useEffect(() => {let active = true; const load = async () => {const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [])
+  useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([ds, cs]) => {if (active) {setDisciplines(ds.filter(d => d.type === 'PARALLEL_SPRINT')); setCategories(cs)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [competition])
+  useEffect(() => {if (!competition || !discipline || !category) return; let active = true; apiRequest<Bracket>(`${base}/bracket`).then(b => {if (active) {setBracket(b); setDrafts({}); setConflict(null)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [base, competition, discipline, category])
   const clearSelection = () => {setBracket(null); setDrafts({}); setConflict(null); setError('')}
   const refresh = async () => setBracket(await apiRequest<Bracket>(`${base}/bracket`))
-  const seed = async () => {setBusy(true); setError(''); try {setBracket(await csrfRequest<Bracket>(`${base}/bracket`, 'POST'))} catch {setError('error')} finally {setBusy(false)}}
+  const seed = async () => {setBusy(true); setError(''); try {setBracket(await csrfRequest<Bracket>(`${base}/bracket`, 'POST'))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   const save = async (h: Heat) => {
     const draft = drafts[h.id] ?? draftFor(h)
     const first = draft.firstStatus === 'FINISHED' ? parseTime(draft.firstTime) : null
     const second = draft.secondStatus === 'FINISHED' ? parseTime(draft.secondTime) : null
-    if ((draft.firstStatus === 'FINISHED' && first === null) || (draft.secondStatus === 'FINISHED' && second === null)) {setError('invalid'); return}
+    if ((draft.firstStatus === 'FINISHED' && first === null) || (draft.secondStatus === 'FINISHED' && second === null)) {setError('parallel.invalid'); return}
     if (draft.winner && !window.confirm(t('parallel.confirmWinner'))) return
     setBusy(true); setError('')
     try {
       await csrfRequest(`${base}/brackets/${bracket?.id}/heats/${h.id}/result`, 'PUT', {version: draft.version, first: {status: draft.firstStatus, timeCentiseconds: first}, second: {status: draft.secondStatus, timeCentiseconds: second}, winnerCrewId: draft.winner ? Number(draft.winner) : null, confirmed: !!draft.winner})
       await refresh(); setDrafts(old => {const next = {...old}; delete next[h.id]; return next}); setConflict(null)
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {try {await refresh(); setConflict(h.id)} catch {setError('error')}} else setError('error')
+      if (e instanceof ApiError && e.status === 409) {try {await refresh(); setConflict(h.id)} catch (refreshError) {setError(apiErrorKey(refreshError))}} else setError(apiErrorKey(e))
     } finally {setBusy(false)}
   }
   const update = (h: Heat, patch: Partial<Draft>) => setDrafts(old => ({...old, [h.id]: {...(old[h.id] ?? draftFor(h)), ...patch}}))
@@ -60,7 +61,7 @@ export default function ParallelSprint({readOnly}: {readOnly: boolean}) {
     <TextField select disabled={busy} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setDiscipline(''); setCategory(''); setDisciplines([]); setCategories([]); clearSelection()}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
     {competition && <TextField select disabled={busy} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); setCategory(''); clearSelection()}}><MenuItem value="">—</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name}</MenuItem>)}</TextField>}
     {discipline && <TextField select disabled={busy} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); clearSelection()}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
-    {error && <Typography role="alert">{t(error === 'invalid' ? 'parallel.invalid' : 'parallel.error')}</Typography>}
+    {error && <Typography role="alert">{t(error)}</Typography>}
     {bracket && !bracket.id && <><Typography>{t('parallel.empty')}</Typography>{!readOnly && <Button disabled={busy} onClick={() => void seed()}>{t('parallel.seed')}</Button>}</>}
     {[...new Set(bracket?.heats.map(h => h.round) ?? [])].map(round => <Box component="section" key={round} sx={{display: 'grid', gap: 2}}><Typography component="h2" variant="h5">{t('parallel.round', {round})}</Typography>{bracket?.heats.filter(h => h.round === round).map(h => {
       const draft = drafts[h.id] ?? draftFor(h)

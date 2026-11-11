@@ -19,7 +19,6 @@ class CurrentParallelSprintBracketController {
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
     private final ParallelSprintSeedingService seeding;
-    private final ParallelSprintBracketController views;
 
     record Bracket(Long id, List<ParallelSprintBracketController.Heat> heats) { }
 
@@ -29,7 +28,7 @@ class CurrentParallelSprintBracketController {
         checkScope(competitionId, disciplineId, categoryId);
         return brackets.findByDisciplineIdAndCategoryId(disciplineId, categoryId)
                 .map(b -> new Bracket(b.getId(), heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(b.getId())
-                        .stream().map(views::view).toList()))
+                        .stream().map(ParallelSprintBracketController::view).toList()))
                 .orElseGet(() -> new Bracket(null, List.of()));
     }
 
@@ -40,7 +39,7 @@ class CurrentParallelSprintBracketController {
         try {
             var bracket = seeding.seed(disciplineId, categoryId, null);
             return new Bracket(bracket.getId(), heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId())
-                    .stream().map(views::view).toList());
+                    .stream().map(ParallelSprintBracketController::view).toList());
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

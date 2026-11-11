@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {apiRequest, ApiError} from './api/client'
+import {apiErrorKey, type ApiErrorKey} from './api/errors'
 import Categories from './Categories'
 import Crews from './Crews'
 import Disciplines from './Disciplines'
@@ -54,7 +55,7 @@ function Shell({locale}: {locale: Locale}) {
   const {t: auth} = useTranslation('auth')
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [checking, setChecking] = useState(true)
-  const [error, setError] = useState<'invalid' | 'error' | null>(null)
+  const [error, setError] = useState<{kind: 'auth', key: 'invalid' | 'error'} | {kind: 'api', key: ApiErrorKey} | null>(null)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -81,7 +82,7 @@ function Shell({locale}: {locale: Locale}) {
     }
     window.addEventListener('session-check', confirmSession)
     apiRequest<Principal>('/api/auth/principal').then(value => { if (active && generation.current === current) setPrincipal(value) })
-      .catch(error => { if (active && generation.current === current && !(error instanceof ApiError && error.status === 401)) setError('error') })
+      .catch(error => { if (active && generation.current === current && !(error instanceof ApiError && error.status === 401)) setError({kind: 'api', key: apiErrorKey(error)}) })
       .finally(() => { if (active && generation.current === current) setChecking(false) })
     return () => { active = false; window.removeEventListener('session-check', confirmSession) }
   }, [])
@@ -98,7 +99,7 @@ function Shell({locale}: {locale: Locale}) {
       window.history.replaceState(window.history.state, '', `#${destination}`)
       generation.current++
       pathRef.current = destination; setPath(destination); setPrincipal(user); setPassword('')
-    } catch (error) { setError(error instanceof ApiError && error.status === 401 ? 'invalid' : 'error') }
+    } catch (error) { setError(error instanceof ApiError && error.status === 401 ? {kind: 'auth', key: 'invalid'} : {kind: 'api', key: apiErrorKey(error)}) }
     finally { setBusy(false) }
   }
   const logout = async () => {
@@ -107,11 +108,11 @@ function Shell({locale}: {locale: Locale}) {
     setBusy(true); setError(null)
     try { await csrfPost('/api/auth/logout'); setCategoryDraft(null); generation.current++; setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null) }
     catch {
-      try { await apiRequest<Principal>('/api/auth/principal'); if (generation.current === current) setError('error') }
+      try { await apiRequest<Principal>('/api/auth/principal'); if (generation.current === current) setError({kind: 'auth', key: 'error'}) }
       catch (error) {
         if (generation.current === current && error instanceof ApiError && error.status === 401) {
           setCategoryDraft(null); setReturnRoute(safeRoute(window.location.hash.slice(1))); setPrincipal(null)
-        } else if (generation.current === current) setError('error')
+        } else if (generation.current === current) setError({kind: 'auth', key: 'error'})
       }
     }
     finally { setBusy(false) }
@@ -184,7 +185,7 @@ function Shell({locale}: {locale: Locale}) {
     <Box component="form" onSubmit={login} sx={{display: 'grid', gap: 2, mt: 2}}>
       <TextField label={auth('username')} value={username} onChange={event => setUsername(event.target.value)} required autoComplete="username"/>
       <TextField label={auth('password')} type="password" value={password} onChange={event => setPassword(event.target.value)} required autoComplete="current-password"/>
-      {error && <Typography role="alert">{auth(error)}</Typography>}
+      {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
       <Button type="submit" variant="contained" disabled={busy}>{auth('login')}</Button>
     </Box>
   </Box>
@@ -243,7 +244,7 @@ function Shell({locale}: {locale: Locale}) {
       <Box component="main" sx={{flexGrow: 1, minWidth: 0, p: {xs: 2, sm: 3}}}>
         <Box sx={{height: {xs: 128, md: 80}}}/>
         <Typography component="h1" variant="h4">{title}</Typography>
-        {error && <Typography role="alert">{auth(error)}</Typography>}
+        {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
         {(activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>

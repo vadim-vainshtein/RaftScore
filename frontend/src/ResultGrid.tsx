@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, csrfRequest} from './api/client'
+import {apiErrorKey} from './api/errors'
 import {parseTime} from './result-time'
 
 type Competition = {id: number, title: string}
@@ -32,13 +33,13 @@ export default function ResultGrid() {
   const [standings, setStandings] = useState<Standing[]>([])
   const [rows, setRows] = useState<Record<number, Row>>({})
   const [gate, setGate] = useState(1)
-  const [error, setError] = useState<'' | 'error' | 'invalid'>('')
+  const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}`
-  useEffect(() => {let active = true; const load = async () => {const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(() => active && setError('error')); return () => {active = false}}, [])
-  useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([d, c]) => {if (active) {setDisciplines(d); setCategories(c)}}).catch(() => active && setError('error')); return () => {active = false}}, [competition])
-  useEffect(() => {if (!competition || !discipline || !category) return; let active = true; Promise.all([apiRequest<{slots: Slot[]}>(`${base}/start-list`), apiRequest<Grid>(`${base}/attempt-grid`)]).then(([list, data]) => {if (active) {setSlots(list.slots); setResults(data.attempts); setStandings(data.standings); setRows(Object.fromEntries(list.slots.map(s => {const r = data.attempts.find(x => x.crewId === s.crewId && x.attemptNumber === 1); return [s.crewId, r ? fromResult(r) : empty()]}))); setAttempt(1)}}).catch(() => active && setError('error')); return () => {active = false}}, [base, competition, discipline, category])
+  useEffect(() => {let active = true; const load = async () => {const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [])
+  useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([d, c]) => {if (active) {setDisciplines(d); setCategories(c)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [competition])
+  useEffect(() => {if (!competition || !discipline || !category) return; let active = true; Promise.all([apiRequest<{slots: Slot[]}>(`${base}/start-list`), apiRequest<Grid>(`${base}/attempt-grid`)]).then(([list, data]) => {if (active) {setSlots(list.slots); setResults(data.attempts); setStandings(data.standings); setRows(Object.fromEntries(list.slots.map(s => {const r = data.attempts.find(x => x.crewId === s.crewId && x.attemptNumber === 1); return [s.crewId, r ? fromResult(r) : empty()]}))); setAttempt(1)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [base, competition, discipline, category])
   const dirty = Object.values(rows).some(r => r.dirty)
   const canLeave = () => !dirty || window.confirm(t('resultGrid.discard'))
   useEffect(() => {const listener = (event: Event) => {if (dirty && !window.confirm(t('resultGrid.discard'))) event.preventDefault()}; window.addEventListener('category-navigation', listener); return () => window.removeEventListener('category-navigation', listener)}, [dirty, t])
@@ -64,9 +65,9 @@ export default function ResultGrid() {
       const saved: Result = {crewId: id, attemptNumber: attempt, version: response.version, ...fields}
       setRows(old => ({...old, [id]: fromResult(saved)}))
       setResults(old => [...old.filter(r => r.crewId !== id || r.attemptNumber !== attempt), saved])
-      try {const data = await apiRequest<Grid>(`${base}/attempt-grid`); setResults(data.attempts); setStandings(data.standings)} catch {setError('error')}
+      try {const data = await apiRequest<Grid>(`${base}/attempt-grid`); setResults(data.attempts); setStandings(data.standings)} catch (e) {setError(apiErrorKey(e))}
       setTimeout(() => document.querySelector<HTMLElement>(`[data-row="${index + 1}"]:not(:disabled)`)?.focus(), 0)
-    } catch {setError('error')} finally {setBusy(false)}
+    } catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     <TextField select label={t('startList.competition')} value={competition} disabled={busy} onChange={e => {if (canLeave()) {setCompetition(e.target.value); setGate(1); setDiscipline(''); setCategory(''); setSlots([]); setResults([])}}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
@@ -74,7 +75,7 @@ export default function ResultGrid() {
     {discipline && <TextField select label={t('startList.category')} value={category} disabled={busy} onChange={e => {if (canLeave()) {setCategory(e.target.value); setGate(1); setSlots([]); setResults([])}}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {category && selected?.type === 'SLALOM' && <><TextField type="number" label={t('resultGrid.attempt')} disabled={busy} value={attempt} slotProps={{htmlInput: {min: 1, max: selected.attemptCount ?? 1}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= (selected.attemptCount ?? 1) && canLeave()) {setAttempt(n); setRows(Object.fromEntries(slots.map(s => {const r = results.find(x => x.crewId === s.crewId && x.attemptNumber === n); return [s.crewId, r ? fromResult(r) : empty()]})))}}}/><TextField type="number" label={t('resultGrid.gatePage')} value={gate} slotProps={{htmlInput: {min: 1, max: Math.max(1, Math.ceil((selected.gateCount ?? 1) / 20))}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= Math.ceil((selected.gateCount ?? 1) / 20)) setGate(n)}}/></>}
     {category && <Typography>{t('resultGrid.statusHelp')}</Typography>}
-    {error && <Typography role="alert">{t(`resultGrid.${error}`)}</Typography>}
+    {error && <Typography role="alert">{t(error === 'invalid' ? 'resultGrid.invalid' : error as 'apiError.network')}</Typography>}
     {category && <Box sx={{overflow: 'auto', maxHeight: '65vh'}}><Box component="table" sx={{borderCollapse: 'collapse', '& th': {position: 'sticky', top: 0, backgroundColor: 'background.paper', zIndex: 2}, '& th:nth-of-type(1), & td:nth-of-type(1)': {position: 'sticky', left: 0, minWidth: 180, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(2), & td:nth-of-type(2)': {position: 'sticky', left: 180, minWidth: 70, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(3), & td:nth-of-type(3)': {position: 'sticky', left: 250, backgroundColor: 'background.paper', zIndex: 3}}} onKeyDown={e => {const target = e.target as HTMLElement; const row = Number(target.dataset.row); const col = Number(target.dataset.col); if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {e.preventDefault(); const slot = slots[row]; if (slot) void save(slot.crewId, row)} else if (!(target instanceof HTMLSelectElement) && ['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key) && Number.isInteger(row) && Number.isInteger(col)) {e.preventDefault(); const next = e.key === 'ArrowUp' ? row - 1 : row + 1; document.querySelector<HTMLInputElement>(`[data-row="${next}"][data-col="${col}"]`)?.focus()}}}>
       <thead><tr><th>{t('startList.crew')}</th><th>{t('resultGrid.attempt')}</th><th>{t('resultGrid.time')}</th><th>{t('resultGrid.penalty')}</th><th>{t('resultGrid.status')}</th>{selected?.type === 'SLALOM' && Array.from({length: Math.min(20, Math.max(0, (selected.gateCount ?? 0) - (gate - 1) * 20))}, (_, i) => <th key={i}>{t('resultGrid.gate')} {(gate - 1) * 20 + i + 1}</th>)}<th>{t('resultGrid.total')}</th><th>{t('resultGrid.best')}</th><th>{t('resultGrid.place')}</th><th>{t('resultGrid.save')}</th></tr></thead>
       <tbody>{slots.map((slot, index) => {

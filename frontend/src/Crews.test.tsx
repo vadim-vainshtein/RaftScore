@@ -1,7 +1,7 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import Crews from './Crews'
-import {apiRequest, csrfRequest} from './api/client'
+import {apiRequest, ApiError, csrfRequest} from './api/client'
 import './i18n'
 vi.mock('./api/client', async original => ({...(await original<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
 const detail = {id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', representative: 'Coach', startNumber: 7, version: 3, roster: [{participantId: 9, surname: 'Smith', givenName: 'Sam', patronymic: ''}], requirementAnswers: [{requirementId: 5, value: false}], admissionDecision: null, eligible: true}
@@ -84,4 +84,15 @@ test('ignores an edit response after a newer create intent', async () => {
   fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
   await act(async () => { resolveDetail(detail); await pending })
   expect(screen.getByLabelText(/Crew name/)).toHaveValue('')
+})
+
+test('localizes known API errors and never displays server details', async () => {
+  vi.mocked(apiRequest).mockRejectedValueOnce(new ApiError(409, {code: 'crew_entry.start_number_duplicate', parameters: {detail: 'secret'}}))
+  render(<Crews/>)
+  expect(await screen.findByRole('alert')).toHaveTextContent('This start number is already in use.')
+  expect(screen.queryByText(/secret/)).not.toBeInTheDocument()
+  const {default: i18n} = await import('./i18n')
+  await act(async () => { await i18n.changeLanguage('ru') })
+  expect(screen.getByRole('alert')).toHaveTextContent('Этот стартовый номер уже используется.')
+  await act(async () => { await i18n.changeLanguage('en') })
 })
