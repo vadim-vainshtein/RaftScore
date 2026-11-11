@@ -13,7 +13,8 @@
     "backups": "Backups",
     "crews": "Crews",
     "disciplines": "Disciplines",
-    "startLists": "Start lists"
+    "startLists": "Start lists",
+    "resultGrid": "Result entry"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -179,5 +180,30 @@
     "manual": "Manual",
     "first": "First start",
     "timePolicy": "Times use the competition time zone. If a clock time occurs twice, the earlier instant is used; nonexistent times are rejected."
+  },
+  "resultGrid": {
+    "attempt": "Attempt",
+    "gate": "Gate",
+    "time": "Time",
+    "penalty": "Penalty",
+    "status": "Status",
+    "save": "Save",
+    "discard": "Discard unsaved changes?",
+    "confirmDsq": "Confirm disqualification?",
+    "invalid": "Invalid result. Check time, status and penalty.",
+    "error": "Could not save or load results. Unsaved edits are retained.",
+    "statuses": {
+      "FINISHED": "Finished",
+      "DNS": "Did not start",
+      "DNF": "Did not finish",
+      "DSQ_ATTEMPT": "Disqualified: attempt",
+      "DSQ_DISCIPLINE": "Disqualified: discipline",
+      "DSQ_COMPETITION": "Disqualified: competition"
+    },
+    "gatePage": "Gate page (20 per page)",
+    "total": "Attempt total",
+    "best": "Best / total",
+    "place": "Place",
+    "statusHelp": "DNS: did not start; DNF: did not finish. Disqualification may apply to an attempt, discipline, or competition."
   }
 }
