@@ -48,6 +48,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequiredArgsConstructor
 class CompetitionController {
     private final CompetitionRepository repository;
+    private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
 
     @Operation(summary = "List competitions", description = "Authenticated users can search titles and sort by start date.")
     @ApiResponse(responseCode = "200", description = "Page of competitions", content = @Content(schema = @Schema(implementation = CompetitionPage.class)))
@@ -109,6 +110,38 @@ class CompetitionController {
                 details.timeZone(), details.description(), details.admissionConfirmationRequired());
         repository.flush();
         return CompetitionResponse.from(competition);
+    }
+
+    @GetMapping("/{id}/tiebreak")
+    @Transactional(readOnly = true)
+    TiebreakResponse tiebreak(@PathVariable Long id) {
+        return TiebreakResponse.from(repository.findById(id).orElseThrow(NotFound::new));
+    }
+
+    @PutMapping("/{id}/tiebreak")
+    @Transactional
+    TiebreakResponse updateTiebreak(@PathVariable Long id, @Valid @RequestBody TiebreakRequest request) {
+        var competition = repository.findById(id).orElseThrow(NotFound::new);
+        if (competition.getVersion() != request.version().longValueExact()) {
+            throw new OptimisticLockingFailureException("Stale competition version");
+        }
+        var discipline = request.disciplineId() == null ? null : disciplines.findById(request.disciplineId().longValueExact())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown discipline"));
+        competition.setTiebreakDiscipline(discipline);
+        repository.flush();
+        return TiebreakResponse.from(competition);
+    }
+
+    record TiebreakRequest(@jakarta.validation.constraints.Positive @Digits(integer = 19, fraction = 0)
+            @DecimalMax("9223372036854775807")
+            @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal disciplineId,
+            @NotNull @PositiveOrZero @Digits(integer = 19, fraction = 0) @DecimalMax("9223372036854775807")
+            @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal version) { }
+    record TiebreakResponse(Long disciplineId, long version) {
+        static TiebreakResponse from(Competition competition) {
+            return new TiebreakResponse(competition.getTiebreakDiscipline() == null ? null
+                    : competition.getTiebreakDiscipline().getId(), competition.getVersion());
+        }
     }
 
     @ExceptionHandler(NotFound.class)

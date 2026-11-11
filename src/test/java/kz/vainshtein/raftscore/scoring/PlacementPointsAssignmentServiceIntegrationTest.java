@@ -121,6 +121,43 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
         assertThat(standings.standings(category.getId())).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::totalPoints)
                 .containsExactly(35L, 35L, 0L, 0L);
     }
+    @Test
+    @Transactional
+    void tiebreakRequiresResultsForTheWholeEqualTotalGroup() {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Race")
+                .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = category(competition, "Open");
+        var sprint = discipline(competition, category);
+        var selected = discipline(competition, category);
+        var first = result(sprint, category, 1, 1, CalculatedResultStatus.FINISHED);
+        var missing = result(sprint, category, 2, 1, CalculatedResultStatus.FINISHED);
+        var third = result(sprint, category, 3, 1, CalculatedResultStatus.FINISHED);
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(selected).crewEntry(first.getCrewEntry())
+                .place(2).status(CalculatedResultStatus.FINISHED).points(0).build());
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(selected).crewEntry(third.getCrewEntry())
+                .place(1).status(CalculatedResultStatus.FINISHED).points(0).build());
+        competition.setTiebreakDiscipline(selected);
+        entityManager.flush(); entityManager.clear();
+        var unresolved = standings.standings(category.getId());
+        assertThat(unresolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
+                .containsExactly(1, 1, 1);
+        assertThat(unresolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::crewId)
+                .containsExactly(first.getCrewEntry().getId(), missing.getCrewEntry().getId(), third.getCrewEntry().getId());
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(disciplines.findById(selected.getId()).orElseThrow())
+                .crewEntry(crews.findById(missing.getCrewEntry().getId()).orElseThrow())
+                .place(2).status(CalculatedResultStatus.FINISHED).points(0).build());
+        entityManager.flush(); entityManager.clear();
+        var resolved = standings.standings(category.getId());
+        assertThat(resolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::crewId)
+                .containsExactly(third.getCrewEntry().getId(), first.getCrewEntry().getId(), missing.getCrewEntry().getId());
+        assertThat(resolved).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
+                .containsExactly(1, 2, 2);
+        disciplines.findById(selected.getId()).orElseThrow().replaceCategories(List.of());
+        entityManager.flush(); entityManager.clear();
+        assertThat(standings.standings(category.getId())).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
+                .containsExactly(1, 1, 1);
+    }
+
     private CompetitionCategory category(Competition competition, String label) {
         return categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
                 .classLabel(label).scoringGroupLabel(label).crewSize(4).build());
