@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0048-placement-points-tables" author="raftscore">
+        <createTable tableName="placement_points_tables">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="competition_id" type="BIGINT"><constraints nullable="false" foreignKeyName="placement_points_tables_competition_fk" references="competitions(id)"/></column>
+            <column name="name" type="TEXT"/>
+            <column name="tie_policy" type="TEXT"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE placement_points_tables ADD CONSTRAINT placement_points_tables_tie_policy_valid CHECK (tie_policy IN ('SHARED_PLACE_SAME_POINTS'))</sql>
+        <createTable tableName="placement_points_rows">
+            <column name="table_id" type="BIGINT"><constraints nullable="false" foreignKeyName="placement_points_rows_table_fk" references="placement_points_tables(id)"/></column>
+            <column name="place" type="INTEGER"><constraints nullable="false"/></column>
+            <column name="points" type="INTEGER"><constraints nullable="false"/></column>
+        </createTable>
+        <addPrimaryKey tableName="placement_points_rows" columnNames="table_id, place" constraintName="placement_points_rows_pk"/>
+        <sql>ALTER TABLE placement_points_rows ADD CONSTRAINT placement_points_rows_place_positive CHECK (place &gt; 0)</sql>
+        <sql>ALTER TABLE placement_points_rows ADD CONSTRAINT placement_points_rows_points_nonnegative CHECK (points &gt;= 0)</sql>
+    </changeSet>
+</databaseChangeLog>
