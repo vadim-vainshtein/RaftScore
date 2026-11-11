@@ -109,3 +109,28 @@ test('uses a generic error message for plain text and empty error bodies', async
     status: 500, message: 'HTTP 500', body: undefined,
   })
 })
+
+test('requests session confirmation for ambiguous failures but not auth probes', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(null, {status: 401})))
+  const expired = vi.fn()
+  window.addEventListener('session-check', expired)
+  try {
+    await expect(createApiClient()('/api/auth/login')).rejects.toMatchObject({status: 401})
+    expect(expired).not.toHaveBeenCalled()
+    await expect(createApiClient()('/api/competitions')).rejects.toMatchObject({status: 401})
+    expect(expired).toHaveBeenCalledTimes(1)
+  } finally {
+    window.removeEventListener('session-check', expired)
+  }
+})
+
+
+test('preserves a 403 error while requesting a session check', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({code: 'access.forbidden', parameters: {}}), {status: 403})))
+  const check = vi.fn()
+  window.addEventListener('session-check', check)
+  try {
+    await expect(createApiClient()('/api/resource')).rejects.toMatchObject({status: 403, code: 'access.forbidden'})
+    expect(check).toHaveBeenCalledTimes(1)
+  } finally { window.removeEventListener('session-check', check) }
+})

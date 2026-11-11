@@ -41,7 +41,7 @@ export function createApiClient(baseUrl = '') {
     const response = await queryApi(url, init, headers)
     const body = await parseBody(response);
 
-    validateResponseOk(response, body);
+    validateResponseOk(response, body, path);
 
     return body as T
   }
@@ -79,8 +79,9 @@ export function createApiClient(baseUrl = '') {
     return body;
   }
 
-  function validateResponseOk(response: Response, body: unknown) {
+  function validateResponseOk(response: Response, body: unknown, path: string) {
     if (!response.ok) {
+      if ((response.status === 401 || response.status === 403) && !['/api/auth/login', '/api/auth/principal', '/api/auth/logout', '/api/auth/csrf'].includes(path)) window.dispatchEvent(new Event('session-check'))
       throw new ApiError(response.status, body)
     }
   }

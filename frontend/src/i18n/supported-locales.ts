@@ -1,10 +1,12 @@
 import {enUS, ruRU} from '@mui/material/locale'
 import en from './locales/en/common.json'
 import ru from './locales/ru/common.json'
+import enAuth from './locales/en/auth.json'
+import ruAuth from './locales/ru/auth.json'
 
 export const locales = {
-  en: {autonym: 'English', mui: enUS, common: en},
-  ru: {autonym: 'Русский', mui: ruRU, common: ru},
+  en: {autonym: 'English', mui: enUS, common: en, auth: enAuth},
+  ru: {autonym: 'Русский', mui: ruRU, common: ru, auth: ruAuth},
 } as const
 export type Locale = keyof typeof locales
 export const localeStorageKey = 'raftscore.language'
