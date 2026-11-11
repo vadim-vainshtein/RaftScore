@@ -5,6 +5,7 @@ import kz.vainshtein.raftscore.auth.entities.User;
 import kz.vainshtein.raftscore.auth.entities.UserRepository;
 import kz.vainshtein.raftscore.auth.models.UserRole;
 import kz.vainshtein.raftscore.auth.services.PasswordHashingService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +47,14 @@ class ReadOnlyUserAdministrationControllerIntegrationTest extends PostgreSqlInte
                 .build();
     }
 
+    @AfterEach
+    void removeTestUsers() {
+        for (var username : java.util.List.of(
+                "readonly/administration", "forbidden-user", "missing-password", "validation-readonly",
+                "byte-limit-user", "session-readonly", "full-access-administration")) {
+            userRepository.findByUsername(username).ifPresent(userRepository::delete);
+        }
+    }
     @Test
     void fullAccessUserCanCreateResetAndBlockAReadOnlyUser() throws Exception {
         var username = "readonly/administration";
