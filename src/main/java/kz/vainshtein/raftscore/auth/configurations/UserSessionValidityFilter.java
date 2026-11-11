@@ -6,6 +6,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import kz.vainshtein.raftscore.auth.entities.UserRepository;
+import kz.vainshtein.raftscore.api.DatabaseUnavailable;
+import org.springframework.http.MediaType;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -16,6 +19,7 @@ class UserSessionValidityFilter extends OncePerRequestFilter {
 
     private final UserRepository userRepository;
     private final SessionEpoch sessionEpoch;
+    private final ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(
@@ -26,10 +30,21 @@ class UserSessionValidityFilter extends OncePerRequestFilter {
         var session = request.getSession(false);
         var stale = authentication != null && authentication.isAuthenticated() && session != null
                 && sessionEpoch.isStale(session);
-        var blocked = !stale && authentication != null && authentication.isAuthenticated()
+        boolean blocked;
+        try {
+            blocked = !stale && authentication != null && authentication.isAuthenticated()
                 && userRepository.findByUsername(authentication.getName())
                 .map(user -> !user.isEnabled())
                 .orElse(false);
+        } catch (RuntimeException exception) {
+            if (!DatabaseUnavailable.isCausedBy(exception)) {
+                throw exception;
+            }
+            response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            objectMapper.writeValue(response.getWriter(), DatabaseUnavailable.error());
+            return;
+        }
         if (blocked || stale) {
             SecurityContextHolder.clearContext();
             if (session != null) {

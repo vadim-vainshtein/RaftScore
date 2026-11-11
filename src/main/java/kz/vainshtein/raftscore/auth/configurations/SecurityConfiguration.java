@@ -3,6 +3,7 @@ package kz.vainshtein.raftscore.auth.configurations;
 import kz.vainshtein.raftscore.api.ApiAccessDeniedHandler;
 import kz.vainshtein.raftscore.auth.entities.UserRepository;
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -45,7 +46,8 @@ class SecurityConfiguration {
             HttpSecurity http,
             HttpSessionSecurityContextRepository securityContextRepository,
             UserRepository userRepository,
-            SessionEpoch sessionEpoch) throws Exception {
+            SessionEpoch sessionEpoch,
+            ObjectMapper objectMapper) throws Exception {
         return http
                 .csrf(Customizer.withDefaults())
                 .logout(logout -> logout.logoutUrl("/api/auth/logout")
@@ -81,7 +83,7 @@ class SecurityConfiguration {
                         .accessDeniedHandler(accessDeniedHandler)
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .addFilterBefore(new RestoreGateFilter(), SecurityContextHolderFilter.class)
-                .addFilterAfter(new UserSessionValidityFilter(userRepository, sessionEpoch), SecurityContextHolderFilter.class)
+                .addFilterAfter(new UserSessionValidityFilter(userRepository, sessionEpoch, objectMapper), SecurityContextHolderFilter.class)
                 .build();
     }
 
