@@ -77,3 +77,11 @@ test('only displays an applied tiebreak in overall results', async () => {
   expect(await screen.findByText('Applied tiebreak discipline: Sprint')).toBeInTheDocument()
   expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.endsWith('/tiebreak'))).toBe(false)
 })
+
+test('shows a safe localized API error on results refresh', async () => {
+  const {ApiError} = await import('./api/client')
+  vi.mocked(apiRequest).mockRejectedValue(new ApiError(503, {code: 'database.unavailable', parameters: {detail: 'secret'}}))
+  render(<Results readOnly/>)
+  expect(await screen.findByRole('alert')).toHaveTextContent('The server could not complete the request.')
+  expect(screen.queryByText(/secret/)).not.toBeInTheDocument()
+})

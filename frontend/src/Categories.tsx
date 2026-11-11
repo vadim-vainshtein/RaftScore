@@ -3,21 +3,23 @@ import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Box, Button, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography} from '@mui/material'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
+import {apiErrorKey, fieldErrorKey, type FieldErrorKey} from './api/errors'
 type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean, version: number}
 type Page = {content: Template[], totalPages: number}
 type Form = {classLabel: string, scoringGroupLabel: string, crewSize: string}
 export type Draft = {form: Form, editing: Template | null, dirty: boolean}
-type Fields = Partial<Record<keyof Form, boolean>>
+type Fields = Partial<Record<keyof Form, boolean | FieldErrorKey>>
 const blank: Form = {classLabel: '', scoringGroupLabel: '', crewSize: ''}
 const endpoint = '/api/category-templates'
 const validLabel = (value: string) => !!value.trim() && !value.includes('\0')
 export default function Categories({initialDraft = null, onDraft = () => {}}: {initialDraft?: Draft | null, onDraft?: (draft: Draft | null) => void}) {
   const {t} = useTranslation('categories')
+  const {t: common} = useTranslation()
   const [page, setPage] = useState(0), [filter, setFilter] = useState('all'), [revision, setRevision] = useState(0)
   const [list, setList] = useState<{key: string, value?: Page, failed?: boolean} | null>(null)
   const [draft, setDraftState] = useState<Draft | null>(initialDraft)
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
-  const [error, setError] = useState<'invalid' | 'error' | 'conflict' | 'forbidden' | 'notFound' | 'connection' | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [fields, setFields] = useState<Fields>({})
   const [lookupRevision, setLookupRevision] = useState(0)
   const [lookup, setLookup] = useState<{key: string, exists?: boolean, failed?: boolean} | null>(null)
@@ -25,12 +27,16 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
   const setDraft = (value: Draft | null) => { setDraftState(value); onDraft(value) }
   const fail = useCallback((e: unknown) => {
     if (e instanceof ApiError && e.status === 400 && e.body && typeof e.body === 'object') {
-      const entries = (e.body as {fieldErrors?: {field: string}[]}).fieldErrors
+      const entries = (e.body as {fieldErrors?: unknown}).fieldErrors
       const next: Fields = {}
-      entries?.forEach(({field}) => { if (field === 'classLabel' || field === 'scoringGroupLabel' || field === 'crewSize') next[field] = true })
+      if (Array.isArray(entries)) entries.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return
+        const {field, code} = entry as {field?: unknown, code?: unknown}
+        if (field === 'classLabel' || field === 'scoringGroupLabel' || field === 'crewSize') next[field] = fieldErrorKey(code)
+      })
       setFields(next); setError('invalid'); return
     }
-    setError(e instanceof ApiError ? e.status === 409 ? 'conflict' : e.status === 403 || e.status === 401 ? 'forbidden' : e.status === 404 ? 'notFound' : 'error' : 'connection')
+    setError(e instanceof ApiError && e.status === 409 ? 'conflict' : `common:${apiErrorKey(e)}`)
   }, [])
   const listKey = `${page}:${filter}:${revision}`
   useEffect(() => {
@@ -94,12 +100,12 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
     <Button variant="contained" onClick={() => start()} disabled={busy}>{t('create')}</Button>
     {form && <Box component="form" onSubmit={save} noValidate sx={{display: 'grid', gap: 2, my: 2, maxWidth: 500}}>
       {dirty && <Typography>{t('dirty')}</Typography>}
-      {(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} label={t(key === 'classLabel' ? 'class' : key === 'scoringGroupLabel' ? 'group' : 'size')} value={form[key]} disabled={busy} error={!!fields[key]} helperText={fields[key] ? t(key === 'crewSize' ? 'sizeError' : 'labelError') : undefined} onChange={e => {if (draft) setDraft({...draft, form: {...form, [key]: e.target.value}, dirty: true})}} required/>)}
+      {(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} label={t(key === 'classLabel' ? 'class' : key === 'scoringGroupLabel' ? 'group' : 'size')} value={form[key]} disabled={busy} error={!!fields[key]} helperText={fields[key] ? typeof fields[key] === 'string' ? common(fields[key] as FieldErrorKey) : t(key === 'crewSize' ? 'sizeError' : 'labelError') : undefined} onChange={e => {if (draft) setDraft({...draft, form: {...form, [key]: e.target.value}, dirty: true})}} required/>)}
       <Typography>{t('preview')}: {form.classLabel} / {form.scoringGroupLabel}</Typography>
       {duplicate && <Typography role="status">{t('duplicate')}</Typography>}{lookup?.key === lookupKey && lookup.failed && <Typography role="alert">{t('lookupFailed')} <Button onClick={() => {setLookup(null); setLookupRevision(v => v + 1)}}>{t('retry')}</Button></Typography>}
       <Box><Button type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>
     </Box>}
-    {error && <Typography role="alert">{t(error)}</Typography>}
+    {error && <Typography role="alert">{error.startsWith('common:') ? common(error.slice(7) as 'apiError.network') : t(error as 'conflict')}</Typography>}
     {error === 'conflict' && <Box><Button onClick={() => void reload()} disabled={busy}>{t('reload')}</Button><Button onClick={() => {setDraft(null); setError(null); setRevision(v => v + 1)}} disabled={busy}>{t('discard')}</Button></Box>}
     <TextField select label={t('filter')} value={filter} disabled={busy} onChange={e => {setFilter(e.target.value); setPage(0); setError(null)}} sx={{my: 2, minWidth: 160}}><MenuItem value="all">{t('all')}</MenuItem><MenuItem value="false">{t('active')}</MenuItem><MenuItem value="true">{t('archived')}</MenuItem></TextField>
     {current?.value && error !== 'conflict' ? <><Box sx={{overflowX: 'auto'}}><Table><TableHead><TableRow>{(['class','group','display','size','status'] as const).map(key => <TableCell key={key}>{t(key)}</TableCell>)}<TableCell/></TableRow></TableHead><TableBody>

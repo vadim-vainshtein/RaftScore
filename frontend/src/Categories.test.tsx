@@ -65,14 +65,14 @@ test('hides stale rows during paging and clamps a page after the count shrinks',
   expect(apiRequest).toHaveBeenCalledWith('/api/category-templates?page=0&size=20')
 })
 test('shows server field errors next to the field and in a summary', async () => {
-  vi.mocked(csrfRequest).mockRejectedValueOnce(new ApiError(400, {fieldErrors: [{field: 'crewSize'}]}))
+  vi.mocked(csrfRequest).mockRejectedValueOnce(new ApiError(400, {fieldErrors: [{field: 'crewSize', code: 'validation.required'}]}))
   render(<Categories/>); await screen.findByText('R4 / Open')
   fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
   await waitFor(() => expect(screen.getByRole('button', {name: 'Save'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await screen.findByRole('alert')
   expect(screen.getByLabelText(/Crew size/)).toHaveAttribute('aria-invalid', 'true')
-  expect(screen.getByText('Enter a whole number from 1 to 2147483647.')).toBeInTheDocument()
+  expect(screen.getByText('This field is required.')).toBeInTheDocument()
 })
 test('disables unrelated row mutations while a draft is open', async () => {
   const other = {...item, id: 2, classLabel: 'R6', displayName: 'R6 / Open'}
@@ -96,4 +96,13 @@ test('validates invalid labels without issuing a duplicate lookup', async () => 
   expect(screen.getByText('Enter a valid nonblank label.')).toBeInTheDocument()
   expect(vi.mocked(apiRequest).mock.calls.some(([path]) => path.includes('/duplicate?'))).toBe(false)
   expect(csrfRequest).not.toHaveBeenCalled()
+})
+
+test.each([null, {}, [null, 42, {field: 'crewSize', code: 'validation.required'}]])('handles malformed field errors safely', async fieldErrors => {
+  vi.mocked(csrfRequest).mockRejectedValueOnce(new ApiError(400, {fieldErrors}))
+  render(<Categories/>); await screen.findByText('R4 / Open')
+  fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
+  await waitFor(() => expect(screen.getByRole('button', {name: 'Save'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByRole('alert')).toBeInTheDocument()
 })

@@ -239,5 +239,21 @@
     "showFilters": "Show filters",
     "fullscreen": "Toggle fullscreen",
     "appliedTiebreak": "Applied tiebreak discipline"
+  },
+  "apiError": {
+    "network": "Connection failed. Please try again.",
+    "validation": "Check the entered values.",
+    "access": "Access denied.",
+    "notFound": "The requested item was not found.",
+    "conflict": "The data changed. Refresh and try again.",
+    "server": "The server could not complete the request. Please try again.",
+    "generic": "Could not complete the request. Please try again.",
+    "required": "This field is required.",
+    "invalidField": "Enter a valid value.",
+    "duplicate": "This category already exists.",
+    "participantDuplicate": "This participant is already in a crew in this category.",
+    "startNumberDuplicate": "This start number is already in use.",
+    "invalidRoster": "Check the crew roster.",
+    "invalidRequirements": "Check the entry requirements."
   }
 }
