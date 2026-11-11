@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+ <changeSet id="0068-start-lists" author="raftscore">
+  <createTable tableName="start_lists">
+   <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+   <column name="discipline_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="category_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+  </createTable>
+  <addUniqueConstraint tableName="start_lists" columnNames="discipline_id, category_id" constraintName="start_lists_selection_uk"/>
+  <addUniqueConstraint tableName="start_lists" columnNames="id, category_id" constraintName="start_lists_id_category_uk"/>
+  <addForeignKeyConstraint baseTableName="start_lists" baseColumnNames="discipline_id, category_id" referencedTableName="discipline_categories" referencedColumnNames="discipline_id, category_id" constraintName="start_lists_selection_fk"/>
+  <createTable tableName="start_slots">
+   <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+   <column name="start_list_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="category_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="crew_entry_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="position" type="INTEGER"><constraints nullable="false"/></column>
+   <column name="planned_time" type="TIMESTAMP WITH TIME ZONE"/>
+   <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+  </createTable>
+  <addForeignKeyConstraint baseTableName="start_slots" baseColumnNames="start_list_id, category_id" referencedTableName="start_lists" referencedColumnNames="id, category_id" constraintName="start_slots_list_category_fk"/>
+  <addForeignKeyConstraint baseTableName="start_slots" baseColumnNames="crew_entry_id, category_id" referencedTableName="crew_entries" referencedColumnNames="id, competition_category_id" constraintName="start_slots_crew_category_fk"/>
+  <addUniqueConstraint tableName="start_slots" columnNames="start_list_id, position" constraintName="start_slots_position_uk"/>
+  <addUniqueConstraint tableName="start_slots" columnNames="start_list_id, crew_entry_id" constraintName="start_slots_crew_uk"/>
+  <sql>ALTER TABLE start_slots ADD CONSTRAINT start_slots_position_positive CHECK (position &gt; 0)</sql>
+  <rollback><dropTable tableName="start_slots"/><dropTable tableName="start_lists"/></rollback>
+ </changeSet>
+</databaseChangeLog>
