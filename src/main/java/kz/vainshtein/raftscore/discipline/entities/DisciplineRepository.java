@@ -4,4 +4,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 /** Storage access for disciplines. */
 public interface DisciplineRepository extends JpaRepository<Discipline, Long> {
+    java.util.List<Discipline> findByCompetitionIdAndTypeOrderByDisplayOrderAscIdAsc(Long competitionId, DisciplineType type);
 }
