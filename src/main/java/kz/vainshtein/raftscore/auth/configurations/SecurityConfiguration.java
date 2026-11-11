@@ -47,6 +47,8 @@ class SecurityConfiguration {
             UserRepository userRepository) throws Exception {
         return http
                 .csrf(Customizer.withDefaults())
+                .logout(logout -> logout.logoutUrl("/api/auth/logout")
+                        .logoutSuccessHandler((request, response, authentication) -> response.setStatus(HttpStatus.NO_CONTENT.value())))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(requests -> requests

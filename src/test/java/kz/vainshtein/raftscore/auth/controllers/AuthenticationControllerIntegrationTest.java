@@ -48,6 +48,26 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
     }
 
     @Test
+    void logoutRequiresCsrfAndInvalidatesTheAuthenticatedSession() throws Exception {
+        var csrf = csrf();
+        var login = mockMvc.perform(post("/api/auth/login")
+                        .session(csrf.session()).header(csrf.headerName(), csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"admin\",\"password\":\"integration-test-initial-password\"}"))
+                .andExpect(status().isNoContent()).andReturn();
+        var session = (MockHttpSession) login.getRequest().getSession(false);
+        mockMvc.perform(post("/api/auth/logout").session(session)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/auth/principal").session(session)).andExpect(status().isOk());
+        var token = mockMvc.perform(get("/api/auth/csrf").session(session)).andReturn();
+        var body = token.getResponse().getContentAsString();
+        mockMvc.perform(post("/api/auth/logout").session(session)
+                        .header((String) JsonPath.read(body, "$.headerName"), (String) JsonPath.read(body, "$.token")))
+                .andExpect(status().isNoContent());
+        org.assertj.core.api.Assertions.assertThat(session.isInvalid()).isTrue();
+        mockMvc.perform(get("/api/auth/principal")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void authenticatesFormLoginIntoAServerSessionThatExposesThePrincipal() throws Exception {
         var csrf = csrf();
         var login = mockMvc.perform(post("/api/auth/login")
