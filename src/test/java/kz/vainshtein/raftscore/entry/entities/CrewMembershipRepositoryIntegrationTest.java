@@ -68,6 +68,44 @@ class CrewMembershipRepositoryIntegrationTest extends PostgreSqlIntegrationTest 
         assertDuplicate(false);
     }
 
+    @Test
+    void participantCannotJoinTwoCrewsInSameCategory() {
+        transactions.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            var firstCrew = createCrew();
+            var secondCrew = createCrew(firstCrew.getCompetitionCategory(), 2);
+            var person = participants.saveAndFlush(Participant.builder().surname("Smith").givenName("Alex").build());
+            memberships.saveAndFlush(CrewMembership.builder().crewEntry(firstCrew).participant(person).position(1).build());
+            assertThatThrownBy(() -> memberships.saveAndFlush(CrewMembership.builder().crewEntry(secondCrew).participant(person).position(1).build()))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        });
+    }
+
+    @Test
+    @Transactional
+    void participantCanJoinCrewsInDifferentCategories() {
+        var firstCrew = createCrew();
+        var otherCategory = categories.saveAndFlush(CompetitionCategory.builder()
+                .competition(firstCrew.getCompetitionCategory().getCompetition())
+                .classLabel("R6").scoringGroupLabel("Open").crewSize(6).build());
+        var secondCrew = createCrew(otherCategory, 1);
+        var person = participants.saveAndFlush(Participant.builder().surname("Smith").givenName("Alex").build());
+        memberships.saveAndFlush(CrewMembership.builder().crewEntry(firstCrew).participant(person).position(1).build());
+        memberships.saveAndFlush(CrewMembership.builder().crewEntry(secondCrew).participant(person).position(1).build());
+    }
+
+    @Test
+    void databaseRejectsSpoofedCategory() {
+        transactions.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            var crew = createCrew();
+            var otherCrew = createCrew();
+            var person = participants.saveAndFlush(Participant.builder().surname("Smith").givenName("Alex").build());
+            assertThatThrownBy(() -> jdbc.update("INSERT INTO crew_memberships (crew_entry_id, competition_category_id, participant_id, position) VALUES (?, ?, ?, ?)",
+                    crew.getId(), otherCrew.getCompetitionCategory().getId(), person.getId(), 1))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        });
+    }
     private void assertInvalid(Long crewId, Long participantId, int position) {
         transactions.executeWithoutResult(status -> {
             status.setRollbackOnly();
@@ -88,7 +126,7 @@ class CrewMembershipRepositoryIntegrationTest extends PostgreSqlIntegrationTest 
     }
 
     private void insert(Long crewId, Long participantId, int position) {
-        jdbc.update("INSERT INTO crew_memberships (crew_entry_id, participant_id, position) VALUES (?, ?, ?)", crewId, participantId, position);
+        jdbc.update("INSERT INTO crew_memberships (crew_entry_id, competition_category_id, participant_id, position) VALUES (?, (SELECT competition_category_id FROM crew_entries WHERE id = ?), ?, ?)", crewId, crewId, participantId, position);
     }
 
     private CrewEntry createCrew() {
@@ -96,7 +134,11 @@ class CrewMembershipRepositoryIntegrationTest extends PostgreSqlIntegrationTest 
                 .location("River").timeZone("Europe/London").build());
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
                 .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        return createCrew(category, 1);
+    }
+
+    private CrewEntry createCrew(CompetitionCategory category, int startNumber) {
         return crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Rapids")
-                .regionOrClub("Club").representative("Coach").startNumber(1).build());
+                .regionOrClub("Club").representative("Coach").startNumber(startNumber).build());
     }
 }
