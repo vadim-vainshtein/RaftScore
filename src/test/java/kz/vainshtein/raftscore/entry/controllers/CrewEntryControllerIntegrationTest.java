@@ -75,6 +75,42 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         }
     }
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void duplicateStartNumbersConflictWithinCategoryAndPreserveEntries() throws Exception {
+        var secondCategory = categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
+                .classLabel("R6").scoringGroupLabel("Open").crewSize(6).build());
+        try {
+            var first = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isCreated()).andReturn().getResponse();
+            Number firstId = JsonPath.read(first.getContentAsString(), "$.id");
+            var second = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                            .content(createBody().replace("\"startNumber\":1", "\"startNumber\":2")))
+                    .andExpect(status().isCreated()).andReturn().getResponse();
+            Number secondId = JsonPath.read(second.getContentAsString(), "$.id");
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.start_number_duplicate"));
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                            .content(createBody().replace("\"categoryId\":" + category.getId(), "\"categoryId\":" + secondCategory.getId())))
+                    .andExpect(status().isCreated());
+            var duplicate = updateBody("0").replace("\"startNumber\":2", "\"startNumber\":1");
+            mvc.perform(put(url + "/" + secondId).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(duplicate))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.start_number_duplicate"));
+            mvc.perform(put(url + "/" + secondId).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(duplicate.replace("\"version\":0", "\"version\":9")))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("conflict.optimistic_lock"));
+            assertThat(entries.findById(firstId.longValue()).orElseThrow().getStartNumber()).isOne();
+            var unchanged = entries.findById(secondId.longValue()).orElseThrow();
+            assertThat(unchanged.getStartNumber()).isEqualTo(2);
+            assertThat(unchanged.getCrewName()).isEqualTo("Crew");
+            assertThat(unchanged.getVersion()).isZero();
+        } finally {
+            jdbc.update("delete from crew_entries where competition_category_id in (?, ?)", category.getId(), secondCategory.getId());
+            categories.deleteById(secondCategory.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+    @Test
     void validatesAndEnforcesSecurity() throws Exception {
         mvc.perform(post(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isForbidden());
         mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isForbidden());

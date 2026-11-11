@@ -68,6 +68,19 @@ class CrewEntryRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
     }
 
     @Test
+    void databaseEnforcesStartNumberUniquenessPerCategory() {
+        transactions.executeWithoutResult(status -> {
+            status.setRollbackOnly();
+            var first = createCategory();
+            var second = createCategory();
+            insert(first.getId(), 42);
+            insert(second.getId(), 42);
+            assertThatThrownBy(() -> insert(first.getId(), 42))
+                    .isInstanceOf(DataIntegrityViolationException.class)
+                    .hasStackTraceContaining("crew_entries_category_start_number_uk");
+        });
+    }
+    @Test
     void rejectsInvalidDetailsBeforeChangingAnEntry() {
         var entry = CrewEntry.builder().competitionCategory(CompetitionCategory.builder()
                 .competition(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1))
