@@ -57,7 +57,9 @@ class AttemptGridIntegrationTest extends PostgreSqlIntegrationTest {
             var version = attempt.getVersion();
             var update = "{\"version\":" + version + ",\"durationCentiseconds\":100,\"penaltyCentiseconds\":0,\"status\":\"FINISHED\",\"gates\":[{\"number\":1,\"penaltySeconds\":5}]}";
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(version + 1));
-            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isConflict());
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isOk()).andExpect(jsonPath("$.version").value(version + 1));
+            var staleChange = update.replace("\"penaltySeconds\":5", "\"penaltySeconds\":50");
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(staleChange)).andExpect(status().isConflict());
             var grid = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline.getId() + "/categories/" + category.getId() + "/attempt-grid";
             mvc.perform(get(grid).with(auth)).andExpect(status().isOk())
                     .andExpect(jsonPath("$.attempts[0].crewId").value(crew.getId()))
