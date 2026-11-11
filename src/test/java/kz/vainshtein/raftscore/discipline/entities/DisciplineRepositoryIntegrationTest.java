@@ -1,9 +1,12 @@
 package kz.vainshtein.raftscore.discipline.entities;
 
 import java.time.LocalDate;
+import java.util.List;
 
 import jakarta.persistence.EntityManager;
 import kz.vainshtein.raftscore.competition.entities.Competition;
+import kz.vainshtein.raftscore.competition.entities.CompetitionCategory;
+import kz.vainshtein.raftscore.competition.entities.CompetitionCategoryRepository;
 import kz.vainshtein.raftscore.competition.entities.CompetitionRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DisciplineRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired private DisciplineRepository disciplines;
     @Autowired private CompetitionRepository competitions;
+    @Autowired private CompetitionCategoryRepository categories;
     @Autowired private EntityManager entityManager;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private TransactionTemplate transactions;
@@ -54,6 +58,48 @@ class DisciplineRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
                 .contains(DisciplineType.values());
     }
 
+    @Test
+    @Transactional
+    void replacesCategorySelectionAndKeepsDisciplinesIsolated() {
+        var owner = competition();
+        var first = category(owner, "First");
+        var second = category(owner, "Second");
+        var foreign = category(competition(), "Foreign");
+        var discipline = disciplines.saveAndFlush(Discipline.builder().competition(owner).name("Sprint")
+                .type(DisciplineType.SPRINT).build());
+        var other = disciplines.saveAndFlush(Discipline.builder().competition(owner).name("Slalom")
+                .type(DisciplineType.SLALOM).build());
+        discipline.replaceCategories(List.of(first, second));
+        other.replaceCategories(List.of(first));
+        entityManager.flush();
+        var version = discipline.getVersion();
+        entityManager.clear();
+
+        var loaded = disciplines.findById(discipline.getId()).orElseThrow();
+        assertThat(loaded.getCategories()).extracting(CompetitionCategory::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+        assertThatThrownBy(() -> loaded.replaceCategories(List.of(second, foreign)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(loaded.getCategories()).extracting(CompetitionCategory::getId)
+                .containsExactlyInAnyOrder(first.getId(), second.getId());
+        loaded.replaceCategories(List.of(second));
+        entityManager.flush();
+        entityManager.clear();
+        var reloaded = disciplines.findById(discipline.getId()).orElseThrow();
+        assertThat(reloaded.getVersion()).isGreaterThan(version);
+        assertThat(reloaded.getCategories()).extracting(CompetitionCategory::getId).containsExactly(second.getId());
+        assertThat(disciplines.findById(other.getId()).orElseThrow().getCategories())
+                .extracting(CompetitionCategory::getId).containsExactly(first.getId());
+        reloaded.replaceCategories(List.of());
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(disciplines.findById(discipline.getId()).orElseThrow().getCategories()).isEmpty();
+    }
+
+    private CompetitionCategory category(Competition owner, String label) {
+        return categories.saveAndFlush(CompetitionCategory.builder().competition(owner).classLabel(label)
+                .scoringGroupLabel("Open").crewSize(4).build());
+    }
     @Test
     void rejectsInvalidValuesInEntityAndDatabase() {
         assertThatThrownBy(() -> Discipline.builder().competition(newCompetition()).name(" ")
