@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0096-overall-tiebreak" author="raftscore">
+        <addColumn tableName="competitions"><column name="tiebreak_discipline_id" type="BIGINT"/></addColumn>
+        <addUniqueConstraint tableName="disciplines" columnNames="id, competition_id" constraintName="disciplines_id_competition_unique"/>
+        <addForeignKeyConstraint baseTableName="competitions" baseColumnNames="tiebreak_discipline_id, id" referencedTableName="disciplines" referencedColumnNames="id, competition_id" constraintName="competition_tiebreak_discipline_fk"/>
+    </changeSet>
+</databaseChangeLog>

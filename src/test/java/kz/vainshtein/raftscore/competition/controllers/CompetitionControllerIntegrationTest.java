@@ -60,6 +60,34 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
         assertThat(repository.findById(id.longValue()).orElseThrow().getTitle()).isEqualTo("Winner");
     }
 
+    @Test void configuresTiebreakWithCompetitionVersionAndOwnership() throws Exception {
+        var created = mvc.perform(post("/api/competitions").with(full()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
+                .andExpect(status().isCreated()).andReturn();
+        Number id = JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        var other = mvc.perform(post("/api/competitions").with(full()).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
+                .andExpect(status().isCreated()).andReturn();
+        Number otherId = JsonPath.read(other.getResponse().getContentAsString(), "$.id");
+        var disciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order) values (?, 'Slalom', 'SLALOM', 0) returning id", Long.class, id.longValue());
+        var otherDisciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order) values (?, 'Other', 'SLALOM', 0) returning id", Long.class, otherId.longValue());
+        var url = "/api/competitions/" + id + "/tiebreak";
+        mvc.perform(get(url).with(user("reader").roles("READ_ONLY"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(0));
+        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"disciplineId\":1.5,\"version\":0}")).andExpect(status().isBadRequest());
+        var body = "{\"disciplineId\":" + disciplineId + ",\"version\":0}";
+        mvc.perform(put(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"disciplineId\":" + otherDisciplineId + ",\"version\":0}")).andExpect(status().isBadRequest());
+        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.disciplineId").value(disciplineId)).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isConflict());
+        mvc.perform(get(url).with(user("reader").roles("READ_ONLY"))).andExpect(status().isOk()).andExpect(jsonPath("$.disciplineId").value(disciplineId));
+        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"disciplineId\":null,\"version\":1}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+    }
+
     @Test void rejectsInvalidAndMissingDetails() throws Exception {
         for (var body : new String[]{"{}", "{" + BODY.replace("Asia/Almaty", "Invalid/Zone") + "}",
                 "{" + BODY + ",\"endDate\":\"2026-04-30\"}", "{" + BODY.replace("Race", "\\u0000") + "}"}) {

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class OverallStandingsService {
     private final CalculatedDisciplineResultRepository results;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionCategoryRepository categories;
 
     public record DisciplineResult(long disciplineId, String disciplineName, Integer place,
                                    CalculatedResultStatus status, int points) { }
@@ -39,19 +40,43 @@ public class OverallStandingsService {
             standings.add(new Standing(crew.getId(), crew.getCrewName(), crew.getRegionOrClub(), crew.getStartNumber(),
                     null, total, disqualified, breakdown));
         }
+        var category = categories.findById(categoryId).orElseThrow();
+        var selected = category.getCompetition().getTiebreakDiscipline();
+        Long selectedId = selected == null ? null : selected.getId();
         standings.sort(Comparator.comparing(Standing::disqualified).thenComparing(Standing::totalPoints, Comparator.reverseOrder())
                 .thenComparing(Standing::crewId));
         var ranked = new ArrayList<Standing>();
-        long previousPoints = -1;
-        int place = 0;
-        for (var standing : standings) {
-            if (!standing.disqualified()) {
-                if (standing.totalPoints() != previousPoints) place = ranked.size() + 1;
-                previousPoints = standing.totalPoints();
+        for (int first = 0; first < standings.size();) {
+            int end = first + 1;
+            var leader = standings.get(first);
+            while (end < standings.size() && standings.get(end).disqualified() == leader.disqualified()
+                    && standings.get(end).totalPoints() == leader.totalPoints()) end++;
+            var group = new ArrayList<>(standings.subList(first, end));
+            boolean resolve = !leader.disqualified() && selectedId != null
+                    && group.stream().allMatch(standing -> tiebreakPlace(standing, selectedId) != null);
+            if (resolve) {
+                group.sort(Comparator.comparing((Standing standing) -> tiebreakPlace(standing, selectedId))
+                        .thenComparing(Standing::crewId));
             }
-            ranked.add(new Standing(standing.crewId(), standing.crewName(), standing.regionOrClub(), standing.startNumber(),
-                    standing.disqualified() ? null : place, standing.totalPoints(), standing.disqualified(), standing.disciplines()));
+            Integer previous = null;
+            int place = first + 1;
+            for (int index = 0; index < group.size(); index++) {
+                var standing = group.get(index);
+                var current = resolve ? tiebreakPlace(standing, selectedId) : null;
+                if (resolve && index > 0 && !current.equals(previous)) place = first + index + 1;
+                previous = current;
+                ranked.add(new Standing(standing.crewId(), standing.crewName(), standing.regionOrClub(), standing.startNumber(),
+                        standing.disqualified() ? null : place, standing.totalPoints(), standing.disqualified(), standing.disciplines()));
+            }
+            first = end;
         }
         return List.copyOf(ranked);
+    }
+
+    private Integer tiebreakPlace(Standing standing, Long disciplineId) {
+        return standing.disciplines().stream()
+                .filter(result -> result.disciplineId() == disciplineId && result.status() == CalculatedResultStatus.FINISHED)
+                .map(DisciplineResult::place).filter(java.util.Objects::nonNull).filter(place -> place > 0)
+                .findFirst().orElse(null);
     }
 }

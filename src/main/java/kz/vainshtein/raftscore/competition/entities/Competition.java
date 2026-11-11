@@ -9,6 +9,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import kz.vainshtein.raftscore.discipline.entities.Discipline;
 import jakarta.persistence.Table;
 import kz.vainshtein.raftscore.persistence.VersionedEntity;
 import lombok.AccessLevel;
@@ -47,6 +51,18 @@ public class Competition extends VersionedEntity {
 
     @Column(name = "admission_confirmation_required", nullable = false)
     private boolean admissionConfirmationRequired;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "tiebreak_discipline_id")
+    private Discipline tiebreakDiscipline;
+
+    public void setTiebreakDiscipline(Discipline discipline) {
+        if (discipline != null && discipline.getCompetition() != this
+                && (id == null || !id.equals(discipline.getCompetition().getId()))) {
+            throw new IllegalArgumentException("Tiebreak discipline must belong to the competition");
+        }
+        this.tiebreakDiscipline = discipline;
+    }
 
     @Builder
     private Competition(String title, LocalDate startDate, LocalDate endDate, String location,
