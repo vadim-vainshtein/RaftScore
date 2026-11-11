@@ -1,0 +1,6 @@
+{
+  "app": {"name":"RaftScore", "navigation":"Main navigation", "openNavigation":"Open navigation", "menu":"Menu", "language":"Language"},
+  "navigation": {"competitions":"Competitions", "categories":"Category directory", "users":"Users", "backups":"Backups"},
+  "placeholder": {"unavailable":"This section is not available yet.", "notFound":"Page not found", "notFoundDescription":"The requested page could not be found."},
+  "format": {"items_one":"{{count}} item", "items_other":"{{count}} items"}
+}

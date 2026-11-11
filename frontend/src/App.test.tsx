@@ -1,6 +1,8 @@
 import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import App from './App'
+import i18n from './i18n'
+import {initialLocale} from './i18n/supported-locales'
 
 let desktop = false
 let listeners: Set<(event: MediaQueryListEvent) => void>
@@ -66,4 +68,22 @@ test('closes the mobile drawer when entering desktop and keeps it closed on retu
     listeners.forEach(listener => listener({matches: false} as MediaQueryListEvent))
   })
   expect(screen.queryByRole('dialog', {name: 'Main navigation'})).not.toBeInTheDocument()
+})
+
+test('switches language without navigation and persists the choice', async () => {
+  localStorage.setItem('raftscore.language', 'ru')
+  window.history.replaceState({marker: 42}, '', '/?lang=en&other=value#/users')
+  expect(initialLocale()).toBe('en')
+  await i18n.changeLanguage(initialLocale())
+  render(<App/>)
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Language'}))
+  fireEvent.click(screen.getByRole('option', {name: 'Русский'}))
+  expect(await screen.findByRole('heading', {name: 'Пользователи'})).toBeInTheDocument()
+  expect(document.documentElement.lang).toBe('ru')
+  expect(localStorage.getItem('raftscore.language')).toBe('ru')
+  expect(window.location.hash).toBe('#/users')
+  expect(window.location.search).toBe('?lang=ru&other=value')
+  expect(window.history.state).toEqual({marker: 42})
+  expect(initialLocale()).toBe('ru')
+  await i18n.changeLanguage('en')
 })
