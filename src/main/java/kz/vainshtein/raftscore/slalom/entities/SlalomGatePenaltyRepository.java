@@ -1,5 +1,6 @@
 package kz.vainshtein.raftscore.slalom.entities;
 
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface SlalomGatePenaltyRepository extends JpaRepository<SlalomGatePenalty, Long> { }
+public interface SlalomGatePenaltyRepository extends JpaRepository<SlalomGatePenalty, Long> { List<SlalomGatePenalty> findByConfigurationIdAndAttemptCrewEntryCompetitionCategoryId(Long configurationId, Long categoryId); }

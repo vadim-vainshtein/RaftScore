@@ -7,6 +7,8 @@ import kz.vainshtein.raftscore.competition.entities.*;
 import kz.vainshtein.raftscore.discipline.entities.*;
 import kz.vainshtein.raftscore.entry.entities.*;
 import kz.vainshtein.raftscore.timing.entities.*;
+import kz.vainshtein.raftscore.startlist.entities.*;
+import kz.vainshtein.raftscore.scoring.SlalomRankingService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -26,6 +28,9 @@ class SlalomConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired AttemptResultRepository attempts;
     @Autowired SlalomConfigurationRepository configurations;
     @Autowired SlalomGatePenaltyRepository penalties;
+    @Autowired StartListRepository startLists;
+    @Autowired StartSlotRepository startSlots;
+    @Autowired SlalomRankingService ranking;
     @Autowired EntityManager em;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactions;
@@ -109,6 +114,25 @@ class SlalomConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
         });
     }
 
+    @Test @Transactional
+    void ranksPersistedInputsAfterClearingPersistenceContext() {
+        var fixture = fixture();
+        var discipline = fixture.discipline();
+        var crew = fixture.attempt().getCrewEntry();
+        var list = startLists.saveAndFlush(StartList.builder().discipline(discipline).category(crew.getCompetitionCategory()).build());
+        startSlots.saveAndFlush(StartSlot.builder().startList(list).crew(crew).position(1).build());
+        var config = configurations.saveAndFlush(new SlalomConfiguration(discipline, 1));
+        var attempt = attempts.saveAndFlush(AttemptResult.builder().discipline(discipline).crewEntry(crew).attemptNumber(1)
+                .durationCentiseconds(1000).status(AttemptResultStatus.FINISHED).build());
+        penalties.saveAndFlush(new SlalomGatePenalty(attempt, config, 1, 5));
+        var listId = list.getId();
+        em.flush();
+        em.clear();
+        var result = ranking.rank(listId);
+        assertThat(result).hasSize(1);
+        assertThat(result.getFirst().totalCentiseconds()).isEqualTo(1500L);
+        assertThat(result.getFirst().place()).isEqualTo(1);
+    }
     private Fixture fixture() {
         var competition = competitions.saveAndFlush(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
