@@ -4,6 +4,8 @@ import com.jayway.jsonpath.JsonPath;
 import kz.vainshtein.raftscore.catalog.entities.CategoryTemplateRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -82,6 +84,33 @@ class CategoryTemplateControllerIntegrationTest extends PostgreSqlIntegrationTes
         mvc.perform(get("/api/category-templates/{id}", entity.getId()).with(reader)).andExpect(status().isForbidden());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1", "2.5"})
+    void rejectsInvalidCrewSizesOnCreateAndEdit(String crewSize) throws Exception {
+        var existing = repository.saveAndFlush(kz.vainshtein.raftscore.catalog.entities.CategoryTemplate.builder()
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var principal = user("admin").roles("FULL_ACCESS");
+        var create = "{\"classLabel\":\"R6\",\"scoringGroupLabel\":\"Women\",\"crewSize\":" + crewSize + "}";
+        var edit = "{\"classLabel\":\"R6\",\"scoringGroupLabel\":\"Women\",\"crewSize\":" + crewSize + ",\"version\":0}";
+
+        mvc.perform(post("/api/category-templates").with(principal).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(create))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("request.validation_failed"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("crewSize"));
+        mvc.perform(put("/api/category-templates/{id}", existing.getId()).with(principal).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(edit))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("request.validation_failed"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("crewSize"));
+
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(repository.findById(existing.getId())).hasValueSatisfying(found -> {
+            assertThat(found.getClassLabel()).isEqualTo("R4");
+            assertThat(found.getScoringGroupLabel()).isEqualTo("Open");
+            assertThat(found.getCrewSize()).isEqualTo(4);
+            assertThat(found.getVersion()).isZero();
+        });
+    }
+
     @Test
     void rejectsFractionalVersionsAndMalformedParameters() throws Exception {
         var principal = user("admin").roles("FULL_ACCESS");
@@ -132,9 +161,6 @@ class CategoryTemplateControllerIntegrationTest extends PostgreSqlIntegrationTes
                 .contentType(MediaType.APPLICATION_JSON).content("{\"classLabel\":\" \",\"scoringGroupLabel\":\"Open\",\"crewSize\":0}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("request.validation_failed"));
         mvc.perform(get("/api/category-templates?size=101").with(user("admin").roles("FULL_ACCESS")))
-                .andExpect(status().isBadRequest());
-        mvc.perform(post("/api/category-templates").with(user("admin").roles("FULL_ACCESS")).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":2.5}"))
                 .andExpect(status().isBadRequest());
         mvc.perform(put("/api/category-templates/999999").with(user("admin").roles("FULL_ACCESS")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":4,\"version\":0}"))

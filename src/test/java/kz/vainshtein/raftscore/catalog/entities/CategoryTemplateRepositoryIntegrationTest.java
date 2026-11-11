@@ -2,6 +2,8 @@ package kz.vainshtein.raftscore.catalog.entities;
 
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -34,10 +36,12 @@ class CategoryTemplateRepositoryIntegrationTest extends PostgreSqlIntegrationTes
         });
     }
 
-    @Test
-    void databaseRejectsNonPositiveCrewSize() {
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1})
+    @Transactional
+    void databaseRejectsNonPositiveCrewSize(int crewSize) {
         assertThatThrownBy(() -> jdbcTemplate.update(
                 "INSERT INTO category_templates (class_label, scoring_group_label, crew_size, archived) VALUES (?, ?, ?, ?)",
-                "R4", "Men Open", 0, false)).isInstanceOf(DataIntegrityViolationException.class);
+                "R4", "Men Open", crewSize, false)).isInstanceOf(DataIntegrityViolationException.class);
     }
 }
