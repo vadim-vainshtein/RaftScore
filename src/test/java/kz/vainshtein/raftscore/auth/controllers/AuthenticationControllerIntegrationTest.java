@@ -40,6 +40,16 @@ class AuthenticationControllerIntegrationTest extends PostgreSqlIntegrationTest 
 
     private MockMvc mockMvc;
 
+    @Test
+    void backupsRequireFullAccessForReadsAndWrites() throws Exception {
+        var reader = SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY");
+        mockMvc.perform(get("/api/backups").with(reader)).andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head("/api/backups").with(reader)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/backups/00000000-0000-0000-0000-000000000000/download").with(reader)).andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head("/api/backups/00000000-0000-0000-0000-000000000000/download").with(reader)).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/backups").with(reader).with(SecurityMockMvcRequestPostProcessors.csrf())).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/backups").with(SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk());
+    }
     @BeforeEach
     void setUpMockMvc() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext)

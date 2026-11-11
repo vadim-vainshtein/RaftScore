@@ -63,6 +63,8 @@ class SecurityConfiguration {
                         .permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/auth/password")
                         .access(AuthorizationPolicies.authenticated())
+                        .requestMatchers("/api/backups", "/api/backups/**")
+                        .access(AuthorizationPolicies.fullAccess())
                         .requestMatchers("/api/category-templates", "/api/category-templates/**")
                         .access(AuthorizationPolicies.fullAccess())
                         .requestMatchers("/api/competitions/*/entries/*")
