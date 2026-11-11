@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+ <changeSet id="0077-parallel-sprint-brackets" author="raftscore">
+  <createTable tableName="parallel_sprint_brackets">
+   <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+   <column name="discipline_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="category_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+  </createTable>
+  <addUniqueConstraint tableName="parallel_sprint_brackets" columnNames="discipline_id, category_id" constraintName="ps_bracket_selection_uk"/>
+  <addUniqueConstraint tableName="parallel_sprint_brackets" columnNames="id, category_id" constraintName="ps_bracket_id_category_uk"/>
+  <addForeignKeyConstraint baseTableName="parallel_sprint_brackets" baseColumnNames="discipline_id, category_id" referencedTableName="discipline_categories" referencedColumnNames="discipline_id, category_id" constraintName="ps_bracket_selection_fk"/>
+  <createTable tableName="parallel_sprint_heats">
+   <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+   <column name="bracket_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="category_id" type="BIGINT"><constraints nullable="false"/></column>
+   <column name="round_number" type="INTEGER"><constraints nullable="false"/></column>
+   <column name="heat_number" type="INTEGER"><constraints nullable="false"/></column>
+   <column name="crew_1_id" type="BIGINT"/><column name="crew_2_id" type="BIGINT"/>
+   <column name="time_1_centiseconds" type="INTEGER"/><column name="time_2_centiseconds" type="INTEGER"/>
+   <column name="status_1" type="TEXT"/><column name="status_2" type="TEXT"/>
+   <column name="next_heat_id" type="BIGINT"/><column name="next_slot" type="INTEGER"/><column name="winner_slot" type="INTEGER"/>
+   <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+  </createTable>
+  <addUniqueConstraint tableName="parallel_sprint_heats" columnNames="bracket_id, round_number, heat_number" constraintName="ps_heat_position_uk"/>
+  <addUniqueConstraint tableName="parallel_sprint_heats" columnNames="id, bracket_id" constraintName="ps_heat_id_bracket_uk"/>
+  <addUniqueConstraint tableName="parallel_sprint_heats" columnNames="next_heat_id, next_slot" constraintName="ps_heat_destination_uk"/>
+  <addForeignKeyConstraint baseTableName="parallel_sprint_heats" baseColumnNames="bracket_id, category_id" referencedTableName="parallel_sprint_brackets" referencedColumnNames="id, category_id" constraintName="ps_heat_bracket_fk"/>
+  <addForeignKeyConstraint baseTableName="parallel_sprint_heats" baseColumnNames="crew_1_id, category_id" referencedTableName="crew_entries" referencedColumnNames="id, competition_category_id" constraintName="ps_heat_crew1_fk"/>
+  <addForeignKeyConstraint baseTableName="parallel_sprint_heats" baseColumnNames="crew_2_id, category_id" referencedTableName="crew_entries" referencedColumnNames="id, competition_category_id" constraintName="ps_heat_crew2_fk"/>
+  <addForeignKeyConstraint baseTableName="parallel_sprint_heats" baseColumnNames="next_heat_id, bracket_id" referencedTableName="parallel_sprint_heats" referencedColumnNames="id, bracket_id" constraintName="ps_heat_next_fk"/>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_numbers_positive CHECK (round_number &gt; 0 AND heat_number &gt; 0)</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_distinct_crews CHECK (crew_1_id IS NULL OR crew_2_id IS NULL OR crew_1_id &lt;&gt; crew_2_id)</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_times_nonnegative CHECK ((time_1_centiseconds IS NULL OR time_1_centiseconds &gt;= 0) AND (time_2_centiseconds IS NULL OR time_2_centiseconds &gt;= 0))</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_status1_valid CHECK (status_1 IN ('FINISHED', 'DNS', 'DNF', 'DSQ_ATTEMPT', 'DSQ_DISCIPLINE', 'DSQ_COMPETITION'))</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_status2_valid CHECK (status_2 IN ('FINISHED', 'DNS', 'DNF', 'DSQ_ATTEMPT', 'DSQ_DISCIPLINE', 'DSQ_COMPETITION'))</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_winner_valid CHECK (winner_slot IS NULL OR (winner_slot = 1 AND crew_1_id IS NOT NULL) OR (winner_slot = 2 AND crew_2_id IS NOT NULL))</sql>
+  <sql>ALTER TABLE parallel_sprint_heats ADD CONSTRAINT ps_heat_next_valid CHECK ((next_heat_id IS NULL AND next_slot IS NULL) OR (next_heat_id IS NOT NULL AND next_slot IS NOT NULL AND next_slot IN (1, 2) AND next_heat_id &lt;&gt; id))</sql>
+ </changeSet>
+</databaseChangeLog>
