@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {apiRequest, ApiError} from './api/client'
 import Categories from './Categories'
+import Crews from './Crews'
 import type {Draft} from './Categories'
 import {useTranslation} from 'react-i18next'
 import './i18n/index'
@@ -12,6 +13,7 @@ import {AppBar, Box, Button, CssBaseline, Drawer, List, ListItem, ListItemButton
 
 const routes = [
   {path: '/competitions', label: 'navigation.competitions', readOnly: true},
+  {path: '/crews', label: 'navigation.crews', readOnly: true},
   {path: '/categories', label: 'navigation.categories', readOnly: false},
   {path: '/users', label: 'navigation.users', readOnly: false},
   {path: '/backups', label: 'navigation.backups', readOnly: false},
@@ -231,7 +233,7 @@ function Shell({locale}: {locale: Locale}) {
         <Box sx={{height: {xs: 128, md: 80}}}/>
         <Typography component="h1" variant="h4">{title}</Typography>
         {error && <Typography role="alert">{auth(error)}</Typography>}
-        {activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

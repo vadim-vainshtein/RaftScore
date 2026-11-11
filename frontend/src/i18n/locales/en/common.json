@@ -1,6 +1,56 @@
 {
-  "app": {"name":"RaftScore", "navigation":"Main navigation", "openNavigation":"Open navigation", "menu":"Menu", "language":"Language"},
-  "navigation": {"competitions":"Competitions", "categories":"Category directory", "users":"Users", "backups":"Backups"},
-  "placeholder": {"unavailable":"This section is not available yet.", "notFound":"Page not found", "notFoundDescription":"The requested page could not be found."},
-  "format": {"items_one":"{{count}} item", "items_other":"{{count}} items"}
+  "app": {
+    "name": "RaftScore",
+    "navigation": "Main navigation",
+    "openNavigation": "Open navigation",
+    "menu": "Menu",
+    "language": "Language"
+  },
+  "navigation": {
+    "competitions": "Competitions",
+    "categories": "Category directory",
+    "users": "Users",
+    "backups": "Backups",
+    "crews": "Crews"
+  },
+  "placeholder": {
+    "unavailable": "This section is not available yet.",
+    "notFound": "Page not found",
+    "notFoundDescription": "The requested page could not be found."
+  },
+  "format": {
+    "items_one": "{{count}} item",
+    "items_other": "{{count}} items"
+  },
+  "crew": {
+    "crews": "Crews",
+    "competition": "Competition",
+    "category": "Category",
+    "all": "All",
+    "search": "Search crews",
+    "admission": "Admission",
+    "pending": "Pending",
+    "admitted": "Admitted",
+    "rejected": "Rejected",
+    "create": "Create crew",
+    "edit": "Edit",
+    "admit": "Admit",
+    "reject": "Reject",
+    "crewName": "Crew name",
+    "regionOrClub": "Region or club",
+    "representative": "Representative",
+    "startNumber": "Start number",
+    "member": "Member {{number}}",
+    "surname": "Surname",
+    "givenName": "Given name",
+    "patronymic": "Patronymic",
+    "yes": "Yes",
+    "no": "No",
+    "save": "Save",
+    "cancel": "Cancel",
+    "connection": "Connection error",
+    "existingParticipant": "Existing participant",
+    "newParticipant": "New participant",
+    "participantConflict": "Already in crew {{name}} in this category."
+  }
 }

@@ -45,6 +45,28 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         url = "/api/competitions/" + competition.getId() + "/entries";
     }
+    @Test
+    void projectionsKeepPrivateDetailsBehindFullAccess() throws Exception {
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
+                .name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());
+        var body = createBody().replace("]}", "],\"requirementAnswers\":[{\"requirementId\":"
+                + requirement.getId() + ",\"value\":false}]}");
+        var response = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated()).andReturn().getResponse();
+        Number id = JsonPath.read(response.getContentAsString(), "$.id");
+        mvc.perform(get(url).with(user("reader").roles("READ_ONLY"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].crewName").value("Crew"))
+                .andExpect(jsonPath("$[0].roster").doesNotExist()).andExpect(jsonPath("$[0].representative").doesNotExist())
+                .andExpect(jsonPath("$[0].admissionDecision").doesNotExist());
+        mvc.perform(get(url + "/private").with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        mvc.perform(get(url + "/" + id).with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        mvc.perform(get(url + "/" + id).with(user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.requirementAnswers[0].value").value(false));
+        mvc.perform(get(url + "/requirements").with(user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Consent"));
+        mvc.perform(get("/api/competitions/" + competition.getId() + "/categories").with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].crewSize").value(4));
+    }
     String createBody() { return "{\"categoryId\":" + category.getId() + ",\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1,\"roster\":[{\"surname\":\"A\",\"givenName\":\"A\"},{\"surname\":\"B\",\"givenName\":\"B\"},{\"surname\":\"C\",\"givenName\":\"C\"},{\"surname\":\"D\",\"givenName\":\"D\"}]}"; }
     String updateBody(String version) { return "{\"crewName\":\"Changed\",\"regionOrClub\":\"Region\",\"representative\":\"Rep\",\"startNumber\":2,\"version\":" + version + "}"; }
     void cleanupParticipants(Long... categoryIds) {

@@ -287,3 +287,12 @@ test('cancelling Back preserves the destination for the next Back', async () => 
   expect(confirm).toHaveBeenCalledTimes(2)
   vi.restoreAllMocks()
 })
+
+test('allows read-only users to open the crews route', async () => {
+  window.history.replaceState(null, '', '/#/crews')
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/auth/principal' ? {username: 'reader', role: 'READ_ONLY'} : {content: [], totalPages: 0})
+  render(<App/>)
+  expect(await screen.findByRole('heading', {name: 'Crews'})).toBeInTheDocument()
+  expect(await screen.findByLabelText('Competition')).toBeInTheDocument()
+  expect(window.location.hash).toBe('#/crews')
+})
