@@ -29,6 +29,8 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CompetitionRepository competitions;
     @Autowired CompetitionCategoryRepository categories;
     @Autowired CrewEntryRepository entries;
+    @Autowired EntryRequirementRepository requirements;
+    @Autowired kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
     @Autowired JdbcTemplate jdbc;
     MockMvc mvc;
     Competition competition;
@@ -51,6 +53,105 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
             jdbc.update("delete from crew_memberships where competition_category_id = ?", categoryId);
             for (var id : ids) jdbc.update("delete from participants where id = ?", id);
         }
+    }
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void preservesExactNumericAnswerInCommittedDatabase() throws Exception {
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
+                .name("Number").valueType(EntryRequirementValueType.NUMBER).required(true).displayOrder(0).build());
+        try {
+            var body = createBody().replace("]}", "],\"requirementAnswers\":[{\"requirementId\":"
+                    + requirement.getId() + ",\"value\":1234567890.123456789123456789}]}");
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.eligible").value(true));
+            assertThat(jdbc.queryForObject("select numeric_value from crew_requirement_values where requirement_id = ?",
+                    java.math.BigDecimal.class, requirement.getId()))
+                    .isEqualByComparingTo("1234567890.123456789123456789");
+        } finally {
+            jdbc.update("delete from crew_requirement_values where requirement_id = ?", requirement.getId());
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            requirements.deleteById(requirement.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void answerOnlyUpdateIncrementsVersionAndInvalidUpdateRollsBack() throws Exception {
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
+                .name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());
+        try {
+            var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.version").value(0)).andReturn().getResponse();
+            Number id = JsonPath.read(created.getContentAsString(), "$.id");
+            var identical = "{\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1,\"version\":0";
+            var answer = identical + ",\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":false}]}";
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(answer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1))
+                    .andExpect(jsonPath("$.eligible").value(true));
+            assertThat(jdbc.queryForObject("select version from crew_entries where id = ?", Long.class, id.longValue())).isEqualTo(1L);
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(answer)).andExpect(status().isConflict());
+
+            var roster = jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, id.longValue());
+            var participantCount = jdbc.queryForObject("select count(*) from participants", Integer.class);
+            var invalid = updateBody("1").replace("}", ",\"roster\":[{\"surname\":\"New\",\"givenName\":\"One\"},"
+                    + "{\"participantId\":" + roster.get(1) + "},{\"participantId\":" + roster.get(2)
+                    + "},{\"participantId\":" + roster.get(3) + "}],\"requirementAnswers\":[{\"requirementId\":"
+                    + requirement.getId() + ",\"value\":\"invalid\"}]}");
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+            var unchanged = entries.findById(id.longValue()).orElseThrow();
+            assertThat(unchanged.getVersion()).isEqualTo(1);
+            assertThat(unchanged.getCrewName()).isEqualTo("Crew");
+            assertThat(unchanged.getRegionOrClub()).isEqualTo("Club");
+            assertThat(unchanged.getRepresentative()).isEqualTo("Coach");
+            assertThat(unchanged.getStartNumber()).isEqualTo(1);
+            assertThat(jdbc.queryForList("select participant_id from crew_memberships where crew_entry_id = ? order by position", Long.class, id.longValue())).isEqualTo(roster);
+            assertThat(jdbc.queryForObject("select count(*) from participants", Integer.class)).isEqualTo(participantCount);
+            assertThat(jdbc.queryForObject("select boolean_value from crew_requirement_values where crew_entry_id = ? and requirement_id = ?",
+                    Boolean.class, id.longValue(), requirement.getId())).isFalse();
+            assertThat(jdbc.queryForObject("select count(*) from crew_requirement_values where crew_entry_id = ?", Integer.class, id.longValue())).isEqualTo(1);
+        } finally {
+            jdbc.update("delete from crew_requirement_values where requirement_id = ?", requirement.getId());
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            requirements.deleteById(requirement.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+    @Test
+    void eligibilityTracksRequiredAnswersAndConfiguration() throws Exception {
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
+                .name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());
+        var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eligible").value(false)).andReturn().getResponse();
+        Number id = JsonPath.read(created.getContentAsString(), "$.id");
+        var answer = updateBody("0").replace("}", ",\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":false}]}");
+        var updated = mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(answer))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(true)).andReturn().getResponse();
+        Number version = JsonPath.read(updated.getContentAsString(), "$.version");
+        var invalid = updateBody(version.toString()).replace("}", ",\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":\"bad\"}]}");
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+        var entry = entries.findById(id.longValue()).orElseThrow();
+        assertThat(eligibility.isEligible(entry)).isTrue();
+        category.setCrewSize(5);
+        categories.flush();
+        assertThat(eligibility.isEligible(entry)).isFalse();
+        category.setCrewSize(4);
+        competition.updateDetails("Race", LocalDate.of(2026, 1, 1), null, "River", "UTC", null, true);
+        competitions.flush();
+        assertThat(eligibility.isEligible(entry)).isFalse();
     }
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
