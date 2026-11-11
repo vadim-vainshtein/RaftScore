@@ -4,6 +4,16 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.time.LocalDate;
+import tools.jackson.databind.annotation.JsonDeserialize;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.core.JsonParser;
+import kz.vainshtein.raftscore.competition.entities.EntryRequirementRepository;
+import kz.vainshtein.raftscore.entry.entities.CrewRequirementValue;
+import kz.vainshtein.raftscore.entry.entities.CrewRequirementValueRepository;
+import kz.vainshtein.raftscore.entry.services.CrewEligibilityService;
 import jakarta.persistence.EntityManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -39,6 +49,9 @@ class CrewEntryController {
     private final CrewMembershipRepository memberships;
     private final ParticipantRepository participants;
     private final EntityManager entityManager;
+    private final EntryRequirementRepository requirements;
+    private final CrewRequirementValueRepository requirementValues;
+    private final CrewEligibilityService eligibility;
 
     record MemberRequest(
             @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
@@ -51,6 +64,21 @@ class CrewEntryController {
         }
     }
 
+    record RequirementAnswer(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal requirementId, @NotNull @JsonDeserialize(using = AnswerValueDeserializer.class) Object value) { }
+
+    static class AnswerValueDeserializer extends ValueDeserializer<Object> {
+        @Override
+        public Object deserialize(JsonParser parser, DeserializationContext context) {
+            return switch (parser.currentToken()) {
+                case VALUE_TRUE -> true;
+                case VALUE_FALSE -> false;
+                case VALUE_STRING -> parser.getString();
+                case VALUE_NUMBER_INT, VALUE_NUMBER_FLOAT -> parser.getDecimalValue();
+                default -> { parser.skipChildren(); yield new Object(); }
+            };
+        }
+    }
+
     record CreateRequest(
             @NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
             @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal categoryId,
@@ -59,7 +87,8 @@ class CrewEntryController {
             @NotBlank @Pattern(regexp = "[^\\x00]*") String representative,
             @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0)
             @Schema(implementation = Integer.class, type = "integer", format = "int32") BigDecimal startNumber,
-            @NotNull List<@NotNull @Valid MemberRequest> roster) { }
+            @NotNull List<@NotNull @Valid MemberRequest> roster,
+            List<@NotNull @Valid RequirementAnswer> requirementAnswers) { }
 
     record UpdateRequest(
             @NotBlank @Pattern(regexp = "[^\\x00]*") String crewName,
@@ -69,14 +98,15 @@ class CrewEntryController {
             @Schema(implementation = Integer.class, type = "integer", format = "int32") BigDecimal startNumber,
             @NotNull @PositiveOrZero @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
             @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal version,
-            List<@NotNull @Valid MemberRequest> roster) { }
+            List<@NotNull @Valid MemberRequest> roster,
+            List<@NotNull @Valid RequirementAnswer> requirementAnswers) { }
 
     record EntryResponse(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub,
-                         String representative, int startNumber, long version, List<MemberResponse> roster) {
-        static EntryResponse from(CrewEntry entry, List<CrewMembership> roster) {
+                         String representative, int startNumber, long version, List<MemberResponse> roster, boolean eligible) {
+        static EntryResponse from(CrewEntry entry, List<CrewMembership> roster, boolean eligible) {
             var category = entry.getCompetitionCategory();
             return new EntryResponse(entry.getId(), category.getCompetition().getId(), category.getId(),
-                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList());
+                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), eligible);
         }
     }
 
@@ -95,7 +125,9 @@ class CrewEntryController {
         validateRoster(request.roster(), category.getCrewSize());
         var entry = entries.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName(request.crewName())
                 .regionOrClub(request.regionOrClub()).representative(request.representative()).startNumber(request.startNumber().intValueExact()).build());
-        return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, replaceRoster(entry, request.roster())));
+        var roster = replaceRoster(entry, request.roster());
+        replaceAnswers(entry, request.requirementAnswers());
+        return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, roster, eligibility.isEligible(entry)));
     }
 
     @Operation(summary = "Update crew entry and roster", description = "Requires FULL_ACCESS, a CSRF token and the current version. Category cannot be changed.")
@@ -114,17 +146,50 @@ class CrewEntryController {
         validateRoster(request.roster() == null ? roster : request.roster(), entry.getCompetitionCategory().getCrewSize());
         entry.updateDetails(request.crewName(), request.regionOrClub(), request.representative(), request.startNumber().intValueExact());
         entries.flush();
-        if (request.roster() != null) {
+        if (request.roster() != null || request.requirementAnswers() != null) {
             if (entry.getVersion() == request.version().longValueExact()) {
                 var updated = entityManager.createNativeQuery("update crew_entries set version = version + 1 where id = :id and version = :version")
                         .setParameter("id", entryId).setParameter("version", entry.getVersion()).executeUpdate();
                 if (updated != 1) throw new OptimisticLockingFailureException("Stale entry version");
                 entityManager.refresh(entry);
             }
-            roster = replaceRoster(entry, request.roster());
+            if (request.roster() != null) roster = replaceRoster(entry, request.roster());
+            replaceAnswers(entry, request.requirementAnswers());
         }
-        return EntryResponse.from(entry, roster);
+        return EntryResponse.from(entry, roster, eligibility.isEligible(entry));
     }
+
+    private void replaceAnswers(CrewEntry entry, List<RequirementAnswer> answers) {
+        if (answers == null) return;
+        var available = requirements.findByCompetitionId(entry.getCompetitionCategory().getCompetition().getId());
+        var seen = new HashSet<Long>();
+        var replacements = new ArrayList<CrewRequirementValue>();
+        try {
+            for (var answer : answers) {
+                if (!seen.add(answer.requirementId().longValueExact())) throw new InvalidAnswers();
+                var requirement = available.stream().filter(r -> r.getId().equals(answer.requirementId().longValueExact()))
+                        .findFirst().orElseThrow(InvalidAnswers::new);
+                var raw = answer.value();
+                Object value = switch (requirement.getValueType()) {
+                    case YES_NO -> raw instanceof Boolean ? raw : null;
+                    case TEXT -> raw instanceof String ? raw : null;
+                    case DATE -> raw instanceof String text ? LocalDate.parse(text) : null;
+                    case NUMBER -> raw instanceof BigDecimal ? raw : null;
+                };
+                if (value == null) throw new InvalidAnswers();
+                replacements.add(CrewRequirementValue.builder().crewEntry(entry).requirement(requirement).value(value).build());
+            }
+        } catch (IllegalArgumentException | java.time.DateTimeException ex) {
+            throw new InvalidAnswers();
+        }
+        requirementValues.deleteAll(requirementValues.findByCrewEntryId(entry.getId()));
+        requirementValues.flush();
+        requirementValues.saveAllAndFlush(replacements);
+    }
+
+    @ExceptionHandler(InvalidAnswers.class)
+    ResponseEntity<ApiError> invalidAnswers() { return ResponseEntity.badRequest().body(ApiError.of("crew_entry.invalid_requirement_answers")); }
+    private static class InvalidAnswers extends RuntimeException { }
 
     private void validateRoster(List<?> roster, int size) {
         if (roster == null || roster.size() != size) throw new InvalidRoster();
