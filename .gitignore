@@ -2,3 +2,6 @@
 /target/
 application-*.yml
 /backups/
+
+frontend/test-results/
+frontend/playwright-report/
