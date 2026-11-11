@@ -9,6 +9,8 @@ import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.startlist.entities.*;
 import kz.vainshtein.raftscore.timing.entities.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 class SprintRankingTest {
@@ -46,6 +48,17 @@ class SprintRankingTest {
         assertThatThrownBy(() -> SprintRanking.rank(List.of(slot(a, 1)), List.of(attempt(a, 1, 0), attempt(a, 2, 0)))).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @ParameterizedTest
+    @EnumSource(value = AttemptResultStatus.class, names = "FINISHED", mode = EnumSource.Mode.EXCLUDE)
+    void nonFinishingStatusesRemainUnplacedAfterFinishedCrews(AttemptResultStatus status) {
+        var nonfinisher = crew(1); var finisher = crew(2); var unrecorded = crew(3);
+        var result = AttemptResult.builder().discipline(discipline).crewEntry(nonfinisher)
+                .attemptNumber(1).status(status).build();
+        var ranked = SprintRanking.rank(List.of(slot(nonfinisher, 1), slot(finisher, 2), slot(unrecorded, 3)),
+                List.of(result, attempt(finisher, 100, 0)));
+        assertThat(ranked).containsExactly(new SprintRanking.Result(finisher, AttemptResultStatus.FINISHED, 100L, 1),
+                new SprintRanking.Result(nonfinisher, status, null, null));
+    }
     private CrewEntry crew(int number) { return CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build(); }
     private StartSlot slot(CrewEntry crew, int position) { return StartSlot.builder().startList(list).crew(crew).position(position).build(); }
     private AttemptResult attempt(CrewEntry crew, int duration, int penalty) { return AttemptResult.builder().discipline(discipline).crewEntry(crew).attemptNumber(1).durationCentiseconds(duration).penaltyCentiseconds(penalty).status(AttemptResultStatus.FINISHED).build(); }

@@ -8,6 +8,8 @@ import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.startlist.entities.*;
 import kz.vainshtein.raftscore.timing.entities.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import static org.assertj.core.api.Assertions.*;
 
 class LongRaceRankingTest {
@@ -40,6 +42,15 @@ class LongRaceRankingTest {
         assertThatThrownBy(() -> LongRaceRanking.rank(List.of(slot(a, 1), StartSlot.builder().startList(otherList).crew(otherCrew).position(2).build()), List.of())).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @ParameterizedTest
+    @CsvSource({"100, 0, 100, 0, 1", "90, 10, 100, 0, 1", "101, 0, 100, 0, 2"})
+    void assignsSharedPlacesFromTotalTime(int firstDuration, int firstPenalty, int secondDuration, int secondPenalty, int firstPlace) {
+        var first = crew(category, 1); var second = crew(category, 2);
+        var ranked = LongRaceRanking.rank(List.of(slot(first, 1), slot(second, 2)),
+                List.of(finished(first, firstDuration, firstPenalty), finished(second, secondDuration, secondPenalty)));
+        assertThat(ranked).filteredOn(result -> result.crew() == first)
+                .extracting(LongRaceRanking.Result::place).containsExactly(firstPlace);
+    }
     private CompetitionCategory category(String name) { return CompetitionCategory.builder().competition(competition).classLabel(name).scoringGroupLabel(name).crewSize(4).build(); }
     private CrewEntry crew(CompetitionCategory c, int number) { return CrewEntry.builder().competitionCategory(c).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build(); }
     private StartSlot slot(CrewEntry crew, int position) { return StartSlot.builder().startList(list).crew(crew).position(position).build(); }

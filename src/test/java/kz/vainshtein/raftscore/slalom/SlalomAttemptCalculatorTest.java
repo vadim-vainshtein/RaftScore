@@ -7,6 +7,8 @@ import kz.vainshtein.raftscore.slalom.entities.SlalomGatePenalty;
 import kz.vainshtein.raftscore.timing.entities.AttemptResult;
 import kz.vainshtein.raftscore.timing.entities.AttemptResultStatus;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -66,6 +68,14 @@ class SlalomAttemptCalculatorTest {
         assertThatIllegalArgumentException().isThrownBy(() -> SlalomAttemptCalculator.calculate(configuration, attempt, List.of()));
     }
 
+    @ParameterizedTest
+    @CsvSource({"0, 0, 0, 1000", "5, 0, 5, 2000", "50, 5, 50, 11500"})
+    void totalsAllGatePenalties(int first, int second, int third, long expected) {
+        when(attempt.getDurationCentiseconds()).thenReturn(1000);
+        var result = SlalomAttemptCalculator.calculate(configuration, attempt,
+                List.of(gate(1, first), gate(2, second), gate(3, third)));
+        assertThat(result.totalCentiseconds()).isEqualTo(expected);
+    }
     private SlalomGatePenalty gate(int number, int seconds) {
         var gate = mock(SlalomGatePenalty.class);
         when(gate.getConfiguration()).thenReturn(configuration);
