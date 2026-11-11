@@ -1,9 +1,9 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import App from './App'
-import {apiRequest, ApiError} from './api/client'
+import {apiRequest, ApiError, csrfRequest} from './api/client'
 
-vi.mock('./api/client', async importOriginal => ({...(await importOriginal<typeof import('./api/client')>()), apiRequest: vi.fn()}))
+vi.mock('./api/client', async importOriginal => ({...(await importOriginal<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
 import i18n from './i18n'
 import {initialLocale} from './i18n/supported-locales'
 
@@ -12,7 +12,7 @@ let listeners: Set<(event: MediaQueryListEvent) => void>
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 beforeEach(() => {
-  vi.mocked(apiRequest).mockReset().mockImplementation(async path => path.includes('/duplicate?') ? {exists: false} : path.startsWith('/api/category-templates') || path.startsWith('/api/competitions?') ? {content: [], totalPages: 0, totalElements: 0} : {username: 'admin', role: 'FULL_ACCESS'})
+  vi.mocked(apiRequest).mockReset().mockImplementation(async path => path === '/api/backups' ? [] : path.includes('/duplicate?') ? {exists: false} : path.startsWith('/api/category-templates') || path.startsWith('/api/competitions?') ? {content: [], totalPages: 0, totalElements: 0} : {username: 'admin', role: 'FULL_ACCESS'})
   window.history.replaceState(null, '', '/#/')
   desktop = false
   listeners = new Set()
@@ -40,6 +40,7 @@ test('navigates between section placeholders and responds to browser history', a
   window.history.replaceState(null, '', '/#/backups')
   fireEvent(window, new HashChangeEvent('hashchange'))
   expect(screen.getByRole('heading', {name: 'Backups'})).toBeInTheDocument()
+  expect(await screen.findByRole('button', {name: 'Create backup'})).toBeInTheDocument()
 })
 
 test('opens and closes the mobile navigation after selecting a section', async () => {
@@ -304,4 +305,29 @@ test('allows read-only users to open the crews route', async () => {
   expect(await screen.findByRole('heading', {name: 'Crews'})).toBeInTheDocument()
   expect(await screen.findByLabelText('Competition')).toBeInTheDocument()
   expect(window.location.hash).toBe('#/crews')
+})
+
+test('successful restore rechecks the session and returns to sign-in after expiry', async () => {
+  await i18n.changeLanguage('en')
+  let restored = false
+  vi.mocked(csrfRequest).mockImplementation(async () => {restored = true; return undefined})
+  const backup = {id: '00000000-0000-0000-0000-000000000001', createdAt: '2026-01-01T10:00:00Z', sizeBytes: 1234, formatVersion: '2', schemaVersion: '3'}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') {
+      if (restored) throw new ApiError(401, undefined)
+      return {username: 'admin', role: 'FULL_ACCESS'}
+    }
+    if (path === '/api/backups') return [backup]
+    if (path === '/api/auth/csrf') return {headerName: 'X-CSRF', token: 'token'}
+    return {content: [], totalPages: 0}
+  })
+  window.history.replaceState(null, '', '/#/backups')
+  render(<App/>)
+  fireEvent.click(await screen.findByRole('button', {name: /Restore backup from/}))
+  fireEvent.click(screen.getByRole('checkbox', {name: /I understand/}))
+  fireEvent.change(screen.getByLabelText('Current password'), {target: {value: 'secret'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Restore database'}))
+  expect(await screen.findByLabelText(/Username/)).toBeInTheDocument()
+  expect(restored).toBe(true)
+  expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/auth/principal')).toHaveLength(2)
 })
