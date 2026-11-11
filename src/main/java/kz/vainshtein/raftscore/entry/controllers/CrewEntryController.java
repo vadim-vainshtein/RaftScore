@@ -15,6 +15,8 @@ import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.entry.entities.CrewEntryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -61,6 +63,7 @@ class CrewEntryController {
     @ApiResponse(responseCode = "401", description = "Authentication required")
     @ApiResponse(responseCode = "403", description = "Forbidden or missing CSRF token", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "404", description = "Competition or category not found", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "Start number already exists in category", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PostMapping
     @Transactional
     ResponseEntity<EntryResponse> create(@PathVariable Long competitionId, @Valid @RequestBody CreateRequest request) {
@@ -77,7 +80,7 @@ class CrewEntryController {
     @ApiResponse(responseCode = "401", description = "Authentication required")
     @ApiResponse(responseCode = "403", description = "Forbidden or missing CSRF token", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(responseCode = "404", description = "Entry not found in competition", content = @Content(schema = @Schema(implementation = ApiError.class)))
-    @ApiResponse(responseCode = "409", description = "Stale version", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "409", description = "Stale version or start number already exists in category", content = @Content(schema = @Schema(implementation = ApiError.class)))
     @PutMapping("/{entryId}")
     @Transactional
     EntryResponse update(@PathVariable Long competitionId, @PathVariable Long entryId, @Valid @RequestBody UpdateRequest request) {
@@ -94,6 +97,16 @@ class CrewEntryController {
     ResponseEntity<ApiError> categoryNotFound() { return ResponseEntity.status(404).body(ApiError.of("competition_category.not_found")); }
     @ExceptionHandler(EntryNotFound.class)
     ResponseEntity<ApiError> entryNotFound() { return ResponseEntity.status(404).body(ApiError.of("crew_entry.not_found")); }
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ResponseEntity<ApiError> integrityViolation(DataIntegrityViolationException exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation
+                    && "crew_entries_category_start_number_uk".equals(violation.getConstraintName())) {
+                return ResponseEntity.status(409).body(ApiError.of("crew_entry.start_number_duplicate"));
+            }
+        }
+        throw exception;
+    }
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ApiError> malformedPath() { return ResponseEntity.badRequest().body(ApiError.of("request.malformed")); }
     private static class CompetitionNotFound extends RuntimeException { }

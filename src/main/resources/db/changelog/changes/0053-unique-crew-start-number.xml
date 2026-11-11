@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0053-unique-crew-start-number" author="raftscore">
+        <preConditions onFail="HALT" onFailMessage="Duplicate crew start numbers exist within a competition category; resolve them before applying this migration.">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM (SELECT competition_category_id, start_number FROM crew_entries GROUP BY competition_category_id, start_number HAVING COUNT(*) &gt; 1) duplicates</sqlCheck>
+        </preConditions>
+        <addUniqueConstraint tableName="crew_entries" columnNames="competition_category_id, start_number"
+                             constraintName="crew_entries_category_start_number_uk"/>
+    </changeSet>
+</databaseChangeLog>
