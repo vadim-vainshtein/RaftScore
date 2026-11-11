@@ -44,7 +44,11 @@ class AttemptResultRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
         var start = Instant.parse("2026-07-01T12:34:56.123456Z");
         var finish = start.plusSeconds(12).plusMillis(340);
         for (var status : AttemptResultStatus.values()) {
-            results.save(result(fixture, status.ordinal() + 1, 1234, start, finish, 25, status));
+            var duration = status == AttemptResultStatus.DNS || status == AttemptResultStatus.DNF ? null : 1234;
+            var resultStart = status == AttemptResultStatus.DNS ? null : start;
+            var resultFinish = status == AttemptResultStatus.DNS || status == AttemptResultStatus.DNF ? null : finish;
+            var penalty = status == AttemptResultStatus.DNS ? 0 : 25;
+            results.save(result(fixture, status.ordinal() + 1, duration, resultStart, resultFinish, penalty, status));
         }
         entityManager.flush();
         entityManager.clear();
@@ -85,6 +89,86 @@ class AttemptResultRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
         fixture.discipline().replaceCategories(List.of());
         assertThatThrownBy(() -> result(fixture, 1, null, null, null, 0, AttemptResultStatus.DNS))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Transactional
+    void retainsConsistentTimingAcrossPostgresRoundTrip() {
+        var fixture = fixture();
+        var start = Instant.parse("2026-07-01T12:00:00.000000400Z");
+        var finish = Instant.parse("2026-07-01T12:00:00.009999600Z");
+        var result = results.saveAndFlush(result(fixture, 1, null, start, finish, 0, AttemptResultStatus.FINISHED));
+        var id = result.getId();
+        entityManager.clear();
+
+        var loaded = results.findById(id).orElseThrow();
+        assertThat(loaded.getDurationCentiseconds()).isZero();
+        assertThat(loaded.getStartInstant()).isEqualTo(Instant.parse("2026-07-01T12:00:00Z"));
+        assertThat(loaded.getFinishInstant()).isEqualTo(Instant.parse("2026-07-01T12:00:00.009999Z"));
+        loaded.updateResult(loaded.getDurationCentiseconds(), loaded.getStartInstant(), loaded.getFinishInstant(),
+                loaded.getPenaltyCentiseconds(), loaded.getStatus());
+        entityManager.flush();
+        assertInvalidUpdate(loaded, 0, start.plusNanos(200), start, 0, AttemptResultStatus.FINISHED);
+    }
+
+    @Test
+    @Transactional
+    void validatesStatusTimingCombinationsAndKeepsRejectedUpdatesUnchanged() {
+        var fixture = fixture();
+        var start = Instant.parse("2026-07-01T12:00:00Z");
+        var finish = start.plusMillis(1234);
+        var result = result(fixture, 1, 123, start, finish, 5, AttemptResultStatus.FINISHED);
+        for (var status : AttemptResultStatus.values()) {
+            if (status == AttemptResultStatus.FINISHED) {
+                result.updateResult(123, null, null, 5, status);
+                result.updateResult(null, start, finish, 5, status);
+                assertThat(result.getDurationCentiseconds()).isEqualTo(123);
+                result.updateResult(123, start, finish, 5, status);
+                assertInvalidUpdate(result, null, start, null, 0, status);
+            } else if (status == AttemptResultStatus.DNS) {
+                result.updateResult(null, null, null, 0, status);
+                assertInvalidUpdate(result, null, start, null, 0, status);
+                assertInvalidUpdate(result, null, null, null, 1, status);
+            } else if (status == AttemptResultStatus.DNF) {
+                result.updateResult(null, start, null, 5, status);
+                result.updateResult(null, null, null, 0, status);
+                assertInvalidUpdate(result, 123, null, null, 0, status);
+                assertInvalidUpdate(result, null, start, finish, 0, status);
+            } else {
+                result.updateResult(null, null, null, 5, status);
+                result.updateResult(null, start, null, 5, status);
+                result.updateResult(123, null, null, 5, status);
+                result.updateResult(null, start, finish, 5, status);
+                assertThat(result.getDurationCentiseconds()).isEqualTo(123);
+                result.updateResult(123, start, finish, 5, status);
+            }
+            assertInvalidUpdate(result, null, null, finish, 0, status);
+            assertInvalidUpdate(result, null, finish, start, 0, status);
+            assertInvalidUpdate(result, 124, start, finish, 0, status);
+            assertInvalidUpdate(result, 123, start, null, 0, status);
+            assertInvalidUpdate(result, null, start, start.plusSeconds(21_474_837), 0, status);
+            assertInvalidUpdate(result, null, Instant.MIN, Instant.MAX, 0, status);
+        }
+        results.saveAndFlush(result);
+        entityManager.clear();
+        assertThat(results.findById(result.getId()).orElseThrow().getStatus())
+                .isEqualTo(AttemptResultStatus.DSQ_COMPETITION);
+    }
+
+    private void assertInvalidUpdate(AttemptResult result, Integer duration, Instant start, Instant finish,
+                                     int penalty, AttemptResultStatus status) {
+        var oldDuration = result.getDurationCentiseconds();
+        var oldStart = result.getStartInstant();
+        var oldFinish = result.getFinishInstant();
+        var oldPenalty = result.getPenaltyCentiseconds();
+        var oldStatus = result.getStatus();
+        assertThatThrownBy(() -> result.updateResult(duration, start, finish, penalty, status))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(result.getDurationCentiseconds()).isEqualTo(oldDuration);
+        assertThat(result.getStartInstant()).isEqualTo(oldStart);
+        assertThat(result.getFinishInstant()).isEqualTo(oldFinish);
+        assertThat(result.getPenaltyCentiseconds()).isEqualTo(oldPenalty);
+        assertThat(result.getStatus()).isEqualTo(oldStatus);
     }
 
     @Test

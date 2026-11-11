@@ -1,12 +1,14 @@
 package kz.vainshtein.raftscore.timing.entities;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 import jakarta.persistence.*;
 import kz.vainshtein.raftscore.discipline.entities.Discipline;
 import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.persistence.VersionedEntity;
+import kz.vainshtein.raftscore.timing.ElapsedTime;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -76,10 +78,61 @@ public class AttemptResult extends VersionedEntity {
             throw new IllegalArgumentException("penaltyCentiseconds must not be negative");
         }
         Objects.requireNonNull(status, "status");
-        this.durationCentiseconds = durationCentiseconds;
+        if (startInstant != null && finishInstant != null && finishInstant.isBefore(startInstant)) {
+            throw new IllegalArgumentException("Finish must not be before start");
+        }
+        startInstant = startInstant == null ? null : startInstant.truncatedTo(ChronoUnit.MICROS);
+        finishInstant = finishInstant == null ? null : finishInstant.truncatedTo(ChronoUnit.MICROS);
+        var resolvedDuration = validateTiming(durationCentiseconds, startInstant, finishInstant, penaltyCentiseconds, status);
+        this.durationCentiseconds = resolvedDuration;
         this.startInstant = startInstant;
         this.finishInstant = finishInstant;
         this.penaltyCentiseconds = penaltyCentiseconds;
         this.status = status;
+    }
+
+    private static Integer validateTiming(Integer duration, Instant start, Instant finish, int penalty,
+                                       AttemptResultStatus status) {
+        if (finish != null && start == null) {
+            throw new IllegalArgumentException("finish requires start");
+        }
+        if (finish != null) {
+            long elapsed;
+            try {
+                elapsed = ElapsedTime.centisecondsBetween(start, finish);
+            } catch (ArithmeticException ex) {
+                throw new IllegalArgumentException("elapsed time is too large", ex);
+            }
+            if (elapsed > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("elapsed time is too large");
+            }
+            if (duration != null && duration.longValue() != elapsed) {
+                throw new IllegalArgumentException("duration must match start and finish");
+            }
+            if (duration == null) {
+                duration = (int) elapsed;
+            }
+        } else if (start != null && duration != null) {
+            throw new IllegalArgumentException("duration with start requires finish");
+        }
+        switch (status) {
+            case FINISHED -> {
+                if (duration == null && finish == null) {
+                    throw new IllegalArgumentException("finished result requires duration or start and finish");
+                }
+            }
+            case DNS -> {
+                if (duration != null || start != null || finish != null || penalty != 0) {
+                    throw new IllegalArgumentException("DNS cannot have timing or penalty");
+                }
+            }
+            case DNF -> {
+                if (duration != null || finish != null) {
+                    throw new IllegalArgumentException("DNF cannot have duration or finish");
+                }
+            }
+            case DSQ_ATTEMPT, DSQ_DISCIPLINE, DSQ_COMPETITION -> { }
+        }
+        return duration;
     }
 }
