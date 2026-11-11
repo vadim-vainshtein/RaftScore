@@ -8,6 +8,7 @@ import kz.vainshtein.raftscore.discipline.entities.*;
 import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.timing.entities.AttemptResultStatus;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.*;
 
 class ParallelSprintRankingTest {
@@ -17,7 +18,7 @@ class ParallelSprintRankingTest {
     private final ParallelSprintBracket bracket = ParallelSprintBracket.builder().discipline(discipline).category(category).build();
 
     @Test
-    void ranksResolvedRoundsAndSharesPlaces() {
+    void ranksResolvedRoundsInStageOrder() {
         var a = crew(1); var b = crew(2); var c = crew(3); var d = crew(4); var e = crew(5);
         var fin = heat(3, a, b, 1, AttemptResultStatus.FINISHED);
         var semi1 = heat(2, a, c, 1, AttemptResultStatus.FINISHED);
@@ -25,7 +26,7 @@ class ParallelSprintRankingTest {
         var quarter = heat(1, a, e, 1, AttemptResultStatus.FINISHED);
         var results = ParallelSprintRanking.rank(List.of(quarter, semi2, fin, semi1));
         assertThat(results).extracting(ParallelSprintRanking.Result::crew).containsExactly(a, b, c, d, e);
-        assertThat(results).extracting(ParallelSprintRanking.Result::place).containsExactly(1, 2, 3, 3, 5);
+        assertThat(results).extracting(ParallelSprintRanking.Result::place).containsExactly(1, 2, 3, 4, 5);
     }
 
     @Test
@@ -36,6 +37,44 @@ class ParallelSprintRankingTest {
         var finalHeat = ParallelSprintHeat.builder().bracket(bracket).roundNumber(2).heatNumber(1).crew1(a).crew2(b).build();
         var results = ParallelSprintRanking.rank(List.of(bye, resolved, finalHeat));
         assertThat(results).containsExactly(new ParallelSprintRanking.Result(c, AttemptResultStatus.DSQ_DISCIPLINE, null));
+    }
+
+    @Test
+    void ordersEliminationsByHeatTimeThenStartNumberWithByes() {
+        var a = crew(1); var b = crew(2); var c = crew(3); var d = crew(4);
+        var e = crew(5); var f = crew(6); var g = crew(7);
+        var fin = timedHeat(3, a, b, 500);
+        var semi1 = timedHeat(2, a, c, 700);
+        var semi2 = timedHeat(2, b, d, 600);
+        var quarter1 = timedHeat(1, a, e, 800);
+        var quarter2 = timedHeat(1, b, f, 750);
+        var quarter3 = timedHeat(1, c, g, 750);
+        var bye = ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(4).crew1(d).winnerSlot(1).build();
+
+        var results = ParallelSprintRanking.rank(List.of(quarter3, bye, semi1, quarter1, fin, semi2, quarter2));
+
+        assertThat(results).extracting(ParallelSprintRanking.Result::crew).containsExactly(a, b, d, c, f, g, e);
+        assertThat(results).extracting(ParallelSprintRanking.Result::place).containsExactly(1, 2, 3, 4, 5, 6, 7);
+    }
+
+    private ParallelSprintHeat timedHeat(int round, CrewEntry winner, CrewEntry loser, int loserTime) {
+        return ParallelSprintHeat.builder().bracket(bracket).roundNumber(round).heatNumber(1).crew1(winner).crew2(loser)
+                .status1(AttemptResultStatus.FINISHED).status2(AttemptResultStatus.FINISHED)
+                .time1Centiseconds(400).time2Centiseconds(loserTime).winnerSlot(1).build();
+    }
+
+    @Test
+    void breaksEqualTimeAndStartNumberById() {
+        var winner = crew(1); var lowerId = crew(2); var higherId = crew(2);
+        ReflectionTestUtils.setField(lowerId, "id", 10L);
+        ReflectionTestUtils.setField(higherId, "id", 20L);
+        var finalHeat = timedHeat(2, winner, crew(3), 500);
+
+        var results = ParallelSprintRanking.rank(List.of(timedHeat(1, winner, higherId, 600),
+                finalHeat, timedHeat(1, winner, lowerId, 600)));
+
+        assertThat(results).extracting(ParallelSprintRanking.Result::crew)
+                .containsExactly(winner, finalHeat.getCrew2(), lowerId, higherId);
     }
 
     private CrewEntry crew(int number) { return CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build(); }
