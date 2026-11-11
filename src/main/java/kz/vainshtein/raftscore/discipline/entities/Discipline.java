@@ -10,6 +10,7 @@ import jakarta.persistence.*;
 import kz.vainshtein.raftscore.competition.entities.Competition;
 import kz.vainshtein.raftscore.competition.entities.CompetitionCategory;
 import kz.vainshtein.raftscore.persistence.VersionedEntity;
+import kz.vainshtein.raftscore.scoring.entities.PlacementPointsTable;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -38,6 +39,21 @@ public class Discipline extends VersionedEntity {
 
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "points_table_id")
+    private PlacementPointsTable pointsTable;
+
+    public void setPointsTable(PlacementPointsTable table) {
+        if (table != null) {
+            var owner = table.getCompetition();
+            if (owner != competition && (competition.getId() == null
+                    || !competition.getId().equals(owner.getId()))) {
+                throw new IllegalArgumentException("points table must belong to the discipline competition");
+            }
+        }
+        this.pointsTable = table;
+    }
 
     @ManyToMany
     @JoinTable(name = "discipline_categories",
