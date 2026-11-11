@@ -22,7 +22,7 @@ public class SlalomConfiguration extends VersionedEntity {
     @JoinColumn(name = "discipline_id", nullable = false, updatable = false)
     private Discipline discipline;
 
-    @Column(name = "gate_count", nullable = false, updatable = false)
+    @Column(name = "gate_count", nullable = false)
     private int gateCount;
 
     @Column(name = "attempt_count", nullable = false)
@@ -39,6 +39,11 @@ public class SlalomConfiguration extends VersionedEntity {
         }
         if (gateCount <= 0) throw new IllegalArgumentException("gateCount must be positive");
         setAttemptCount(attemptCount);
+        this.gateCount = gateCount;
+    }
+
+    public void setGateCount(int gateCount) {
+        if (gateCount <= 0) throw new IllegalArgumentException("gateCount must be positive");
         this.gateCount = gateCount;
     }
 

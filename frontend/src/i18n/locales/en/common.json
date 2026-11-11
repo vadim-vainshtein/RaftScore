@@ -11,7 +11,8 @@
     "categories": "Category directory",
     "users": "Users",
     "backups": "Backups",
-    "crews": "Crews"
+    "crews": "Crews",
+    "disciplines": "Disciplines"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -52,5 +53,33 @@
     "existingParticipant": "Existing participant",
     "newParticipant": "New participant",
     "participantConflict": "Already in crew {{name}} in this category."
+  },
+  "discipline": {
+    "competition": "Competition",
+    "create": "Create discipline",
+    "edit": "Edit",
+    "name": "Name",
+    "type": "Type",
+    "order": "Order",
+    "categories": "Categories",
+    "gateCount": "Gates",
+    "attemptCount": "Attempts",
+    "qualification": "Qualification discipline",
+    "automatic": "Automatic",
+    "save": "Save",
+    "cancel": "Cancel",
+    "error": "Could not load or save disciplines.",
+    "conflict": "Configuration changed or has recorded activity. Reload and try again.",
+    "types": {
+      "SPRINT": "Sprint",
+      "PARALLEL_SPRINT": "Parallel sprint",
+      "SLALOM": "Slalom",
+      "LONG_RACE": "Long race"
+    },
+    "points": "Points table",
+    "noPoints": "None",
+    "resultsEntered": "Results entered",
+    "noResults": "No results",
+    "confirmPoints": "Changing the points table will recalculate existing results. Continue?"
   }
 }

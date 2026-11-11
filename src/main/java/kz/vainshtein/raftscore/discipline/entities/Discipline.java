@@ -55,6 +55,14 @@ public class Discipline extends VersionedEntity {
         this.pointsTable = table;
     }
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "qualification_discipline_id")
+    private Discipline qualificationDiscipline;
+
+    public void setQualificationDiscipline(Discipline qualification) {
+        this.qualificationDiscipline = qualification;
+    }
+
     @ManyToMany
     @JoinTable(name = "discipline_categories",
             joinColumns = @JoinColumn(name = "discipline_id"),

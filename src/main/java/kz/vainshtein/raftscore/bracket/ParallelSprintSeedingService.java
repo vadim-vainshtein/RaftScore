@@ -26,12 +26,15 @@ public class ParallelSprintSeedingService {
     /** A null qualificationId selects the first configured ordinary sprint. */
     @Transactional
     public ParallelSprintBracket seed(long disciplineId, long categoryId, Long qualificationId) {
-        var discipline = disciplines.findById(disciplineId).orElseThrow();
+        var discipline = disciplines.findForStartListUpdate(disciplineId).orElseThrow();
         var category = categories.findById(categoryId).orElseThrow();
         if (discipline.getType() != DisciplineType.PARALLEL_SPRINT ||
                 !discipline.getCompetition().getId().equals(category.getCompetition().getId()) ||
                 discipline.getCategories().stream().noneMatch(c -> c.getId().equals(categoryId))) {
             throw new IllegalArgumentException("category must be selected for the parallel sprint competition");
+        }
+        if (qualificationId == null && discipline.getQualificationDiscipline() != null) {
+            qualificationId = discipline.getQualificationDiscipline().getId();
         }
         var qualification = qualificationId == null
                 ? disciplines.findByCompetitionIdAndTypeOrderByDisplayOrderAscIdAsc(discipline.getCompetition().getId(), DisciplineType.SPRINT)
