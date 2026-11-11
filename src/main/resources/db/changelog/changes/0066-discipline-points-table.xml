@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0066-discipline-points-table" author="raftscore">
+        <addColumn tableName="disciplines"><column name="points_table_id" type="BIGINT"/></addColumn>
+        <addUniqueConstraint tableName="placement_points_tables" columnNames="id, competition_id" constraintName="placement_points_tables_id_competition_uk"/>
+        <addUniqueConstraint tableName="disciplines" columnNames="points_table_id" constraintName="disciplines_points_table_uk"/>
+        <addForeignKeyConstraint baseTableName="disciplines" baseColumnNames="points_table_id, competition_id" referencedTableName="placement_points_tables" referencedColumnNames="id, competition_id" constraintName="disciplines_points_table_owner_fk"/>
+    </changeSet>
+</databaseChangeLog>
