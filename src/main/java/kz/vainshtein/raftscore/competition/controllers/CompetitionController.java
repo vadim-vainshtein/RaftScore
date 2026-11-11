@@ -1,5 +1,15 @@
 package kz.vainshtein.raftscore.competition.controllers;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import kz.vainshtein.raftscore.competition.entities.CompetitionListProjection;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDate;
@@ -39,6 +49,40 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 class CompetitionController {
     private final CompetitionRepository repository;
 
+    @Operation(summary = "List competitions", description = "Authenticated users can search titles and sort by start date.")
+    @ApiResponse(responseCode = "200", description = "Page of competitions", content = @Content(schema = @Schema(implementation = CompetitionPage.class)))
+    @ApiResponse(responseCode = "400", description = "Invalid parameters", content = @Content(schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(responseCode = "401", description = "Authentication required")
+    @GetMapping
+    @Transactional(readOnly = true)
+    CompetitionPage list(
+            @Parameter(description = "Zero-based page; page multiplied by size must not exceed 2147483647", schema = @Schema(minimum = "0")) @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size", schema = @Schema(minimum = "1", maximum = "100")) @RequestParam(defaultValue = "20") int size,
+            @Parameter(description = "Case-insensitive literal title search") @RequestParam(defaultValue = "") String search,
+            @Parameter(description = "Start date order") @RequestParam(defaultValue = "ASC") SortDirection sort) {
+        if (page < 0 || size < 1 || size > 100 || (long) page * size > Integer.MAX_VALUE || search.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Invalid list parameters");
+        }
+        var direction = Sort.Direction.valueOf(sort.name());
+        var result = repository.findList(search, PageRequest.of(page, size, Sort.by(direction, "startDate").and(Sort.by("id"))));
+        var now = Instant.now();
+        return new CompetitionPage(result.map(item -> CompetitionListItem.from(item, now)).getContent(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
+    enum SortDirection { ASC, DESC }
+    enum CompetitionState { UPCOMING, IN_PROGRESS, COMPLETED }
+    record CompetitionPage(List<CompetitionListItem> content, int page, int size, long totalElements, int totalPages) { }
+    record CompetitionListItem(Long id, String title, LocalDate startDate, LocalDate endDate, String location,
+                               String timeZone, CompetitionState state, long categoryCount, long crewCount) {
+        static CompetitionListItem from(CompetitionListProjection item, Instant now) {
+            var today = now.atZone(ZoneId.of(item.getTimeZone())).toLocalDate();
+            var state = today.isBefore(item.getStartDate()) ? CompetitionState.UPCOMING
+                    : today.isAfter(item.getEndDate()) ? CompetitionState.COMPLETED : CompetitionState.IN_PROGRESS;
+            return new CompetitionListItem(item.getId(), item.getTitle(), item.getStartDate(), item.getEndDate(),
+                    item.getLocation(), item.getTimeZone(), state, item.getCategoryCount(), item.getCrewCount());
+        }
+    }
     @ResponseStatus(HttpStatus.CREATED)
     @PostMapping
     @Transactional
