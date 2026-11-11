@@ -51,4 +51,23 @@ public class ParallelSprintHeat extends VersionedEntity {
         this.nextHeat = nextHeat;
         this.nextSlot = nextSlot;
     }
+    /** Records an already validated result. */
+    public void record(AttemptResultStatus firstStatus, Integer firstTime, AttemptResultStatus secondStatus, Integer secondTime, int winner) {
+        this.status1 = firstStatus;
+        this.time1Centiseconds = firstTime;
+        this.status2 = secondStatus;
+        this.time2Centiseconds = secondTime;
+        this.winnerSlot = winner;
+    }
+
+    /** Changes only the feeder's own slot, before this heat has been played. */
+    public void advance(int slot, CrewEntry previousWinner, CrewEntry winner) {
+        if (winnerSlot != null || status1 != null || status2 != null || time1Centiseconds != null || time2Centiseconds != null)
+            throw new IllegalStateException("downstream heat has already been played");
+        var existing = slot == 1 ? crew1 : crew2;
+        if (slot != 1 && slot != 2) throw new IllegalArgumentException("invalid destination slot");
+        if (existing != null && (previousWinner == null || !existing.getId().equals(previousWinner.getId())))
+            throw new IllegalStateException("downstream slot is already occupied");
+        if (slot == 1) crew1 = winner; else crew2 = winner;
+    }
 }
