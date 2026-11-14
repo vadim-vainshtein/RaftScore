@@ -14,13 +14,10 @@ beforeEach(() => { vi.mocked(apiRequest).mockReset().mockImplementation(async pa
   return [detail]
 }); vi.mocked(csrfRequest).mockReset().mockResolvedValue({}) })
 afterEach(() => cleanup())
-test('filters crews and submits the current roster, typed answers and version', async () => {
+test('submits the current roster, typed answers and version', async () => {
   render(<Crews/>); const competition = await screen.findByLabelText('Competition')
   fireEvent.mouseDown(competition); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
   await screen.findByText(/River/)
-  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'missing'}})
-  expect(screen.queryByText(/River/)).not.toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: ''}})
   fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
   expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
   expect(within(screen.getByRole('group', {name: 'Member 1'})).getByLabelText(/Given name/)).toHaveValue('Sam')
@@ -47,7 +44,7 @@ test('selects participants by ID when names match', async () => {
   expect(screen.getByRole('status')).toHaveTextContent('Rapid')
   fireEvent.change(screen.getByLabelText(/Crew name/), {target: {value: 'New'}})
   fireEvent.change(screen.getByLabelText(/Region or club/), {target: {value: 'Club'}})
-  fireEvent.change(screen.getByLabelText(/Representative/), {target: {value: 'Coach'}})
+  fireEvent.change(screen.getByLabelText(/Representative/, {selector: 'input'}), {target: {value: 'Coach'}})
   fireEvent.change(screen.getByLabelText(/Start number/), {target: {value: '8'}})
   expect(screen.getByRole('button', {name: 'Save'})).toBeDisabled()
   fireEvent.submit(screen.getByRole('button', {name: 'Save'}).closest('form')!)
@@ -59,6 +56,7 @@ test('read-only view requests only public data and offers no mutations', async (
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}]}
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', admissionConfirmationRequired: true}
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
+    if (path.startsWith('/api/crew-search/public?')) return [{id: 99, crewName: 'Other crew', startNumber: 7, rosterVariant: 1, competitionTitle: 'Old race', categoryName: 'R1', startDate: '2025-01-01', regionOrClub: 'Old club'}, {id: 100, crewName: 'Other crew', startNumber: 8, rosterVariant: 2, competitionTitle: 'Old race', categoryName: 'R1', startDate: '2025-01-01', regionOrClub: 'Old club'}]
     if (path.endsWith('/entries')) return [{id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7}]
     throw new Error(`Unexpected request ${path}`)
   })
@@ -66,7 +64,11 @@ test('read-only view requests only public data and offers no mutations', async (
   fireEvent.mouseDown(await screen.findByLabelText('Competition'))
   fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
   expect(await screen.findByText(/River/)).toBeInTheDocument()
-  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject/})).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'Other'}})
+  expect(await screen.findByText(/7 — Other crew — Old race/)).toBeInTheDocument()
+  expect(screen.getByText(/8 — Other crew — Old race/)).toHaveTextContent('Roster variant 2')
+  expect(screen.getByText(/7 — Other crew — Old race/)).toHaveTextContent('Roster variant 1')
+  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject|Use roster/})).not.toBeInTheDocument()
   expect(vi.mocked(apiRequest).mock.calls.map(([path]) => path)).not.toEqual(expect.arrayContaining(['/api/competitions/1/entries/private', '/api/competitions/1/entries/requirements']))
 })
 
@@ -97,19 +99,32 @@ test('localizes known API errors and never displays server details', async () =>
   await act(async () => { await i18n.changeLanguage('en') })
 })
 
-test('edits category seat labels and uses them in the crew form', async () => {
-  const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => path === '/api/seat-names' ? Promise.resolve([{name: 'Bow'}]) : path.endsWith('/categories') ? Promise.resolve([{id: 2, displayName: 'R1', crewSize: 1, version: 3, seatLabels: []}]) : previous(path))
-  vi.mocked(csrfRequest).mockResolvedValue({id: 2, displayName: 'R1', crewSize: 1, version: 4, seatLabels: ['Bow']})
+test('uses the selected roster participant as representative', async () => {
   render(<Crews/>)
   fireEvent.mouseDown(await screen.findByLabelText('Competition'))
   fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
   fireEvent.mouseDown(await screen.findByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-  fireEvent.click(screen.getByRole('button', {name: 'Edit seat names'}))
-  fireEvent.change(await screen.findByLabelText('Seat 1'), {target: {value: 'Bow'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
+  await screen.findByLabelText('Representative from roster')
+  fireEvent.mouseDown(screen.getByLabelText('Representative from roster'))
+  fireEvent.click(screen.getByRole('option', {name: /1\. Smith Sam/}))
+  fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Jones'}})
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2/seat-labels', 'PUT', {version: 3, seatLabels: ['Bow']}))
-  fireEvent.click(await screen.findByRole('button', {name: 'Create crew'}))
-  expect(screen.getByRole('group', {name: 'Bow'})).toBeInTheDocument()
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({representative: 'Jones Sam', representativePosition: 1})))
+})
+
+test('prefills a new registration from another competition without carrying its entry identity', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'River', startNumber: 1, regionOrClub: 'Old club', startDate: '2025-01-01', competitionTitle: 'Old race', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}]) : path === '/api/competitions/9/entries/90' ? Promise.resolve({...detail, id: 90, categoryId: 20, regionOrClub: 'Old club', representative: 'Old Member', representativePosition: 1, representativeContacts: {phone: '123'}, roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'River'}})
+  fireEvent.click(await screen.findByRole('button', {name: 'Use roster'}))
+  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
+  expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
+  expect(screen.getByLabelText(/Start number/)).toHaveValue(null)
 })

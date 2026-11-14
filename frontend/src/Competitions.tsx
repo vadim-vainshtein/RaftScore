@@ -9,7 +9,10 @@ import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
 type Item = {id: number, title: string, startDate: string, endDate: string, location: string, state: 'CREATED' | 'STARTED' | 'COMPLETED', categoryCount: number, crewCount: number}
-type Details = {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
+type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
+type Policy = 'HIDDEN' | 'OPTIONAL' | 'REQUIRED'
+const defaultFields: Record<Field, Policy> = {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}
+type Details = {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean, status: 'CREATED' | 'STARTED' | 'COMPLETED', representativeFields?: Record<Field, Policy>}
 type Draft = Omit<Details, 'id' | 'version' | 'status'> & {id?: number, version?: number}
 type Page = {content: Item[], page: number, totalPages: number, totalElements: number}
 
@@ -42,16 +45,43 @@ export default function Competitions({readOnly}: {readOnly: boolean}) {
       <TextField required label={t('competition.timeZone')} value={draft.timeZone} onChange={e => setDraft({...draft, timeZone: e.target.value})}/>
       <TextField label={t('competition.description')} multiline value={draft.description ?? ''} onChange={e => setDraft({...draft, description: e.target.value})}/>
       <FormControlLabel label={t('competition.admission')} control={<Checkbox checked={draft.admissionConfirmationRequired} onChange={e => setDraft({...draft, admissionConfirmationRequired: e.target.checked})}/>}/>
+      <Typography>{t('crew.representativeSettings')}</Typography>
+      {(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => <TextField key={field} select label={t(`crew.${field}`)} value={(draft.representativeFields ?? defaultFields)[field]} onChange={e => setDraft({...draft, representativeFields: {...(draft.representativeFields ?? defaultFields), [field]: e.target.value as Policy}})}>{(['HIDDEN', 'OPTIONAL', 'REQUIRED'] as const).map(policy => <MenuItem key={policy} value={policy}>{t(`crew.policy.${policy}`)}</MenuItem>)}</TextField>)}
       <Box><Button type="submit" disabled={busy}>{t('competition.save')}</Button><Button disabled={busy} onClick={() => setDraft(null)}>{t('competition.cancel')}</Button></Box>
     </Box> : details ? <Box sx={{display: 'grid', gap: 1}}>
       <Typography variant="h5">{details.title}</Typography><Typography>{displayDate(details.startDate)} – {displayDate(details.endDate)} · {details.location} · {details.timeZone}</Typography>
       {details.description && <Typography>{details.description}</Typography>}
       <Typography>{t('competition.admission')}: {t(details.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}</Typography>
+      {!readOnly && details.status !== 'COMPLETED' && <CompetitionCategorySeats competitionId={details.id}/>}
       <Typography>{t(`competition.states.${details.status}`)}</Typography>
       <Box>{details.status !== 'CREATED' && <Button component="a" href={`#/workspace/${details.id}`}>{t('competition.workspace')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={async () => {if (details.status === 'STARTED' && !window.confirm(t('competition.confirmComplete'))) return; setBusy(true); try {setDetails(await csrfRequest<Details>(`/api/competitions/${details.id}/status`, 'PUT', {status: details.status === 'CREATED' ? 'STARTED' : 'COMPLETED', version: details.version})); setRevision(v => v + 1)} catch(e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t(details.status === 'CREATED' ? 'competition.start' : 'competition.complete')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => setDraft(details)}>{t('competition.edit')}</Button>}<Button onClick={() => setDetails(null)}>{t('competition.back')}</Button></Box>
     </Box> : <>
       <Box sx={{display: 'flex', flexWrap: 'wrap', gap: 2}}><TextField label={t('competition.search')} value={search} onChange={e => {setSearch(e.target.value); setPage(0)}}/><TextField select label={t('competition.sort')} value={sort} onChange={e => {setSort(e.target.value); setPage(0)}}><MenuItem value="ASC">{t('competition.ascending')}</MenuItem><MenuItem value="DESC">{t('competition.descending')}</MenuItem></TextField>{!readOnly && <Button onClick={() => setCreating(true)}>{t('competition.create')}</Button>}</Box>
       {result && <><Typography>{t('competition.total', {count: result.totalElements})}</Typography>{result.content.map(item => <Box key={item.id}><Typography>{item.title} · {displayDate(item.startDate)} – {displayDate(item.endDate)} · {item.location} · {t(`competition.states.${item.state}`)} · {t('competition.counts', {categories: item.categoryCount, crews: item.crewCount})}</Typography><Button disabled={busy} onClick={() => void open(item.id)}>{t('competition.open')}</Button>{!readOnly && item.state !== 'COMPLETED' && <Button disabled={busy} onClick={() => void edit(item.id)}>{t('competition.edit')}</Button>}</Box>)}<Box><Button disabled={page === 0} onClick={() => setPage(page - 1)}>{t('competition.previous')}</Button><Typography component="span">{page + 1} / {Math.max(1, result.totalPages)}</Typography><Button disabled={page + 1 >= result.totalPages} onClick={() => setPage(page + 1)}>{t('competition.next')}</Button></Box></>}
     </>}
+  </Box>
+}
+
+function CompetitionCategorySeats({competitionId}: {competitionId: number}) {
+  const {t} = useTranslation()
+  const [categories, setCategories] = useState<{id: number, displayName: string, crewSize: number, version: number, seatLabels: string[]}[]>([])
+  const [editing, setEditing] = useState<number | null>(null), [labels, setLabels] = useState<string[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  useEffect(() => {let active = true; apiRequest<typeof categories>(`/api/competitions/${competitionId}/categories`).then(result => {if (active) setCategories(result)}).catch(e => {if (active) setError(apiErrorKey(e))}); return () => {active = false}}, [competitionId])
+  const item = categories.find(category => category.id === editing)
+  const save = async () => {if (!item) return; setBusy(true); setError(''); try {const updated = await csrfRequest<typeof item>(`/api/competitions/${competitionId}/categories/${item.id}/seat-labels`, 'PUT', {version: item.version, seatLabels: labels}); setCategories(current => current.map(c => c.id === updated.id ? updated : c)); setEditing(null)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
+  return <Box>
+    <Typography>{t('crew.categorySeats')}</Typography>
+    {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
+    {categories.map(category => <Box key={category.id}>
+      <Typography>{category.displayName}</Typography>
+      <Button disabled={busy} onClick={() => {setEditing(category.id); setLabels(category.seatLabels ?? [])}}>{t('crew.editCategory')}</Button>
+    </Box>)}
+    {item && <Box component="form" onSubmit={event => {event.preventDefault(); void save()}}>
+      <fieldset><legend>{t('crew.editCategory')}: {item.displayName}</legend>
+        {Array.from({length: Math.min(item.crewSize, Math.max(8, labels.length))}, (_, i) => <TextField key={i} label={t('crew.seat', {number: i + 1})} value={labels[i] ?? ''} onChange={e => setLabels(Array.from({length: Math.max(i + 1, labels.length)}, (_, n) => n === i ? e.target.value : labels[n] ?? ''))}/>)}
+        <Button disabled={busy || Math.max(8, labels.length) >= item.crewSize} onClick={() => setLabels(Array.from({length: Math.max(8, labels.length) + 1}, (_, i) => labels[i] ?? ''))}>{t('crew.addSeat')}</Button>
+      </fieldset>
+      <Button type="submit" disabled={busy}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => setEditing(null)}>{t('crew.cancel')}</Button>
+    </Box>}
   </Box>
 }

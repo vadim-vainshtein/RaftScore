@@ -40,7 +40,7 @@ test('full access configures a race and corrects results', async ({ page }) => {
     await page.getByRole('button', { name: 'Create crew' }).click()
     await page.getByLabel('Crew name').fill(name)
     await page.getByLabel('Region or club').fill('Club')
-    await page.getByLabel('Representative').fill('Coach')
+    await page.getByRole('textbox', {name: /^Representative(?:\s*\*)?$/}).fill('Coach')
     await page.getByLabel('Start number').fill(number)
     await page.getByLabel('Surname').fill(name)
     await page.getByLabel('Given name').fill('Racer')

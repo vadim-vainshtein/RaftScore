@@ -85,6 +85,85 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         mvc.perform(get("/api/competitions/" + competition.getId() + "/categories").with(user("reader").roles("READ_ONLY")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$[0].crewSize").value(4));
     }
+    @Test
+    void registrationValidatesContactPoliciesAndSearchKeepsContactsPrivate() throws Exception {
+        competition.setRepresentativeFields(java.util.Map.of("representative", "OPTIONAL", "phone", "REQUIRED", "whatsapp", "HIDDEN", "telegram", "OPTIONAL", "email", "OPTIONAL"));
+        competitions.saveAndFlush(competition);
+        var body = createBody().replace("\"regionOrClub\":\"Club\",", "").replace("\"representative\":\"Coach\",", "");
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        body = body.replace("\"startNumber\":1", "\"representative\":\"A A\",\"representativeContacts\":{\"phone\":\"123\"},\"representativePosition\":1,\"startNumber\":1");
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.regionOrClub").value("")).andExpect(jsonPath("$.representativeContacts.phone").value("123")).andExpect(jsonPath("$.representativePosition").value(1));
+        mvc.perform(get("/api/crew-search").param("name", "CREW").with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].roster[0].surname").value("A"))
+                .andExpect(jsonPath("$[0].representativeContacts").doesNotExist());
+        mvc.perform(get("/api/crew-search").param("name", "Crew").with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/crew-search/public").param("name", "crew").with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].crewName").value("Crew"))
+                .andExpect(jsonPath("$[0].roster").doesNotExist()).andExpect(jsonPath("$[0].representativeContacts").doesNotExist())
+                .andExpect(jsonPath("$[0].representative").doesNotExist());
+        mvc.perform(get("/api/crew-search/public").param("name", "crew")).andExpect(status().isUnauthorized());
+    }
+    @Test
+    void searchMatchesCyrillicAndTreatsWildcardsLiterally() throws Exception {
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content(createBody().replace("Crew", "Экипаж 100%"))).andExpect(status().isCreated());
+        mvc.perform(get("/api/crew-search").param("name", "эКиПаЖ").with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].crewName").value("Экипаж 100%"));
+        mvc.perform(get("/api/crew-search").param("name", "_").with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+    }
+    @Test
+    void omittedRepresentativePositionIsPreservedAndExplicitNullClearsIt() throws Exception {
+        var body = createBody().replace("Coach", "A A").replace("\"startNumber\":1", "\"representativePosition\":1,\"startNumber\":1");
+        var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse();
+        Number id = JsonPath.read(created.getContentAsString(), "$.id");
+        Number createdVersion = JsonPath.read(created.getContentAsString(), "$.version");
+        var unchanged = "{\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"A A\",\"startNumber\":1,\"version\":" + createdVersion + "}";
+        var updated = mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(unchanged))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.representativePosition").value(1)).andReturn().getResponse();
+        Number version = JsonPath.read(updated.getContentAsString(), "$.version");
+        var cleared = unchanged.replace("\"A A\"", "\"Another person\"").replace("\"version\":" + createdVersion, "\"version\":" + version + ",\"representativePosition\":null");
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(cleared))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.representativePosition").doesNotExist());
+    }
+    @Test
+    void publicSearchDistinguishesSameNameWithStartNumbers() throws Exception {
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isCreated());
+        var second = createBody().replace("\"startNumber\":1", "\"startNumber\":2")
+                .replace("\"surname\":\"A\"", "\"surname\":\"E\"");
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(second)).andExpect(status().isCreated());
+        mvc.perform(get("/api/crew-search/public").param("name", "crew").with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].startNumber").value(2)).andExpect(jsonPath("$[1].startNumber").value(1))
+                .andExpect(jsonPath("$[0].rosterVariant").value(1)).andExpect(jsonPath("$[1].rosterVariant").value(2))
+                .andExpect(jsonPath("$[0].roster").doesNotExist());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void rejectsMismatchedSelectedRepresentativeAndRollsBack() throws Exception {
+        try {
+            var invalid = createBody().replace("\"startNumber\":1", "\"representativePosition\":1,\"startNumber\":1");
+            mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(invalid)).andExpect(status().isBadRequest());
+            assertThat(entries.findByCompetitionCategoryId(category.getId())).isEmpty();
+            var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody()))
+                    .andExpect(status().isCreated()).andReturn().getResponse();
+            Number id = JsonPath.read(created.getContentAsString(), "$.id");
+            Number version = JsonPath.read(created.getContentAsString(), "$.version");
+            var update = updateBody(version.toString()).replace("}", ",\"representativePosition\":1}");
+            mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(update)).andExpect(status().isBadRequest());
+            mvc.perform(get(url + "/" + id).with(user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk()).andExpect(jsonPath("$.crewName").value("Crew")).andExpect(jsonPath("$.representative").value("Coach"));
+        } finally {
+            cleanupParticipants(category.getId());
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            categories.deleteById(category.getId());
+            competitions.deleteById(competition.getId());
+            competitions.deleteById(other.getId());
+        }
+    }
+
     String createBody() { return "{\"categoryId\":" + category.getId() + ",\"crewName\":\"Crew\",\"regionOrClub\":\"Club\",\"representative\":\"Coach\",\"startNumber\":1,\"roster\":[{\"surname\":\"A\",\"givenName\":\"A\"},{\"surname\":\"B\",\"givenName\":\"B\"},{\"surname\":\"C\",\"givenName\":\"C\"},{\"surname\":\"D\",\"givenName\":\"D\"}]}"; }
     String updateBody(String version) { return "{\"crewName\":\"Changed\",\"regionOrClub\":\"Region\",\"representative\":\"Rep\",\"startNumber\":2,\"version\":" + version + "}"; }
     void cleanupParticipants(Long... categoryIds) {

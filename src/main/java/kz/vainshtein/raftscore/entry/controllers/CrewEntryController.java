@@ -92,8 +92,10 @@ class CrewEntryController {
             @NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
             @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal categoryId,
             @NotBlank @Pattern(regexp = "[^\\x00]*") String crewName,
-            @NotBlank @Pattern(regexp = "[^\\x00]*") String regionOrClub,
-            @NotBlank @Pattern(regexp = "[^\\x00]*") String representative,
+            @Pattern(regexp = "[^\\x00]*") String regionOrClub,
+            @Pattern(regexp = "[^\\x00]*") String representative,
+            java.util.Map<String, String> representativeContacts,
+            @Positive Integer representativePosition,
             @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0)
             @Schema(implementation = Integer.class, type = "integer", format = "int32") BigDecimal startNumber,
             @NotNull List<@NotNull @Valid MemberRequest> roster,
@@ -101,8 +103,10 @@ class CrewEntryController {
 
     record UpdateRequest(
             @NotBlank @Pattern(regexp = "[^\\x00]*") String crewName,
-            @NotBlank @Pattern(regexp = "[^\\x00]*") String regionOrClub,
-            @NotBlank @Pattern(regexp = "[^\\x00]*") String representative,
+            @Pattern(regexp = "[^\\x00]*") String regionOrClub,
+            @Pattern(regexp = "[^\\x00]*") String representative,
+            java.util.Map<String, String> representativeContacts,
+            @JsonDeserialize(using = PositionUpdateDeserializer.class) PositionUpdate representativePosition,
             @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0)
             @Schema(implementation = Integer.class, type = "integer", format = "int32") BigDecimal startNumber,
             @NotNull @PositiveOrZero @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0)
@@ -110,12 +114,23 @@ class CrewEntryController {
             List<@NotNull @Valid MemberRequest> roster,
             List<@NotNull @Valid RequirementAnswer> requirementAnswers) { }
 
+    record PositionUpdate(Integer value) { }
+    static class PositionUpdateDeserializer extends ValueDeserializer<PositionUpdate> {
+        @Override public PositionUpdate deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.currentToken() != tools.jackson.core.JsonToken.VALUE_NUMBER_INT) throw new InvalidRepresentative();
+            try { return new PositionUpdate(parser.getBigIntegerValue().intValueExact()); }
+            catch (ArithmeticException ex) { throw new InvalidRepresentative(); }
+        }
+        @Override public Object getNullValue(DeserializationContext context) { return new PositionUpdate(null); }
+        @Override public Object getAbsentValue(DeserializationContext context) { return null; }
+    }
+
     record EntryResponse(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub,
-                         String representative, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible, List<AnswerResponse> requirementAnswers) {
+                         String representative, java.util.Map<String, String> representativeContacts, Integer representativePosition, int startNumber, long version, List<MemberResponse> roster, Boolean admissionDecision, boolean eligible, List<AnswerResponse> requirementAnswers) {
         static EntryResponse from(CrewEntry entry, List<CrewMembership> roster, boolean eligible, List<CrewRequirementValue> answers) {
             var category = entry.getCompetitionCategory();
             return new EntryResponse(entry.getId(), category.getCompetition().getId(), category.getId(),
-                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligible, answers.stream().map(AnswerResponse::from).toList());
+                    entry.getCrewName(), entry.getRegionOrClub(), entry.getRepresentative(), entry.getRepresentativeContacts(), entry.getRepresentativePosition(), entry.getStartNumber(), entry.getVersion(), roster.stream().map(MemberResponse::from).toList(), entry.getAdmissionDecision(), eligible, answers.stream().map(AnswerResponse::from).toList());
         }
     }
 
@@ -204,9 +219,14 @@ class CrewEntryController {
         var category = categories.findByIdAndCompetitionId(request.categoryId().longValueExact(), competitionId).orElseThrow(CategoryNotFound::new);
         lifecycle.requireEditable(competitionId);
         validateRoster(request.roster(), category.getCrewSize());
+        validateRepresentativePosition(request.representativePosition(), category.getCrewSize());
+        validateRepresentative(category.getCompetition(), request.representative(), request.representativeContacts());
         var entry = entries.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName(request.crewName())
                 .regionOrClub(request.regionOrClub()).representative(request.representative()).startNumber(request.startNumber().intValueExact()).build());
+        entry.setRepresentativeContacts(request.representativeContacts());
+        entry.setRepresentativePosition(request.representativePosition());
         var roster = replaceRoster(entry, request.roster());
+        validateSelectedRepresentative(request.representativePosition(), request.representative(), roster);
         replaceAnswers(entry, request.requirementAnswers());
         return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId())));
     }
@@ -226,7 +246,13 @@ class CrewEntryController {
         if (entry.getVersion() != request.version().longValueExact()) throw new OptimisticLockingFailureException("Stale entry version");
         var roster = memberships.findByCrewEntryIdOrderByPositionAsc(entryId);
         validateRoster(request.roster() == null ? roster : request.roster(), entry.getCompetitionCategory().getCrewSize());
+        var position = updatedRepresentativePosition(request, entry, roster);
+        validateRepresentativePosition(position, entry.getCompetitionCategory().getCrewSize());
+        var contacts = request.representativeContacts() == null ? entry.getRepresentativeContacts() : request.representativeContacts();
+        validateRepresentative(entry.getCompetitionCategory().getCompetition(), request.representative(), contacts);
         entry.updateDetails(request.crewName(), request.regionOrClub(), request.representative(), request.startNumber().intValueExact());
+        entry.setRepresentativeContacts(contacts);
+        entry.setRepresentativePosition(position);
         entries.flush();
         if (request.roster() != null || request.requirementAnswers() != null) {
             if (entry.getVersion() == request.version().longValueExact()) {
@@ -238,6 +264,7 @@ class CrewEntryController {
             if (request.roster() != null) roster = replaceRoster(entry, request.roster());
             replaceAnswers(entry, request.requirementAnswers());
         }
+        if (request.representativePosition() != null) validateSelectedRepresentative(position, request.representative(), roster);
         return EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }
 
@@ -274,6 +301,45 @@ class CrewEntryController {
     @ExceptionHandler(InvalidAnswers.class)
     ResponseEntity<ApiError> invalidAnswers() { return ResponseEntity.badRequest().body(ApiError.of("crew_entry.invalid_requirement_answers")); }
     private static class InvalidAnswers extends RuntimeException { }
+
+    private void validateRepresentative(kz.vainshtein.raftscore.competition.entities.Competition competition, String representative, java.util.Map<String, String> contacts) {
+        var values = contacts == null ? java.util.Map.<String, String>of() : contacts;
+        if (!java.util.Set.of("phone", "whatsapp", "telegram", "email").containsAll(values.keySet()) || values.values().stream().anyMatch(v -> v == null || v.indexOf(0) >= 0)) throw new InvalidRepresentative();
+        for (var field : competition.getRepresentativeFields().entrySet()) {
+            var value = field.getKey().equals("representative") ? representative : values.get(field.getKey());
+            if (field.getValue().equals("REQUIRED") && (value == null || value.isBlank())) throw new InvalidRepresentative();
+        }
+    }
+
+    @ExceptionHandler(InvalidRepresentative.class)
+    ResponseEntity<ApiError> invalidRepresentative() { return ResponseEntity.badRequest().body(ApiError.of("request.validation_failed")); }
+    private static class InvalidRepresentative extends RuntimeException { }
+
+    private Integer updatedRepresentativePosition(UpdateRequest request, CrewEntry entry, List<CrewMembership> roster) {
+        if (request.representativePosition() != null) return request.representativePosition().value();
+        var position = entry.getRepresentativePosition();
+        if (position == null || !java.util.Objects.equals(request.representative(), entry.getRepresentative())) return null;
+        var previous = roster.get(position - 1).getParticipant();
+        var previousName = java.util.stream.Stream.of(previous.getSurname(), previous.getGivenName(), previous.getPatronymic())
+                .filter(value -> value != null && !value.isBlank()).collect(java.util.stream.Collectors.joining(" "));
+        if (!previousName.equals(entry.getRepresentative())) return null;
+        if (request.roster() == null) return position;
+        var selected = request.roster().get(position - 1);
+        if (selected.participantId() != null) return selected.participantId().longValueExact() == previous.getId() ? position : null;
+        return java.util.Objects.equals(selected.surname(), previous.getSurname()) && java.util.Objects.equals(selected.givenName(), previous.getGivenName()) && java.util.Objects.equals(selected.patronymic(), previous.getPatronymic()) ? position : null;
+    }
+
+    private void validateSelectedRepresentative(Integer position, String representative, List<CrewMembership> roster) {
+        if (position == null) return;
+        var person = roster.get(position - 1).getParticipant();
+        var name = java.util.stream.Stream.of(person.getSurname(), person.getGivenName(), person.getPatronymic())
+                .filter(value -> value != null && !value.isBlank()).collect(java.util.stream.Collectors.joining(" "));
+        if (!name.equals(representative)) throw new InvalidRepresentative();
+    }
+
+    private void validateRepresentativePosition(Integer position, int size) {
+        if (position != null && (position < 1 || position > size)) throw new InvalidRepresentative();
+    }
 
     private void validateRoster(List<?> roster, int size) {
         if (roster == null || roster.size() != size) throw new InvalidRoster();

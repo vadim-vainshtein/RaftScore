@@ -7,7 +7,9 @@ import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
 type FieldIssue = {step: number, field: string, label: string, message?: string}
-type Competition = {title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}
+type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
+type Policy = 'HIDDEN' | 'OPTIONAL' | 'REQUIRED'
+type Competition = {title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean, representativeFields: Record<Field, Policy>}
 type Template = {seatLabels?: string[], id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean}
 type Category = {seatLabels?: string[], templateId?: number, classLabel: string, scoringGroupLabel: string, crewSize: number}
 type Requirement = {name: string, valueType: string, required: boolean, displayOrder: number}
@@ -23,7 +25,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
   const disciplineName = (d: Discipline) => d.name.trim() || t(('discipline.types.' + d.type) as 'discipline.types.SPRINT')
   const displayDate = (value: string) => value ? formatDate(new Date(`${value}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC') : '—'
   const [step, setStep] = useState(0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const [competition, setCompetition] = useState<Competition>({title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false})
+  const [competition, setCompetition] = useState<Competition>({title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
   const zones = useMemo(() => {
     const date = competition.startDate ? new Date(competition.startDate + 'T12:00:00Z') : new Date()
     const reference = Number.isNaN(date.getTime()) ? new Date() : date
@@ -125,7 +127,8 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <Button disabled={Math.max(8, c.seatLabels?.length ?? 0) >= c.crewSize} onClick={() => setCategories(categories.map((item, index) => index !== i ? item : {...item, seatLabels: Array.from({length: Math.max(8, item.seatLabels?.length ?? 0) + 1}, (_, n) => item.seatLabels?.[n] ?? '')}))}>{categoryT('addSeat')}</Button>
       </Box>)}
       </>}
-    {step === 2 && <>{requirements.length === 0 && <Typography>{t('wizard.noRequirements')}
+    {step === 2 && <><Typography>{t('crew.representativeSettings')}</Typography>{(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => <TextField key={field} select label={t(`crew.${field}`)} value={competition.representativeFields[field]} onChange={e => setCompetition({...competition, representativeFields: {...competition.representativeFields, [field]: e.target.value as Policy}})}>{(['HIDDEN', 'OPTIONAL', 'REQUIRED'] as const).map(policy => <MenuItem key={policy} value={policy}>{t(`crew.policy.${policy}`)}</MenuItem>)}</TextField>)}
+{requirements.length === 0 && <Typography>{t('wizard.noRequirements')}
       </Typography>}<FormControlLabel label={t('competition.admission')} control={<Checkbox checked={competition.admissionConfirmationRequired} onChange={e => setCompetition({...competition, admissionConfirmationRequired: e.target.checked})}/>} />
       <Button onClick={() => setRequirements([...requirements, {name: '', valueType: 'YES_NO', required: false, displayOrder: requirements.length}])}>{t('wizard.addRequirement')}
       </Button>{requirements.map((r, i) => <Box key={i} sx={{display: 'flex', gap: 1, flexWrap: 'wrap'}}>

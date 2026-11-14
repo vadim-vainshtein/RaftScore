@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+  <changeSet id="0103-representative-fields" author="raftscore">
+    <sql>ALTER TABLE competitions ADD COLUMN representative_fields jsonb NOT NULL DEFAULT '{"representative":"REQUIRED","phone":"OPTIONAL","whatsapp":"OPTIONAL","telegram":"OPTIONAL","email":"OPTIONAL"}'::jsonb;
+    ALTER TABLE crew_entries ADD COLUMN representative_contacts jsonb NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE crew_entries ADD COLUMN representative_position integer;</sql>
+  </changeSet>
+</databaseChangeLog>
