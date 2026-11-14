@@ -206,7 +206,19 @@
     "total": "Attempt total",
     "best": "Best / total",
     "place": "Place",
-    "statusHelp": "DNS: did not start; DNF: did not finish. Disqualification may apply to an attempt, discipline, or competition."
+    "statusHelp": "DNS: did not start; DNF: did not finish. Disqualification may apply to an attempt, discipline, or competition.",
+    "saved": "Result saved for {{crew}} (attempt {{attempt}}).",
+    "stale": "Calculated data may be out of date.",
+    "retryRefresh": "Retry refresh",
+    "saveFailed": "Save could not be confirmed. Your draft is kept.",
+    "conflict": "This result changed elsewhere. Your draft is kept.",
+    "loadCurrent": "Load current version",
+    "draft": "Your draft",
+    "current": "Current version",
+    "noCurrent": "No saved result",
+    "discardDraft": "Discard draft",
+    "keepDraft": "Keep draft",
+    "missingGate": "Complete gate {{number}}."
   },
   "results": {
     "overall": "Overall",
