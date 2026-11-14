@@ -1,17 +1,30 @@
-# RaftScore Issue Workflow
+# RaftScore Development Workflow
 
-Use this workflow for work that originates from a repository issue:
+For each new implementation task, create a separate branch before making changes
+and implement the task in that branch. Keep changes scoped to the task and
+preserve unrelated local work.
 
-1. Take the issue and inspect its labels before planning or editing. Continue only
-   when it is labeled `task`; do not implement issues labeled `epic` or `feature`.
-   If its classification is missing or conflicting, ask the user to clarify.
-2. Create a new issue-linked branch before making code changes, then perform all
-   implementation work in that branch. Use the repository host's issue-development
-   workflow when available so the branch is associated with the issue.
-3. Keep the work scoped to that issue and preserve unrelated local changes.
-4. Create a pull request only when the user explicitly asks. Creating a remote
-   branch or pull request is an external action and requires the user's explicit
-   authorization; do not push, open, merge, or modify a PR otherwise.
+## Development Review
+
+These requirements apply to the general development pipeline for this repository.
+
+- Delegate implementation and validation to `task_developer` using `gpt-6.1-terra`.
+- After each developer pass, start a fresh, independent, read-only
+  `task_reviewer` using `gpt-6.1-terra` and `fork_turns="none"`.
+- Give the reviewer the original user task description verbatim as its sole task
+  context. The reviewer must find the branch diff from the repository; provide
+  only neutral target access metadata if necessary. Do not provide implementation
+  session history or summaries, rationale, findings from previous passes, or
+  validation reports.
+- Return actionable findings to the developer automatically, then revalidate and
+  review again with a new independent reviewer until no actionable findings remain.
+  Ask the user only when a necessary product or scope decision, blocker, or
+  independently gated operation requires their input.
+- After validation succeeds and the independent reviewer approves, the coordinator
+  commits only reviewed task changes, pushes the task branch to GitHub, opens a PR
+  to the repository's default branch, and merges it once required checks and branch
+  protection allow. This workflow authorizes these actions for project tasks.
+- Retain explicit authorization gates for deployment and other unrelated gated actions.
 
 ## Code Readability
 
