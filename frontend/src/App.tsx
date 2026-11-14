@@ -15,6 +15,7 @@ import Competitions from './Competitions'
 import type {Draft} from './Categories'
 import {useTranslation} from 'react-i18next'
 import './i18n/index'
+import './App.css'
 import {locales, persistLocale, supportedLocale} from './i18n/supported-locales'
 import type {Locale} from './i18n/supported-locales'
 import {createTheme, ThemeProvider} from '@mui/material/styles'
@@ -40,7 +41,7 @@ function App() {
   const {i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   useEffect(() => { document.documentElement.lang = locale }, [locale])
-  return <ThemeProvider theme={createTheme({}, locales[locale].mui)}><Shell locale={locale}/></ThemeProvider>
+  return <ThemeProvider theme={createTheme({palette: {primary: {main: '#006d70'}, background: {default: '#f2f6f7', paper: '#ffffff'}}, components: {MuiButton: {styleOverrides: {root: {textTransform: 'none', minHeight: 44}}}}}, locales[locale].mui)}><Shell locale={locale}/></ThemeProvider>
 }
 
 type Principal = {username: string, role: 'FULL_ACCESS' | 'READ_ONLY'}
@@ -208,7 +209,7 @@ function Shell({locale}: {locale: Locale}) {
     <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth}}>
       <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
       <List>
-        {routes.filter(route => !visiblePath.startsWith('/workspace/') && route.path !== '/workspace' && route.path !== '/result-grid' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
+        {routes.filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
           <ListItem key={route.path} disablePadding>
           <ListItemButton
             component="a"
@@ -236,30 +237,30 @@ function Shell({locale}: {locale: Locale}) {
 
   return (
     <Box sx={{display: 'flex', minHeight: '100vh'}}>
-      <CssBaseline/>
+      <CssBaseline/><a className="skip-link" href="#main-content" onClick={event => {event.preventDefault(); const main = document.getElementById('main-content'); main?.focus(); main?.scrollIntoView()}}>{t('app.skipToContent')}</a>
       <AppBar position="fixed" sx={{width: {md: `calc(100% - ${drawerWidth}px)`}, ml: {md: `${drawerWidth}px`}}}>
-        <Toolbar sx={{flexWrap: 'wrap', py: 1, gap: 1}}>
+        <Toolbar sx={{flexWrap: 'nowrap', py: 1, gap: 1}}>
           <Button color="inherit" aria-label={t('app.openNavigation')} aria-expanded={menuOpen && !isDesktop} onClick={() => setMenuOpen(true)} sx={{display: {md: 'none'}, mr: 2}}>{t('app.menu')}</Button>
-          <Typography variant="h6" component="div" sx={{flexGrow: 1}}>{t('app.name')}</Typography>
-          <Typography title={principal.username} sx={{minWidth: 0, maxWidth: {xs: 100, md: 240}, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{principal.username}</Typography>
-          <Typography sx={{whiteSpace: 'nowrap'}}>{auth(`roles.${principal.role}`)}</Typography>
+          <Box sx={{flexGrow: 1}}/>
+          <Typography>{auth(`roles.${principal.role}`)}</Typography><Box component="details" sx={{position: 'relative', '& summary': {maxWidth: {xs: 110, md: 240}, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}}><summary title={principal.username}>{principal.username}</summary><Box sx={{position: 'absolute', right: 0, top: '100%', p: 2, display: 'grid', gap: 1, minWidth: 180, backgroundColor: '#1d3140', boxShadow: 4}}>
+
           <Button color="inherit" disabled={busy} onClick={logout}>{auth('logout')}</Button>
           <TextField select size="small" label={t('app.language')} value={locale} onChange={event => changeLanguage(event.target.value)} sx={{minWidth: 120, backgroundColor: 'background.paper', borderRadius: 1}}>
             {Object.entries(locales).map(([code, config]) => <MenuItem key={code} value={code} lang={code}>{config.autonym}</MenuItem>)}
-          </TextField>
+          </TextField></Box></Box>
         </Toolbar>
       </AppBar>
-      <Drawer variant="temporary" slotProps={{paper: {"aria-label": t('app.navigation')}}} open={menuOpen && !isDesktop} onClose={() => setMenuOpen(false)} sx={{display: {xs: 'block', md: 'none'}}}>
+      <Drawer variant="temporary" slotProps={{paper: {"aria-label": t('app.navigation')}}} open={menuOpen && !isDesktop} onClose={() => setMenuOpen(false)} sx={{display: {xs: 'block', md: 'none'}, '& .MuiDrawer-paper': {backgroundColor: '#1d3140', color: '#fff'}}}>
         {navigation}
       </Drawer>
-      <Drawer variant="permanent" open sx={{display: {xs: 'none', md: 'block'}, width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': {width: drawerWidth, boxSizing: 'border-box'}}}>
+      <Drawer variant="permanent" open sx={{display: {xs: 'none', md: 'block'}, width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': {width: drawerWidth, boxSizing: 'border-box', backgroundColor: '#1d3140', color: '#fff'}}}>
         {navigation}
       </Drawer>
-      <Box component="main" sx={{flexGrow: 1, minWidth: 0, p: {xs: 2, sm: 3}}}>
-        <Box sx={{height: {xs: 128, md: 80}}}/>
-        <Typography component="h1" variant="h4">{title}</Typography>
+      <Box component="main" id="main-content" tabIndex={-1} sx={{flexGrow: 1, minWidth: 0, p: {xs: 2, sm: 3}}}>
+        <Toolbar sx={{py: 1}}/>
+        {activeRoute?.path !== '/workspace' && <Typography component="h1" variant="h4">{title}</Typography>}
         {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
-        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={visiblePath} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={visiblePath} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

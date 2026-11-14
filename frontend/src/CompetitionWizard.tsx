@@ -19,13 +19,16 @@ const types = ['SPRINT', 'PARALLEL_SPRINT', 'SLALOM', 'LONG_RACE']
 const multipliers = [1, 2, 3, 4]
 const freshDiscipline = (order: number): Discipline => ({name: '', type: 'SPRINT', displayOrder: order, categoryIndexes: [], gateCount: null, attemptCount: null, qualificationDisciplineIndex: null, pointsTable: null})
 
-export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => void, onSaved: (value: {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}) => void}) {
+export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftKey?: string, onCancel: () => void, onSaved: (value: {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}) => void}) {
   const {t, i18n} = useTranslation()
   const {t: categoryT} = useTranslation('categories')
   const disciplineName = (d: Discipline) => d.name.trim() || t(('discipline.types.' + d.type) as 'discipline.types.SPRINT')
   const displayDate = (value: string) => value ? formatDate(new Date(`${value}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC') : '—'
-  const [step, setStep] = useState(0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const [competition, setCompetition] = useState<Competition>({title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
+  const [stored] = useState(() => { try { return draftKey ? JSON.parse(localStorage.getItem(draftKey) ?? 'null') : null } catch { return null } })
+  const [step, setStep] = useState<number>(stored?.step ?? 0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  const [competition, setCompetition] = useState<Competition>(stored?.competition ?? {title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
+  const [zoneSearch, setZoneSearch] = useState('')
+  const [expandedPoints, setExpandedPoints] = useState<Record<number, boolean>>({})
   const zones = useMemo(() => {
     const date = competition.startDate ? new Date(competition.startDate + 'T12:00:00Z') : new Date()
     const reference = Number.isNaN(date.getTime()) ? new Date() : date
@@ -34,15 +37,16 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       return {zone, label: zone + ' ' + offset}
     })
   }, [competition.startDate])
-  const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>([])
-  const [requirements, setRequirements] = useState<Requirement[]>([]), [disciplines, setDisciplines] = useState<Discipline[]>([])
+  const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>(stored?.categories ?? [])
+  const [requirements, setRequirements] = useState<Requirement[]>(stored?.requirements ?? []), [disciplines, setDisciplines] = useState<Discipline[]>(stored?.disciplines ?? [])
   const [issues, setIssues] = useState<FieldIssue[]>([])
   const [focusField, setFocusField] = useState<{field: string} | null>(null)
   const handledFocus = useRef<typeof focusField>(null)
   useEffect(() => { if (focusField && focusField !== handledFocus.current) { document.getElementById(focusField.field)?.focus(); handledFocus.current = focusField } }, [step, focusField])
-  const [explicitTiebreak, setTiebreak] = useState<number | null>(null)
-  const [presetSelected, setPresetSelected] = useState(false)
-  const [tiebreakExplicit, setTiebreakExplicit] = useState(false)
+  const [explicitTiebreak, setTiebreak] = useState<number | null>(stored?.explicitTiebreak ?? null)
+  const [presetSelected, setPresetSelected] = useState(stored?.presetSelected ?? false)
+  const [tiebreakExplicit, setTiebreakExplicit] = useState(stored?.tiebreakExplicit ?? false)
+  useEffect(() => {if (draftKey) localStorage.setItem(draftKey, JSON.stringify({step, competition, categories, requirements, disciplines, explicitTiebreak, presetSelected, tiebreakExplicit}))}, [draftKey, step, competition, categories, requirements, disciplines, explicitTiebreak, presetSelected, tiebreakExplicit])
   const slalom = disciplines.findIndex(d => d.type === 'SLALOM')
   const tiebreak = presetSelected && !tiebreakExplicit ? (slalom < 0 ? null : slalom) : explicitTiebreak
   useEffect(() => {let active = true; (async () => {try {let page = 0, total = 1; const all: Template[] = []; while (page < total) {const result = await apiRequest<{content: Template[], totalPages: number}>(`/api/category-templates?archived=false&page=${page}&size=100`); all.push(...result.content.filter(item => !item.archived)); total = result.totalPages; page++} if (active) setTemplates(all)} catch {if (active) setError('wizard.templatesError')}})(); return () => {active = false}}, [t])
@@ -101,7 +105,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
     updateDiscipline(index, {pointsTable: {name: t('wizard.preset'), tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows}})
     setPresetSelected(true)
   }
-  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories: categories.map(c => ({...c, seatLabels: c.seatLabels?.slice(0, c.crewSize)})), requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
+  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories: categories.map(c => ({...c, seatLabels: c.seatLabels?.slice(0, c.crewSize)})), requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); if (draftKey) localStorage.removeItem(draftKey); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
   return <Box sx={{display: 'grid', gap: 2, maxWidth: 850}}>
     <Typography variant="h5">{t(("wizard.step" + step) as "wizard.step0")}
       </Typography>
@@ -112,7 +116,8 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>
       <TextField id="competition.endDate" type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.endDate} onChange={e => setCompetition({...competition, endDate: e.target.value})}/>
       <TextField id="competition.location" label={t('competition.location')} value={competition.location} onChange={e => setCompetition({...competition, location: e.target.value})}/>
-      <TextField select slotProps={{select: {native: true}}} id="competition.timeZone" label={t('competition.timeZone')} value={competition.timeZone} onChange={e => setCompetition({...competition, timeZone: e.target.value})}>{zones.map(({zone, label}) => <option key={zone} value={zone}>{label}</option>)}</TextField>
+      <TextField label={t('wizard.searchZone')} value={zoneSearch} onChange={e => setZoneSearch(e.target.value)}/>
+      <TextField select slotProps={{select: {native: true}}} id="competition.timeZone" label={t('competition.timeZone')} value={competition.timeZone} onChange={e => setCompetition({...competition, timeZone: e.target.value})}>{zones.filter(({zone, label}) => zone === competition.timeZone || label.toLowerCase().includes(zoneSearch.toLowerCase())).map(({zone, label}) => <option key={zone} value={zone}>{label}</option>)}</TextField>
       <TextField id="competition.description" label={t('competition.description')} multiline value={competition.description ?? ''} onChange={e => setCompetition({...competition, description: e.target.value})}/>
       </>}
     {step === 1 && <>
@@ -159,7 +164,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <Button onClick={() => applyPreset(i, d)}>{t('wizard.preset')}
       </Button>
       <TextField select label={t('wizard.copyPoints')} value="" onChange={e => {const source = disciplines[Number(e.target.value)].pointsTable; if (source) updateDiscipline(i, {pointsTable: structuredClone(source)})}}>{disciplines.map((x, n) => n !== i && x.pointsTable ? <MenuItem key={n} value={n}>{disciplineName(x)}</MenuItem> : null)}
-      </TextField>{d.pointsTable && <>
+      </TextField>{d.pointsTable && <><Typography>{d.pointsTable.name}</Typography><Button onClick={() => setExpandedPoints({...expandedPoints, [i]: !expandedPoints[i]})}>{t('wizard.configurePoints')}</Button>{expandedPoints[i] && <>
       <TextField label={t('wizard.tableName')} value={d.pointsTable.name} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, name: e.target.value}})}/>{d.pointsTable.rows.map((row, n) => <Box key={n} sx={{display: 'flex', gap: 1}}>
       <TextField id={`disciplines[${i}].pointsTable.rows[${n}].place`} type="number" label={t('wizard.place')} value={row.place} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.map((x, k) => k === n ? {...x, place: Number(e.target.value)} : x)}})}/>
       <TextField id={`disciplines[${i}].pointsTable.rows[${n}].points`} type="number" label={t('wizard.points')} value={row.points} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.map((x, k) => k === n ? {...x, points: Number(e.target.value)} : x)}})}/>
@@ -168,7 +173,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       </Box>)}
       <Button onClick={() => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: [...d.pointsTable!.rows, {place: d.pointsTable!.rows.length + 1, points: 0}]}})}>{t('wizard.addRow')}
       </Button>
-      </>}
+      </>}</>}
       <Button onClick={() => {setDisciplines(disciplines.filter((_, n) => n !== i).map((x, n) => ({...x, displayOrder: n, qualificationDisciplineIndex: x.qualificationDisciplineIndex === i ? null : x.qualificationDisciplineIndex !== null && x.qualificationDisciplineIndex > i ? x.qualificationDisciplineIndex - 1 : x.qualificationDisciplineIndex}))); setTiebreak(tiebreak === i ? null : tiebreak !== null && tiebreak > i ? tiebreak - 1 : tiebreak)}}>{t('wizard.remove')}
       </Button>
       </Box>)}
@@ -183,6 +188,9 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <Typography>{t('competition.admission')}: {t(competition.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}
       </Typography>
       <Typography>{t('wizard.step1')}: {categories.map(c => `${c.classLabel} / ${c.scoringGroupLabel}`).join(', ') || '—'}</Typography>
+      {categories.map((c, i) => <Typography key={i}>{c.classLabel} / {c.scoringGroupLabel}: {Array.from({length: c.crewSize}, (_, n) => c.seatLabels?.[n] || categoryT('seat', {number: n + 1})).join(', ')}</Typography>)}
+      <Button onClick={() => setStep(1)}>{t('competition.edit')}</Button>
+      <Typography>{t('crew.representativeSettings')}: {(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => `${t(`crew.${field}`)}: ${t(`crew.policy.${competition.representativeFields[field]}`)}`).join(', ')}</Typography><Button onClick={() => setStep(2)}>{t('competition.edit')}</Button>
       <Typography>{t('wizard.step2')}: {requirements.map(r => `${r.name} (${t(('wizard.valueTypes.' + r.valueType) as 'wizard.valueTypes.TEXT')}, ${t(r.required ? 'competition.yes' : 'competition.no')})`).join(', ') || '—'}</Typography>{disciplines.map((d, i) => <Box key={i}>
       <Typography>{disciplineName(d)}{d.categoryIndexes.length > 0 && ` · ${d.categoryIndexes.map(n => categories[n] ? `${categories[n].classLabel} / ${categories[n].scoringGroupLabel}` : '').join(', ')}`}{!!d.gateCount && ` · ${t('discipline.gateCount')}: ${d.gateCount}`}{d.type !== 'PARALLEL_SPRINT' && ` · ${t('discipline.attemptCount')}: ${d.type === 'SLALOM' ? d.attemptCount : 1}`}{d.qualificationDisciplineIndex != null && disciplines[d.qualificationDisciplineIndex] && ` · ${disciplineName(disciplines[d.qualificationDisciplineIndex])}`}</Typography>
       <Typography>{d.pointsTable?.name}: {d.pointsTable?.rows.map(r => `${r.place}: ${r.points}`).join(', ')}
@@ -190,7 +198,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       </Box>)}
       <Typography>{t('wizard.tiebreak')}: {tiebreak != null && disciplines[tiebreak] ? disciplineName(disciplines[tiebreak]) : '—'}</Typography>
       </>}
-    <Box>{step > 0 && <Button disabled={busy} onClick={() => {setStep(step - 1); setError('')}}>{t('competition.previous')}
+    <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}>{step > 0 && <Button disabled={busy} onClick={() => {setStep(step - 1); setError('')}}>{t('competition.previous')}
       </Button>}{step < 4 ? <Button onClick={next}>{t('competition.next')}
       </Button> : <Button disabled={busy} onClick={() => void save()}>{t('competition.save')}
       </Button>}<Button disabled={busy} onClick={onCancel}>{t('competition.cancel')}

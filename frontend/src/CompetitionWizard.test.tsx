@@ -149,3 +149,20 @@ test('shows a generic server failure as an error alert', async () => {
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   expect(await screen.findByRole('alert')).toHaveStyle({color: 'rgb(211, 47, 47)'})
 })
+
+test('restores a user draft after unmount and keeps the saved step', async () => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  const key = 'test-wizard-draft'
+  localStorage.removeItem(key)
+  const view = render(<CompetitionWizard draftKey={key} onCancel={vi.fn()} onSaved={vi.fn()}/>)
+  fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River draft'}})
+  fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-04-01'}})
+  fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  view.unmount()
+  render(<CompetitionWizard draftKey={key} onCancel={vi.fn()} onSaved={vi.fn()}/>)
+  expect(screen.getByText('2 / 5')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Previous'}))
+  expect(screen.getByLabelText('Title')).toHaveValue('River draft')
+  localStorage.removeItem(key)
+})

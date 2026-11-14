@@ -13,13 +13,22 @@ type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number, plannedTime: string | null}
 type StartList = {id: number | null, slots: Slot[], locked: boolean}
-export default function StartLists({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
+export default function StartLists({readOnly, fixedCompetition, onReadinessChange}: {readOnly: boolean, fixedCompetition?: string, onReadinessChange?: () => void}) {
   const {t, i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
-  const [category, setCategory] = useState('')
+  const [category, setCategory] = useState(params.get('category') ?? '')
+  useEffect(() => {
+    if (!fixedCompetition) return
+    const [route, query = ''] = window.location.hash.slice(1).split('?')
+    const next = new URLSearchParams(query)
+    if (discipline) next.set('discipline', discipline); else next.delete('discipline')
+    if (category) next.set('category', category); else next.delete('category')
+    window.history.replaceState(window.history.state, '', `#${route}${next.size ? '?' + next : ''}`)
+    window.dispatchEvent(new Event('workspace-filter-change'))
+  }, [fixedCompetition, discipline, category])
   const [competitions, setCompetitions] = useState<Competition[]>([])
   const [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -43,7 +52,7 @@ export default function StartLists({readOnly, fixedCompetition}: {readOnly: bool
     }
     void load().catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
-  }, [])
+  }, [fixedCompetition])
   useEffect(() => {
     if (!competition) return
     let active = true
@@ -83,7 +92,7 @@ export default function StartLists({readOnly, fixedCompetition}: {readOnly: bool
         crewIds: mode === 'manual' ? order : null,
         firstStart: firstInstant?.toISOString() ?? null, intervalSeconds: interval ? Number(interval) : null,
       })
-      setManualOrder(null); setList(result)
+      setManualOrder(null); setList(result); onReadinessChange?.()
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         setList({...list, locked: true})
@@ -103,10 +112,10 @@ export default function StartLists({readOnly, fixedCompetition}: {readOnly: bool
   }
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
+    {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
       <MenuItem value="">—</MenuItem>
-      {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
-    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); setCategory(''); setList(null)}}>
+      {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
+    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>
     }

@@ -23,7 +23,7 @@ test('shows category results from the public projection', async () => {
   fireEvent.mouseDown(await screen.findByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   expect(await screen.findByText('1 — Crew A')).toBeInTheDocument()
-  expect(screen.getByText('Time: 1:14.25')).toBeInTheDocument()
+  expect(screen.getByText('Time: 01:14.25')).toBeInTheDocument()
   expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('private') || p.includes('attempt-grid'))).toBe(false)
 })
 test('keeps the last results when refresh fails', async () => {
@@ -96,4 +96,16 @@ test('warns when a seeded parallel crew has no calculated result', async () => {
   })
   render(<Results readOnly/>)
   expect(await screen.findByText(/Standings use available calculated results/)).toBeInTheDocument()
+})
+
+test('shows a compact desktop protocol table with details', async () => {
+  vi.stubGlobal('matchMedia', () => ({matches: true, addEventListener: () => {}, removeEventListener: () => {}}))
+  try {
+    render(<Results readOnly/>)
+    fireEvent.mouseDown(await screen.findByLabelText('Category'))
+    fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(screen.getByRole('row', {name: /Crew A/})).toHaveTextContent('01:14.25')
+    expect(screen.getAllByText('Attempt and gate details')).toHaveLength(2)
+  } finally {vi.unstubAllGlobals()}
 })

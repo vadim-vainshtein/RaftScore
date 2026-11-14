@@ -4,7 +4,8 @@
     "navigation": "Main navigation",
     "openNavigation": "Open navigation",
     "menu": "Menu",
-    "language": "Language"
+    "language": "Language",
+    "skipToContent": "Skip to content"
   },
   "navigation": {
     "competitions": "Competitions",
@@ -78,7 +79,10 @@
     "representativeSettings": "Representative fields",
     "categorySeats": "Categories and seat names",
     "editCategory": "Edit category",
-    "rosterVariant": "Roster variant {{number}}"
+    "rosterVariant": "Roster variant {{number}}",
+    "openApplication": "Open entry",
+    "copyApplication": "Create entry from this",
+    "chooseCategoryFirst": "Choose a category to create a crew."
   },
   "discipline": {
     "competition": "Competition",
@@ -145,7 +149,12 @@
     "workspace": "Competition workspace",
     "start": "Start competition",
     "complete": "Complete competition",
-    "confirmComplete": "Complete this competition? Result entry will be closed."
+    "confirmComplete": "Complete this competition? Result entry will be closed.",
+    "unsavedRows": "Unsaved rows: {{count}}. They will be discarded.",
+    "discardAndComplete": "Discard and complete",
+    "prepare": "Continue preparation",
+    "enterResults": "Enter results",
+    "openProtocol": "Open protocol"
   },
   "wizard": {
     "template": "Add active template",
@@ -189,7 +198,11 @@
     "step3": "Disciplines and points",
     "step4": "Review",
     "noRequirements": "No requirements",
-    "blankPoints": "Create empty points table"
+    "blankPoints": "Create empty points table",
+    "continueDraft": "Continue creation",
+    "discardDraft": "Discard the competition draft?",
+    "searchZone": "Search time zones",
+    "configurePoints": "Configure points"
   },
   "startList": {
     "locked": "Locked: results have been entered.",
@@ -285,7 +298,8 @@
     "hideFilters": "Hide filters",
     "showFilters": "Show filters",
     "fullscreen": "Toggle fullscreen",
-    "appliedTiebreak": "Applied tiebreak discipline"
+    "appliedTiebreak": "Applied tiebreak discipline",
+    "updatedAt": "Updated: {{time}}"
   },
   "parallel": {
     "slot": "Position {{number}}",
@@ -304,7 +318,9 @@
     "round": "Round {{round}}",
     "heat": "Heat {{heat}}",
     "bye": "Bye",
-    "pending": "Awaiting qualifier"
+    "pending": "Awaiting qualifier",
+    "chooseRound": "Choose round",
+    "editHeat": "Open heat {{heat}} form"
   },
   "apiError": {
     "network": "Connection failed. Please try again.",
@@ -352,5 +368,13 @@
     "confirmationRequired": "Confirm that you understand the restore before continuing.",
     "restoreNamed": "Restore backup from {{date}} ({{id}})",
     "downloadNamed": "Download backup from {{date}} ({{id}})"
+  },
+  "workspace": {
+    "preparation": "Preparation",
+    "readiness": "Categories: {{categories}} · Disciplines: {{disciplines}}",
+    "input": "Result entry",
+    "protocol": "Protocol",
+    "crewReadiness": "Entries: {{total}} · Eligible: {{admitted}}",
+    "startReadiness": "Crews in selected start list: {{count}}"
   }
 }

@@ -123,8 +123,29 @@ test('prefills a new registration from another competition without carrying its 
   fireEvent.mouseDown(await screen.findByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
   fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'River'}})
-  fireEvent.click(await screen.findByRole('button', {name: 'Use roster'}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Create entry from this'}))
   expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
   expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
   expect(screen.getByLabelText(/Start number/)).toHaveValue(null)
+})
+
+test('clearing or changing search hides old hits and ignores delayed responses', async () => {
+  let resolveDelayed: (value: unknown) => void = () => {}
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => {
+    if (path.includes('/crew-search?name=River')) return Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'Old hit', startNumber: 1, regionOrClub: 'Club', startDate: '2025-01-01', competitionTitle: 'Race', categoryName: 'R1', roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}]}])
+    if (path.includes('/crew-search?name=Delayed')) return new Promise(resolve => {resolveDelayed = resolve})
+    return previous(path)
+  })
+  render(<Crews/>)
+  const search = screen.getByLabelText('Search crews')
+  fireEvent.change(search, {target: {value: 'River'}})
+  expect(await screen.findByText(/Old hit/)).toBeInTheDocument()
+  fireEvent.change(search, {target: {value: 'Delayed'}})
+  expect(screen.queryByText(/Old hit/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Create entry from this'})).not.toBeInTheDocument()
+  await waitFor(() => expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('name=Delayed'))).toBe(true))
+  fireEvent.change(search, {target: {value: ''}})
+  await act(async () => {resolveDelayed([{id: 91, crewName: 'Late hit', startNumber: 2, startDate: '2025-01-01'}]); await Promise.resolve()})
+  expect(screen.queryByText(/Late hit|Old hit/)).not.toBeInTheDocument()
 })

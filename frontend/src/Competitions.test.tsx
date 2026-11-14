@@ -5,7 +5,7 @@ import {apiRequest, csrfRequest} from './api/client'
 import './i18n'
 vi.mock('./api/client', () => ({apiRequest: vi.fn(), csrfRequest: vi.fn(), ApiError: class extends Error {status = 0}}))
 beforeEach(() => {vi.mocked(apiRequest).mockReset().mockResolvedValue({content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 2, totalElements: 21})})
-afterEach(cleanup)
+afterEach(() => {cleanup(); window.location.hash = ''})
 test('lists, searches and paginates competitions for read-only users', async () => {
   render(<Competitions readOnly/>)
   expect(await screen.findByText(/River race/)).toHaveTextContent('Categories: 2, crews: 4')
@@ -17,16 +17,16 @@ test('lists, searches and paginates competitions for read-only users', async () 
 })
 test('opens details for read-only users without editing controls', async () => {
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? {id: 1, version: 0, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'} : {content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
-  render(<Competitions readOnly/>)
-  fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
+  window.location.hash = '#/competitions?view=1'
+render(<Competitions readOnly/>)
   expect(await screen.findByRole('heading', {name: 'River race'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
 })
 
 test('opens the latest details directly for editing from the list', async () => {
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? {id: 1, version: 7, title: 'Latest', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'} : {content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
+  window.location.hash = '#/competitions?edit=1'
   render(<Competitions readOnly={false}/>)
-  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
   expect(await screen.findByLabelText(/Title/)).toHaveValue('Latest')
   expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1')
 })
@@ -35,8 +35,8 @@ test('starts a created competition using its version', async () => {
   const details = {id: 1, version: 7, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? [] : {content: [{...details, state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
   vi.mocked(csrfRequest).mockResolvedValue({...details, status: 'STARTED', version: 8})
-  render(<Competitions readOnly={false}/>);
-  fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
+  window.location.hash = '#/competitions?view=1'
+render(<Competitions readOnly={false}/>);
   fireEvent.click(await screen.findByRole('button', {name: 'Start competition'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/status', 'PUT', {status: 'STARTED', version: 7}))
   expect(await screen.findByRole('link', {name: 'Competition workspace'})).toHaveAttribute('href', '#/workspace/1')
@@ -45,8 +45,8 @@ test('starts a created competition using its version', async () => {
 test('hides edit for completed competitions in the list and details', async () => {
   const details = {id: 1, version: 2, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'COMPLETED'}
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : {content: [{...details, state: 'COMPLETED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
-  render(<Competitions readOnly={false}/> )
-  fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
+  window.location.hash = '#/competitions?view=1'
+  render(<Competitions readOnly={false}/>)
   expect(await screen.findByRole('heading', {name: 'River race'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit category'})).not.toBeInTheDocument()
@@ -56,8 +56,8 @@ test('hides edit for completed competitions in the list and details', async () =
 test('opens completed details instead of editing if status changed since listing', async () => {
   const details = {id: 1, version: 2, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'COMPLETED'}
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : {content: [{...details, state: 'STARTED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
-  render(<Competitions readOnly={false}/> )
-  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  window.location.hash = '#/competitions?edit=1'
+  render(<Competitions readOnly={false}/>)
   expect(await screen.findByRole('heading', {name: 'River race'})).toBeInTheDocument()
   expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
@@ -66,11 +66,29 @@ test('opens completed details instead of editing if status changed since listing
 test('edits seat labels inside the selected competition category', async () => {
   vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? {id: 1, version: 0, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'} : path.endsWith('/categories') ? [{id: 2, displayName: 'R1 / Open', crewSize: 1, version: 4, seatLabels: ['Bow']}] : {content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state: 'CREATED', categoryCount: 1, crewCount: 0}], page: 0, totalPages: 1, totalElements: 1})
   vi.mocked(csrfRequest).mockResolvedValue({id: 2, displayName: 'R1 / Open', crewSize: 1, version: 5, seatLabels: ['Front']})
-  render(<Competitions readOnly={false}/>)
-  fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
+  window.location.hash = '#/competitions?view=1'
+render(<Competitions readOnly={false}/>)
   fireEvent.click(await screen.findByRole('button', {name: 'Edit category'}))
   const editor = screen.getByRole('group', {name: 'Edit category: R1 / Open'})
   fireEvent.change(within(editor).getByLabelText('Seat 1'), {target: {value: 'Front'}})
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2/seat-labels', 'PUT', {version: 4, seatLabels: ['Front']}))
+})
+
+test.each([['CREATED', 'Continue preparation', '#/workspace/1'], ['STARTED', 'Enter results', '#/workspace/1/result-grid'], ['COMPLETED', 'Open protocol', '#/workspace/1/results']])('offers the stage action for %s', async (state, label, href) => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state, categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
+  render(<Competitions readOnly={false}/>)
+  expect(await screen.findByRole('link', {name: label})).toHaveAttribute('href', href)
+})
+
+test('routes completion from settings through the workspace dialog', async () => {
+  window.location.hash = '#/competitions?view=1&discipline=3&category=2&unused=ignored'
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1'
+    ? {id: 1, version: 2, title: 'Race', status: 'STARTED', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', admissionConfirmationRequired: false}
+    : path.endsWith('/categories') ? [] : {content: [], totalPages: 0})
+  vi.mocked(csrfRequest).mockClear()
+  render(<Competitions readOnly={false}/>)
+  expect(await screen.findByRole('link', {name: 'Complete competition'})).toHaveAttribute('href', '#/workspace/1?discipline=3&category=2&complete=1')
+  expect(screen.getByRole('link', {name: 'Competition workspace'})).toHaveAttribute('href', '#/workspace/1?discipline=3&category=2')
+  expect(csrfRequest).not.toHaveBeenCalled()
 })

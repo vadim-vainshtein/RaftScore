@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, expect, test, vi} from 'vitest'
 import CompetitionWorkspace from './CompetitionWorkspace'
 import {apiRequest, csrfRequest} from './api/client'
@@ -24,6 +24,9 @@ test('completion preserves a refused dirty draft and blocks while a save is pend
   const input = await screen.findByLabelText('Time A')
   fireEvent.change(input, {target: {value: '1:14.25'}})
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  expect(screen.getByRole('dialog')).toHaveTextContent('Unsaved rows: 1')
+  fireEvent.click(screen.getByRole('button', {name: 'Cancel'}))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   expect(csrfRequest).not.toHaveBeenCalled()
   expect(input).toHaveValue('1:14.25')
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
@@ -54,13 +57,14 @@ test('keeps the draft visible and disables edits while completion is pending or 
   const input = await screen.findByLabelText('Time A')
   fireEvent.change(input, {target: {value: '1:14.25'}})
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Discard and complete'}))
   await waitFor(() => expect(input).toBeDisabled())
   expect(window.dispatchEvent(new Event('category-navigation', {cancelable: true}))).toBe(false)
   fail(new Error('conflict'))
   expect(await screen.findByRole('alert')).toBeInTheDocument()
   expect(input).toBeEnabled()
   expect(input).toHaveValue('1:14.25')
-  expect(screen.getByRole('button', {name: 'Complete competition'})).toBeEnabled()
+  expect(screen.getByRole('button', {name: 'Discard and complete'})).toBeEnabled()
 })
 
 test('guards edited sprint heats and pending saves before completing', async () => {
@@ -78,9 +82,13 @@ test('guards edited sprint heats and pending saves before completing', async () 
   vi.mocked(csrfRequest).mockImplementation(path => path.endsWith('/status') ? Promise.resolve({id: 1, title: 'Race', version: 1, status: 'COMPLETED'}) : new Promise(resolve => {finishSave = () => {saved = true; resolve({})}}))
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false)
   render(<CompetitionWorkspace path="/workspace/1/parallel-sprint?discipline=3&category=2" readOnly={false}/> )
-  const input = await screen.findByLabelText('Time 1')
+  fireEvent.click(await screen.findByText('Open heat 1 form'))
+  const input = await screen.findByLabelText('Time Position 1 — A')
   fireEvent.change(input, {target: {value: '0:03.00'}})
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  expect(screen.getByRole('dialog')).toHaveTextContent('Unsaved rows: 1')
+  fireEvent.click(screen.getByRole('button', {name: 'Cancel'}))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   expect(csrfRequest).not.toHaveBeenCalled()
   expect(input).toHaveValue('0:03.00')
   fireEvent.click(screen.getByRole('button', {name: 'Save heat'}))
@@ -89,9 +97,201 @@ test('guards edited sprint heats and pending saves before completing', async () 
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
   expect(csrfRequest).toHaveBeenCalledTimes(1)
   finishSave()
+  await waitFor(() => expect(screen.getByText(/Position 1: 1 — A.*0:03\.00/)).toBeInTheDocument())
   await waitFor(() => expect(screen.getByRole('button', {name: 'Save heat'})).toBeEnabled())
   confirm.mockClear()
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  const dialog = await screen.findByRole('dialog')
+  fireEvent.click(within(dialog).getByRole('button', {name: 'Complete competition'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledTimes(2))
+})
+
+test('completes from settings in the shared dialog and opens protocol', async () => {
+  window.location.hash = '#/workspace/1?discipline=3&category=2&complete=1&unused=ignored'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    return []
+  })
+  vi.mocked(csrfRequest).mockResolvedValue({id: 1, version: 5, status: 'COMPLETED'})
+  render(<CompetitionWorkspace path="/workspace/1?discipline=3&category=2&complete=1&unused=ignored" readOnly={false}/>)
+  expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/status', 'PUT', {status: 'COMPLETED', version: 4}))
+  await waitFor(() => expect(window.location.hash).toBe('#/workspace/1/results?discipline=3&category=2&unused=ignored'))
+})
+
+test('carries only selected filters to settings', async () => {
+  window.location.hash = '#/workspace/1/start-lists?discipline=3&category=2&unused=ignored'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/start-list')) return {id: null, slots: [], locked: false}
+    return []
+  })
+  render(<CompetitionWorkspace path="/workspace/1/start-lists?discipline=3&category=2&unused=ignored" readOnly={false}/>)
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?view=1&discipline=3&category=2')
+})
+
+test('completion while protocol is open updates status and removes write actions', async () => {
+  window.location.hash = '#/workspace/1/results?discipline=3&category=2'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (path.endsWith('/start-list')) return {slots: []}
+    return []
+  })
+  vi.mocked(csrfRequest).mockResolvedValue({id: 1, title: 'Race', version: 5, status: 'COMPLETED'})
+  render(<CompetitionWorkspace path="/workspace/1/results?discipline=3&category=2" readOnly={false}/>)
+  expect(await screen.findByRole('button', {name: 'Recalculate'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  fireEvent.click(screen.getByRole('dialog').querySelector('button:last-child')!)
+  await waitFor(() => expect(screen.getByText('Completed')).toBeInTheDocument())
+  expect(screen.queryByRole('button', {name: 'Recalculate'})).not.toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Complete competition'})).not.toBeInTheDocument())
+  expect(window.location.hash).toBe('#/workspace/1/results?discipline=3&category=2')
+})
+
+test.each([['result-grid', 'parallel-sprint', 'SPRINT', 'Parallel sprint'], ['parallel-sprint', 'result-grid', 'PARALLEL_SPRINT', 'Result entry']])('filters incompatible discipline on %s to %s navigation', async (source, destination, type, label) => {
+  window.location.hash = `#/workspace/1/${source}?discipline=3&category=2`
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Event', type, categoryIds: [2]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (path.endsWith('/start-list')) return {slots: []}
+    if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
+    if (path.endsWith('/bracket')) return {id: null, heats: []}
+    return []
+  })
+  render(<CompetitionWorkspace path={`/workspace/1/${source}?discipline=3&category=2`} readOnly={false}/>)
+  const link = await screen.findByRole('link', {name: label})
+  await waitFor(() => expect(link).toHaveAttribute('href', `#/workspace/1/${destination}?category=2`))
+  fireEvent.click(link, {ctrlKey: true})
+  expect((link as HTMLAnchorElement).hash).toBe(`#/workspace/1/${destination}?category=2`)
+})
+
+test.each([false, true])('completed workspace keeps admin roster access separate from writes (readOnly=%s)', async readOnly => {
+  window.location.hash = '#/workspace/1/crews?category=2'
+  const crew = {id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7, roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}], admissionDecision: true, eligible: true, version: 1}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'COMPLETED', admissionConfirmationRequired: true}
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
+    if (path.endsWith('/disciplines') || path.endsWith('/requirements')) return []
+    if (path.endsWith('/entries/private')) return [crew]
+    if (path.endsWith('/entries')) return [{id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7}]
+    throw new Error(path)
+  })
+  vi.mocked(csrfRequest).mockClear()
+  render(<CompetitionWorkspace path="/workspace/1/crews?category=2" readOnly={readOnly}/>)
+  expect(await screen.findByText(/7 — River/)).toBeInTheDocument()
+  if (readOnly) {
+    expect(screen.queryByText('Smith Sam')).not.toBeInTheDocument()
+    expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.endsWith('/entries/private'))).toBe(false)
+  } else {
+    expect(screen.getByText('Smith Sam')).toBeInTheDocument()
+    expect(screen.getByText('Admitted')).toBeInTheDocument()
+    expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.endsWith('/entries/private'))).toBe(true)
+  }
+  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject/})).not.toBeInTheDocument()
+  expect(csrfRequest).not.toHaveBeenCalled()
+})
+
+test('refreshes readiness after a crew admission', async () => {
+  window.location.hash = '#/workspace/1/crews?category=2'
+  let admitted = false
+  const crew = () => ({id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7, roster: [], admissionDecision: admitted, eligible: admitted, version: 1})
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, admissionConfirmationRequired: true}
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
+    if (path.endsWith('/disciplines') || path.endsWith('/requirements')) return []
+    if (path.endsWith('/entries/private')) return [crew()]
+    throw new Error(path)
+  })
+  vi.mocked(csrfRequest).mockImplementation(async () => {admitted = true; return {}})
+  render(<CompetitionWorkspace path="/workspace/1/crews?category=2" readOnly={false}/>)
+  expect(await screen.findByText('Entries: 1 · Eligible: 0')).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', {name: 'Admit'}))
+  expect(await screen.findByText('Entries: 1 · Eligible: 1')).toBeInTheDocument()
+})
+
+test('refreshes readiness after saving a discipline', async () => {
+  window.location.hash = '#/workspace/1/disciplines'
+  let added = false
+  const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', displayOrder: 0, categoryIds: [], pointsTableId: null, resultsEntered: false}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0}
+    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private')) return []
+    if (path.endsWith('/disciplines')) return added ? [discipline] : []
+    throw new Error(path)
+  })
+  vi.mocked(csrfRequest).mockImplementation(async () => {added = true; return {}})
+  render(<CompetitionWorkspace path="/workspace/1/disciplines" readOnly={false}/>)
+  expect(await screen.findByText('Categories: 0 · Disciplines: 0')).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', {name: 'Create discipline'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByText('Categories: 0 · Disciplines: 1')).toBeInTheDocument()
+})
+
+test('refreshes readiness after generating a start list', async () => {
+  window.location.hash = '#/workspace/1/start-lists?discipline=3&category=2'
+  let generated = false
+  const slot = {crewId: 4, crewName: 'River', startNumber: 7, position: 1, plannedTime: null}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, timeZone: 'UTC'}
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1'}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/entries/private')) return [{id: 4, categoryId: 2, crewName: 'River', startNumber: 7, eligible: true}]
+    if (path.endsWith('/start-list')) return {id: generated ? 1 : null, slots: generated ? [slot] : [], locked: false}
+    throw new Error(path)
+  })
+  vi.mocked(csrfRequest).mockImplementation(async () => {generated = true; return {id: 1, slots: [slot], locked: false}})
+  render(<CompetitionWorkspace path="/workspace/1/start-lists?discipline=3&category=2" readOnly={false}/>)
+  expect(await screen.findByText('Crews in selected start list: 0')).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', {name: 'Generate start list'}))
+  expect(await screen.findByText('Crews in selected start list: 1')).toBeInTheDocument()
+})
+
+test('refreshes readiness after creating a crew', async () => {
+  window.location.hash = '#/workspace/1/crews?category=2'
+  let created = false
+  const crew = {id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7, roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}], admissionDecision: true, eligible: true, version: 0}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, admissionConfirmationRequired: false}
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
+    if (path.endsWith('/disciplines') || path.endsWith('/requirements')) return []
+    if (path.endsWith('/entries/private')) return created ? [crew] : []
+    throw new Error(path)
+  })
+  vi.mocked(csrfRequest).mockImplementation(async () => {created = true; return {}})
+  render(<CompetitionWorkspace path="/workspace/1/crews?category=2" readOnly={false}/>)
+  expect(await screen.findByText('Entries: 0 · Eligible: 0')).toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('button', {name: 'Create crew'}))
+  fireEvent.change(screen.getByLabelText(/Crew name/), {target: {value: 'River'}})
+  fireEvent.change(screen.getByLabelText(/Start number/), {target: {value: '7'}})
+  fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Smith'}})
+  fireEvent.change(screen.getByLabelText(/Given name/), {target: {value: 'Sam'}})
+  fireEvent.change(screen.getByLabelText(/Representative/, {selector: 'input'}), {target: {value: 'Coach'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByText('Entries: 1 · Eligible: 1')).toBeInTheDocument()
+})
+
+test('discarding a draft when clearing category leaves no unsaved rows at completion', async () => {
+  window.location.hash = '#/workspace/1/result-grid?discipline=3&category=2'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (path.endsWith('/start-list')) return {id: null, slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}], locked: false}
+    if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
+    if (path.endsWith('/entries/private')) return []
+    throw new Error(path)
+  })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<CompetitionWorkspace path="/workspace/1/result-grid?discipline=3&category=2" readOnly={false}/>)
+  fireEvent.change(await screen.findByLabelText('Time A'), {target: {value: '1:14.25'}})
+  fireEvent.mouseDown(screen.getByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: '—'}))
   expect(confirm).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
+  expect(screen.getByRole('dialog')).not.toHaveTextContent('Unsaved rows')
+  expect(screen.queryByRole('button', {name: 'Discard and complete'})).not.toBeInTheDocument()
 })

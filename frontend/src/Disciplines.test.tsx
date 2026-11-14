@@ -56,3 +56,26 @@ test('clears a qualification selection when categories make it incompatible', as
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/5/configuration', 'PUT', expect.objectContaining({categoryIds: [2, 9], qualificationDisciplineId: null})))
 })
+
+test('contextual discipline links retain only compatible categories', async () => {
+  window.location.hash = '#/workspace/1/disciplines?category=2'
+  const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [9]}
+  load([slalom, parallel])
+  render(<Disciplines fixedCompetition="1" readOnly={false}/>)
+  const timedRow = (await screen.findByText(/Slalom —/)).parentElement!
+  expect(within(timedRow).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/workspace/1/start-lists?discipline=3&category=2')
+  expect(within(timedRow).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/workspace/1/results?discipline=3&category=2')
+  expect(within(timedRow).getByRole('link', {name: 'Result entry'})).toHaveAttribute('href', '#/workspace/1/result-grid?discipline=3&category=2')
+  const parallelRow = screen.getByText(/Parallel —/).parentElement!
+  expect(within(parallelRow).getByRole('link', {name: 'Parallel sprint'})).toHaveAttribute('href', '#/workspace/1/parallel-sprint?discipline=5')
+  window.location.hash = ''
+})
+
+test('global discipline links retain their established routes', async () => {
+  render(<Disciplines readOnly={false}/>)
+  await selectCompetition()
+  const row = (await screen.findByText(/Slalom —/)).parentElement!
+  expect(within(row).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/start-lists?competition=1&discipline=3')
+  expect(within(row).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/results?competition=1&discipline=3')
+  expect(within(row).getByRole('link', {name: 'Result entry'})).toHaveAttribute('href', '#/result-grid?competition=1&discipline=3')
+})
