@@ -65,8 +65,8 @@ class CompetitionRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
     void databaseRejectsReversedDateRange() {
         assertThatThrownBy(() -> entityManager.createNativeQuery("""
                 INSERT INTO competitions (title, start_date, end_date, location, time_zone,
-                    admission_confirmation_required, version)
-                VALUES ('Race', DATE '2026-07-02', DATE '2026-07-01', 'River', 'Europe/London', false, 0)
+                    admission_confirmation_required, version, status)
+                VALUES ('Race', DATE '2026-07-02', DATE '2026-07-01', 'River', 'Europe/London', false, 0, 'CREATED')
                 """).executeUpdate()).isInstanceOf(jakarta.persistence.PersistenceException.class);
     }
 }

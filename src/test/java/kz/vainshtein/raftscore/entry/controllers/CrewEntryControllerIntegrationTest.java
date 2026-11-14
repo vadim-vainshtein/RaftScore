@@ -46,6 +46,24 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         url = "/api/competitions/" + competition.getId() + "/entries";
     }
     @Test
+    void completedCompetitionRejectsCrewMutationsAndPreservesMissingEntryContract() throws Exception {
+        var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isCreated()).andReturn().getResponse();
+        Number id = JsonPath.read(created.getContentAsString(), "$.id");
+        jdbc.update("update competitions set status = 'STARTED' where id = ?", competition.getId());
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(updateBody("0"))).andExpect(status().isOk());
+        jdbc.update("update competitions set status = 'COMPLETED' where id = ?", competition.getId());
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isConflict());
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(updateBody("1"))).andExpect(status().isConflict());
+        mvc.perform(put(url + "/" + id + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":1}")).andExpect(status().isConflict());
+        mvc.perform(put(url + "/999999999").with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(updateBody("1"))).andExpect(status().isNotFound());
+    }
+    @Test
     void projectionsKeepPrivateDetailsBehindFullAccess() throws Exception {
         var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition)
                 .name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());

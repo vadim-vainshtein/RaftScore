@@ -5,6 +5,7 @@ import java.time.LocalDate;
 /** Database-backed fields needed for the competition list. */
 public interface CompetitionListProjection {
     Long getId();
+    CompetitionStatus getStatus();
     String getTitle();
     LocalDate getStartDate();
     LocalDate getEndDate();

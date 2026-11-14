@@ -62,4 +62,19 @@ class DisciplineConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
         assertThat(configurations.findByDisciplineId(discipline.getId()).orElseThrow().getGateCount()).isEqualTo(3);
     }
 
+    @Test void completedCompetitionRejectsConfigurationChanges() throws Exception {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Completed").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var discipline = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competition.transitionTo(CompetitionStatus.COMPLETED);
+        competitions.saveAndFlush(competition);
+        var mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var base = "/api/competitions/" + competition.getId() + "/disciplines";
+        var json = "{\"name\":\"Sprint\",\"type\":\"SPRINT\",\"displayOrder\":0,\"categoryIds\":[" + category.getId() + "],\"version\":" + discipline.getVersion() + "}";
+        mvc.perform(post(base).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isConflict());
+        mvc.perform(put(base + "/" + discipline.getId() + "/configuration").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isConflict());
+        mvc.perform(put(base + "/999999999/configuration").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isNotFound());
+    }
+
 }

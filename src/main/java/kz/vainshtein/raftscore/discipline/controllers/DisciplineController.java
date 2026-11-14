@@ -23,6 +23,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequestMapping("/api/competitions/{competitionId}/disciplines")
 @RequiredArgsConstructor
 class DisciplineController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final DisciplineRepository disciplines;
     private final PlacementPointsTableRepository tables;
     private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
@@ -47,6 +48,7 @@ class DisciplineController {
     @Transactional
     DisciplineResponse update(@PathVariable Long competitionId, @PathVariable Long disciplineId,
                               @Valid @RequestBody UpdateRequest request) {
+        lifecycle.requireEditable(competitionId);
         var discipline = disciplines.findForStartListUpdate(disciplineId).filter(d -> d.getCompetition().getId().equals(competitionId))
                 .orElseThrow(NotFound::new);
         if (discipline.getVersion() != request.version().longValueExact()) {

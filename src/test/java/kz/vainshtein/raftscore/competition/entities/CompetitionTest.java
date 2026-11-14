@@ -18,6 +18,16 @@ class CompetitionTest {
     }
 
     @Test
+    void lifecycleOnlyMovesForward() {
+        var competition = validCompetition().build();
+        assertThat(competition.getStatus()).isEqualTo(CompetitionStatus.CREATED);
+        org.assertj.core.api.Assertions.assertThatIllegalStateException().isThrownBy(() -> competition.transitionTo(CompetitionStatus.COMPLETED));
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competition.transitionTo(CompetitionStatus.COMPLETED);
+        org.assertj.core.api.Assertions.assertThatIllegalStateException().isThrownBy(() -> competition.transitionTo(CompetitionStatus.STARTED));
+    }
+
+    @Test
     void defaultsEndDateToStartForSingleDay() {
         var competition = validCompetition().build();
         assertThat(competition.getEndDate()).isEqualTo(START);

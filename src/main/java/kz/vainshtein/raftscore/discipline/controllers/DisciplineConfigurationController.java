@@ -29,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 class DisciplineConfigurationController {
     private final DisciplineRepository disciplines;
     private final CompetitionRepository competitions;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final CompetitionCategoryRepository categories;
     private final SlalomConfigurationRepository slalom;
     private final JdbcTemplate jdbc;
@@ -65,6 +66,7 @@ class DisciplineConfigurationController {
     @Transactional
     View create(@PathVariable Long competitionId, @Valid @RequestBody Configuration request) {
         var competition = competitions.findForDisciplineConfiguration(competitionId).orElseThrow(DisciplineConfigurationController::notFound);
+        lifecycle.requireEditable(competitionId);
         var discipline = Discipline.builder().competition(competition).name(request.name()).type(request.type())
                 .displayOrder(request.displayOrder()).build();
         apply(discipline, competitionId, request, false);
@@ -79,6 +81,7 @@ class DisciplineConfigurationController {
         competitions.findForDisciplineConfiguration(competitionId).orElseThrow(DisciplineConfigurationController::notFound);
         var discipline = disciplines.findForStartListUpdate(disciplineId)
                 .filter(d -> d.getCompetition().getId().equals(competitionId)).orElseThrow(DisciplineConfigurationController::notFound);
+        lifecycle.requireEditable(competitionId);
         if (request.version() == null) throw badRequest("version required");
         if (discipline.getVersion() != request.version()) throw new OptimisticLockingFailureException("Stale discipline version");
         if (discipline.getType() != request.type()) throw new ResponseStatusException(HttpStatus.CONFLICT, "discipline type cannot be changed");

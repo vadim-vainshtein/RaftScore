@@ -23,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/competitions/{competitionId}/disciplines/{disciplineId}/categories/{categoryId}/crews/{crewId}/attempts")
 @RequiredArgsConstructor
 class AttemptResultController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final jakarta.persistence.EntityManager entityManager;
     private final DisciplineRepository disciplines;
     private final CrewEntryRepository crews;
@@ -46,6 +47,7 @@ class AttemptResultController {
     @Transactional
     View put(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
              @PathVariable long crewId, @PathVariable int attemptNumber, @Valid @RequestBody Request request) {
+        lifecycle.requireStarted(competitionId);
         var discipline = disciplines.findForStartListUpdate(disciplineId)
                 .filter(d -> d.getCompetition().getId().equals(competitionId)
                         && d.getCategories().stream().anyMatch(c -> c.getId().equals(categoryId)))

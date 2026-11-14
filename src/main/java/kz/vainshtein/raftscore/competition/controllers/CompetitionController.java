@@ -1,7 +1,7 @@
 package kz.vainshtein.raftscore.competition.controllers;
 
-import java.time.Instant;
-import java.time.ZoneId;
+import kz.vainshtein.raftscore.competition.entities.CompetitionStatus;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import kz.vainshtein.raftscore.competition.entities.CompetitionListProjection;
@@ -66,22 +66,18 @@ class CompetitionController {
         }
         var direction = Sort.Direction.valueOf(sort.name());
         var result = repository.findList(search, PageRequest.of(page, size, Sort.by(direction, "startDate").and(Sort.by("id"))));
-        var now = Instant.now();
-        return new CompetitionPage(result.map(item -> CompetitionListItem.from(item, now)).getContent(),
+
+        return new CompetitionPage(result.map(item -> CompetitionListItem.from(item)).getContent(),
                 result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
     }
 
     enum SortDirection { ASC, DESC }
-    enum CompetitionState { UPCOMING, IN_PROGRESS, COMPLETED }
     record CompetitionPage(List<CompetitionListItem> content, int page, int size, long totalElements, int totalPages) { }
     record CompetitionListItem(Long id, String title, LocalDate startDate, LocalDate endDate, String location,
-                               String timeZone, CompetitionState state, long categoryCount, long crewCount) {
-        static CompetitionListItem from(CompetitionListProjection item, Instant now) {
-            var today = now.atZone(ZoneId.of(item.getTimeZone())).toLocalDate();
-            var state = today.isBefore(item.getStartDate()) ? CompetitionState.UPCOMING
-                    : today.isAfter(item.getEndDate()) ? CompetitionState.COMPLETED : CompetitionState.IN_PROGRESS;
+                               String timeZone, CompetitionStatus state, long categoryCount, long crewCount) {
+        static CompetitionListItem from(CompetitionListProjection item) {
             return new CompetitionListItem(item.getId(), item.getTitle(), item.getStartDate(), item.getEndDate(),
-                    item.getLocation(), item.getTimeZone(), state, item.getCategoryCount(), item.getCrewCount());
+                    item.getLocation(), item.getTimeZone(), item.getStatus(), item.getCategoryCount(), item.getCrewCount());
         }
     }
     @GetMapping("/{id}")
@@ -108,12 +104,29 @@ class CompetitionController {
     CompetitionResponse update(@PathVariable Long id, @Valid @RequestBody UpdateRequest request) {
         var details = request.details();
         details.validateDates();
-        var competition = repository.findById(id).orElseThrow(NotFound::new);
+        var competition = repository.findForDisciplineConfiguration(id).orElseThrow(NotFound::new);
+        if (competition.getStatus() == CompetitionStatus.COMPLETED) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT);
         if (competition.getVersion() != request.version().longValueExact()) {
             throw new OptimisticLockingFailureException("Stale competition version");
         }
         competition.updateDetails(details.title(), details.startDate(), details.endDate(), details.location(),
                 details.timeZone(), details.description(), details.admissionConfirmationRequired());
+        repository.flush();
+        return CompetitionResponse.from(competition);
+    }
+
+    record StatusRequest(@NotNull CompetitionStatus status,
+                         @NotNull @PositiveOrZero @Digits(integer = 19, fraction = 0) @DecimalMax("9223372036854775807") BigDecimal version) { }
+
+    @PutMapping("/{id}/status")
+    @Transactional
+    CompetitionResponse transition(@PathVariable Long id, @Valid @RequestBody StatusRequest request) {
+        var competition = repository.findForDisciplineConfiguration(id).orElseThrow(NotFound::new);
+        if (competition.getVersion() != request.version().longValueExact()) {
+            throw new OptimisticLockingFailureException("Stale competition version");
+        }
+        try { competition.transitionTo(request.status()); }
+        catch (IllegalStateException ex) { throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
         repository.flush();
         return CompetitionResponse.from(competition);
     }
@@ -127,7 +140,8 @@ class CompetitionController {
     @PutMapping("/{id}/tiebreak")
     @Transactional
     TiebreakResponse updateTiebreak(@PathVariable Long id, @Valid @RequestBody TiebreakRequest request) {
-        var competition = repository.findById(id).orElseThrow(NotFound::new);
+        var competition = repository.findForDisciplineConfiguration(id).orElseThrow(NotFound::new);
+        if (competition.getStatus() == CompetitionStatus.COMPLETED) throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT);
         if (competition.getVersion() != request.version().longValueExact()) {
             throw new OptimisticLockingFailureException("Stale competition version");
         }
@@ -208,11 +222,11 @@ class CompetitionController {
 
     record CompetitionResponse(Long id, long version, String title, LocalDate startDate, LocalDate endDate,
                                String location, String timeZone, String description,
-                               boolean admissionConfirmationRequired) {
+                               boolean admissionConfirmationRequired, CompetitionStatus status) {
         static CompetitionResponse from(Competition competition) {
             return new CompetitionResponse(competition.getId(), competition.getVersion(), competition.getTitle(),
                     competition.getStartDate(), competition.getEndDate(), competition.getLocation(),
-                    competition.getTimeZone(), competition.getDescription(), competition.isAdmissionConfirmationRequired());
+                    competition.getTimeZone(), competition.getDescription(), competition.isAdmissionConfirmationRequired(), competition.getStatus());
         }
     }
 }

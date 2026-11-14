@@ -8,9 +8,9 @@ import CompetitionWizard from './CompetitionWizard'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
-type Item = {id: number, title: string, startDate: string, endDate: string, location: string, state: 'UPCOMING' | 'IN_PROGRESS' | 'COMPLETED', categoryCount: number, crewCount: number}
-type Details = {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}
-type Draft = Omit<Details, 'id' | 'version'> & {id?: number, version?: number}
+type Item = {id: number, title: string, startDate: string, endDate: string, location: string, state: 'CREATED' | 'STARTED' | 'COMPLETED', categoryCount: number, crewCount: number}
+type Details = {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
+type Draft = Omit<Details, 'id' | 'version' | 'status'> & {id?: number, version?: number}
 type Page = {content: Item[], page: number, totalPages: number, totalElements: number}
 
 export default function Competitions({readOnly}: {readOnly: boolean}) {
@@ -26,15 +26,15 @@ export default function Competitions({readOnly}: {readOnly: boolean}) {
     return () => {active = false}
   }, [search, sort, page, revision, t])
   const open = async (id: number) => {setBusy(true); setError(''); try {setDetails(await apiRequest<Details>(`/api/competitions/${id}`))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
-  const edit = async (id: number) => {setBusy(true); setError(''); try {setDraft(await apiRequest<Details>(`/api/competitions/${id}`))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
+  const edit = async (id: number) => {setBusy(true); setError(''); try {const latest = await apiRequest<Details>(`/api/competitions/${id}`); if (latest.status === 'COMPLETED') {setDetails(latest); setRevision(v => v + 1)} else setDraft(latest)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   const save = async (event: FormEvent) => {event.preventDefault(); if (!draft || busy) return
     setBusy(true); setError('')
-    try {const {id, ...body} = draft; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); setDetails(saved); setRevision(v => v + 1)}
+    try {const {id, status: _status, ...body} = draft as Draft & {status?: string}; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); setDetails(saved); setRevision(v => v + 1)}
     catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-    {creating ? <CompetitionWizard onCancel={() => setCreating(false)} onSaved={saved => {setCreating(false); setDetails(saved); setRevision(v => v + 1)}}/> : draft ? <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
+    {creating ? <CompetitionWizard onCancel={() => setCreating(false)} onSaved={saved => {setCreating(false); setDetails({...saved, status: 'CREATED'}); setRevision(v => v + 1)}}/> : draft ? <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
       <TextField required label={t('competition.title')} value={draft.title} onChange={e => setDraft({...draft, title: e.target.value})}/>
       <TextField required type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={draft.startDate} onChange={e => setDraft({...draft, startDate: e.target.value})}/>
       <TextField type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}, htmlInput: {min: draft.startDate}}} value={draft.endDate} onChange={e => setDraft({...draft, endDate: e.target.value})}/>
@@ -47,10 +47,11 @@ export default function Competitions({readOnly}: {readOnly: boolean}) {
       <Typography variant="h5">{details.title}</Typography><Typography>{displayDate(details.startDate)} – {displayDate(details.endDate)} · {details.location} · {details.timeZone}</Typography>
       {details.description && <Typography>{details.description}</Typography>}
       <Typography>{t('competition.admission')}: {t(details.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}</Typography>
-      <Box>{!readOnly && <Button disabled={busy} onClick={() => setDraft(details)}>{t('competition.edit')}</Button>}<Button onClick={() => setDetails(null)}>{t('competition.back')}</Button></Box>
+      <Typography>{t(`competition.states.${details.status}`)}</Typography>
+      <Box>{details.status !== 'CREATED' && <Button component="a" href={`#/workspace/${details.id}`}>{t('competition.workspace')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={async () => {if (details.status === 'STARTED' && !window.confirm(t('competition.confirmComplete'))) return; setBusy(true); try {setDetails(await csrfRequest<Details>(`/api/competitions/${details.id}/status`, 'PUT', {status: details.status === 'CREATED' ? 'STARTED' : 'COMPLETED', version: details.version})); setRevision(v => v + 1)} catch(e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t(details.status === 'CREATED' ? 'competition.start' : 'competition.complete')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => setDraft(details)}>{t('competition.edit')}</Button>}<Button onClick={() => setDetails(null)}>{t('competition.back')}</Button></Box>
     </Box> : <>
       <Box sx={{display: 'flex', flexWrap: 'wrap', gap: 2}}><TextField label={t('competition.search')} value={search} onChange={e => {setSearch(e.target.value); setPage(0)}}/><TextField select label={t('competition.sort')} value={sort} onChange={e => {setSort(e.target.value); setPage(0)}}><MenuItem value="ASC">{t('competition.ascending')}</MenuItem><MenuItem value="DESC">{t('competition.descending')}</MenuItem></TextField>{!readOnly && <Button onClick={() => setCreating(true)}>{t('competition.create')}</Button>}</Box>
-      {result && <><Typography>{t('competition.total', {count: result.totalElements})}</Typography>{result.content.map(item => <Box key={item.id}><Typography>{item.title} · {displayDate(item.startDate)} – {displayDate(item.endDate)} · {item.location} · {t(`competition.states.${item.state}`)} · {t('competition.counts', {categories: item.categoryCount, crews: item.crewCount})}</Typography><Button disabled={busy} onClick={() => void open(item.id)}>{t('competition.open')}</Button>{!readOnly && <Button disabled={busy} onClick={() => void edit(item.id)}>{t('competition.edit')}</Button>}</Box>)}<Box><Button disabled={page === 0} onClick={() => setPage(page - 1)}>{t('competition.previous')}</Button><Typography component="span">{page + 1} / {Math.max(1, result.totalPages)}</Typography><Button disabled={page + 1 >= result.totalPages} onClick={() => setPage(page + 1)}>{t('competition.next')}</Button></Box></>}
+      {result && <><Typography>{t('competition.total', {count: result.totalElements})}</Typography>{result.content.map(item => <Box key={item.id}><Typography>{item.title} · {displayDate(item.startDate)} – {displayDate(item.endDate)} · {item.location} · {t(`competition.states.${item.state}`)} · {t('competition.counts', {categories: item.categoryCount, crews: item.crewCount})}</Typography><Button disabled={busy} onClick={() => void open(item.id)}>{t('competition.open')}</Button>{!readOnly && item.state !== 'COMPLETED' && <Button disabled={busy} onClick={() => void edit(item.id)}>{t('competition.edit')}</Button>}</Box>)}<Box><Button disabled={page === 0} onClick={() => setPage(page - 1)}>{t('competition.previous')}</Button><Typography component="span">{page + 1} / {Math.max(1, result.totalPages)}</Typography><Button disabled={page + 1 >= result.totalPages} onClick={() => setPage(page + 1)}>{t('competition.next')}</Button></Box></>}
     </>}
   </Box>
 }

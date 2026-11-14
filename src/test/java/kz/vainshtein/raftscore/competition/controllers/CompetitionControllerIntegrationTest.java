@@ -2,6 +2,7 @@ package kz.vainshtein.raftscore.competition.controllers;
 
 import com.jayway.jsonpath.JsonPath;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import jakarta.persistence.PersistenceContext;
 import java.util.Optional;
 import kz.vainshtein.raftscore.competition.entities.Competition;
@@ -58,6 +59,42 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + ",\"version\":0}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("conflict.optimistic_lock"));
         assertThat(repository.findById(id.longValue()).orElseThrow().getTitle()).isEqualTo("Winner");
+    }
+
+    @Test void transitionsRequireCurrentVersionAndCloseResultWrites() throws Exception {
+        var created = mvc.perform(post("/api/competitions").with(full()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("CREATED")).andReturn();
+        Number id = JsonPath.read(created.getResponse().getContentAsString(), "$.id");
+        var details = "/api/competitions/" + id;
+        var transition = details + "/status";
+        var recalculate = details + "/recalculate";
+
+        mvc.perform(post(recalculate).with(full()).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(put(transition).with(user("reader").roles("READ_ONLY")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(statusChange("STARTED", 0)))
+                .andExpect(status().isForbidden());
+        mvc.perform(put(transition).with(full()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(statusChange("COMPLETED", 0)))
+                .andExpect(status().isConflict());
+        mvc.perform(put(transition).with(full()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(statusChange("STARTED", 0)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("STARTED"))
+                .andExpect(jsonPath("$.version").value(1));
+        mvc.perform(post(recalculate).with(full()).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(put(transition).with(full()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(statusChange("COMPLETED", 0)))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("conflict.optimistic_lock"));
+        mvc.perform(put(transition).with(full()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(statusChange("COMPLETED", 1)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
+        mvc.perform(post(recalculate).with(full()).with(csrf())).andExpect(status().isConflict());
+        mvc.perform(get(details).with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    private static String statusChange(String status, long version) {
+        return "{\"status\":\"%s\",\"version\":%d}".formatted(status, version);
     }
 
     @Test void configuresTiebreakWithCompetitionVersionAndOwnership() throws Exception {
@@ -135,7 +172,7 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
         }
     }
 
-    @Test void concurrentCommitAfterReadIsReportedAsConflict() throws Exception {
+    @Test void concurrentCommitBeforeLockIsReportedAsConflict() throws Exception {
         var created = mvc.perform(post("/api/competitions").with(full()).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
                 .andExpect(status().isCreated()).andReturn();
@@ -143,11 +180,10 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
         var independent = new TransactionTemplate(transactions);
         independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         doAnswer(invocation -> {
-            var loaded = Optional.ofNullable(entityManager.find(Competition.class, invocation.getArgument(0)));
             independent.executeWithoutResult(status -> jdbc.update(
                     "update competitions set title = ?, version = version + 1 where id = ?", "Concurrent winner", id.longValue()));
-            return loaded;
-        }).when(repository).findById(anyLong());
+            return Optional.ofNullable(entityManager.find(Competition.class, invocation.getArgument(0), LockModeType.PESSIMISTIC_WRITE));
+        }).when(repository).findForDisciplineConfiguration(anyLong());
         mvc.perform(put("/api/competitions/{id}", id).with(full()).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{" + BODY.replace("Race", "Loser") + ",\"version\":0}"))

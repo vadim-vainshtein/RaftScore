@@ -62,6 +62,8 @@ class RecalculationServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Test @Transactional
     void emptySlalomWithoutConfigurationAllowsRecalculationAndDisciplineUpdate() throws Exception {
         var competition = competitions.saveAndFlush(Competition.builder().title("Empty slalom").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competitions.flush();
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         var discipline = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Slalom").type(DisciplineType.SLALOM).build());
         discipline.replaceCategories(List.of(category));

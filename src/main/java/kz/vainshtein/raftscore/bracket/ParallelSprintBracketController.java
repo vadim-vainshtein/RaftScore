@@ -22,6 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/competitions/{competitionId}/disciplines/{disciplineId}/categories/{categoryId}/brackets/{bracketId}")
 @RequiredArgsConstructor
 class ParallelSprintBracketController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
     private final ParallelSprintResultService results;
@@ -48,6 +49,7 @@ class ParallelSprintBracketController {
     Heat record(@PathVariable long competitionId, @PathVariable long disciplineId,
                 @PathVariable long categoryId, @PathVariable long bracketId, @PathVariable long heatId,
                 @Valid @RequestBody ResultRequest request) {
+        lifecycle.requireStarted(competitionId);
         checkScope(competitionId, disciplineId, categoryId, bracketId);
         var heat = heats.findById(heatId).filter(h -> h.getBracket().getId().equals(bracketId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));

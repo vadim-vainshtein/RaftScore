@@ -1,12 +1,11 @@
 package kz.vainshtein.raftscore.competition.controllers;
 
-import java.time.Instant;
 import java.time.LocalDate;
 import kz.vainshtein.raftscore.competition.entities.Competition;
 import kz.vainshtein.raftscore.competition.entities.CompetitionCategory;
 import kz.vainshtein.raftscore.competition.entities.CompetitionCategoryRepository;
-import kz.vainshtein.raftscore.competition.entities.CompetitionListProjection;
 import kz.vainshtein.raftscore.competition.entities.CompetitionRepository;
+import kz.vainshtein.raftscore.competition.entities.CompetitionStatus;
 import kz.vainshtein.raftscore.entry.entities.CrewEntry;
 import kz.vainshtein.raftscore.entry.entities.CrewEntryRepository;
 import org.junit.jupiter.api.Test;
@@ -18,8 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import testsupport.PostgreSqlIntegrationTest;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -36,8 +33,11 @@ class CompetitionListIntegrationTest extends PostgreSqlIntegrationTest {
     @Test void listsForBothRolesWithSearchPagingCountsAndStableSort() throws Exception {
         var date = LocalDate.of(2026, 5, 1);
         var first = competition("Unique list race A", date);
-        competition("Unique list race B", date);
+        var started = competition("Unique list race B", date);
+        started.transitionTo(CompetitionStatus.STARTED);
         var later = competition("Unique list race C", date.plusDays(1));
+        later.transitionTo(CompetitionStatus.STARTED);
+        later.transitionTo(CompetitionStatus.COMPLETED);
         competition("Unrelated event", date);
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(first)
                 .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
@@ -53,11 +53,14 @@ class CompetitionListIntegrationTest extends PostgreSqlIntegrationTest {
                     .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(3))
                     .andExpect(jsonPath("$.totalPages").value(2)).andExpect(jsonPath("$.content[0].id").value(first.getId()))
                     .andExpect(jsonPath("$.content[0].categoryCount").value(2)).andExpect(jsonPath("$.content[0].crewCount").value(1))
+                    .andExpect(jsonPath("$.content[0].state").value("CREATED"))
+                    .andExpect(jsonPath("$.content[1].state").value("STARTED"))
                     .andExpect(jsonPath("$.content[0].description").doesNotExist());
             mvc.perform(get("/api/competitions").with(user("user").roles(role))
                             .param("search", "Unique list race").param("size", "2").param("sort", "DESC"))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(3))
-                    .andExpect(jsonPath("$.content[0].id").value(later.getId()));
+                    .andExpect(jsonPath("$.content[0].id").value(later.getId()))
+                    .andExpect(jsonPath("$.content[0].state").value("COMPLETED"));
             mvc.perform(get("/api/competitions").with(user("user").roles(role))
                             .param("search", "Unique list race").param("size", "1").param("page", "1").param("sort", "ASC"))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].title").value("Unique list race B"));
@@ -66,21 +69,6 @@ class CompetitionListIntegrationTest extends PostgreSqlIntegrationTest {
             mvc.perform(get("/api/competitions" + query).with(user("user").roles("READ_ONLY")))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").exists());
         }
-    }
-
-    @Test void computesInclusiveStateUsingCompetitionZone() {
-        var item = mock(CompetitionListProjection.class);
-        when(item.getStartDate()).thenReturn(LocalDate.of(2026, 5, 1));
-        when(item.getEndDate()).thenReturn(LocalDate.of(2026, 5, 2));
-        when(item.getTimeZone()).thenReturn("Pacific/Auckland");
-        assertThat(CompetitionController.CompetitionListItem.from(item, Instant.parse("2026-04-30T11:59:59Z")).state())
-                .isEqualTo(CompetitionController.CompetitionState.UPCOMING);
-        assertThat(CompetitionController.CompetitionListItem.from(item, Instant.parse("2026-04-30T12:00:00Z")).state())
-                .isEqualTo(CompetitionController.CompetitionState.IN_PROGRESS);
-        assertThat(CompetitionController.CompetitionListItem.from(item, Instant.parse("2026-05-02T11:59:59Z")).state())
-                .isEqualTo(CompetitionController.CompetitionState.IN_PROGRESS);
-        assertThat(CompetitionController.CompetitionListItem.from(item, Instant.parse("2026-05-02T12:00:00Z")).state())
-                .isEqualTo(CompetitionController.CompetitionState.COMPLETED);
     }
 
     private Competition competition(String title, LocalDate date) {
