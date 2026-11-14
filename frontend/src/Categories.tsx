@@ -113,7 +113,7 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
       <Button disabled={busy || !/^\d+$/.test(form.crewSize) || Math.max(8, form.seatLabels.length) >= Number(form.crewSize)} onClick={() => {if (draft) setDraft({...draft, form: {...form, seatLabels: Array.from({length: Math.max(8, form.seatLabels.length) + 1}, (_, i) => form.seatLabels[i] ?? '')}, dirty: true})}}>{t('addSeat')}</Button>
       <Typography>{t('preview')}: {form.classLabel} / {form.scoringGroupLabel}</Typography>
       {duplicate && <Typography role="status">{t('duplicate')}</Typography>}{lookup?.key === lookupKey && lookup.failed && <Typography role="alert">{t('lookupFailed')} <Button onClick={() => {setLookup(null); setLookupRevision(v => v + 1)}}>{t('retry')}</Button></Typography>}
-      <Box><Button type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>
+      <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button variant="contained" type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>
     </Box>}
     {form && <SeatNameDictionary label={t('seatNames')} onChanged={() => setRevision(v => v + 1)}/>}
     {error && <Typography role="alert">{error.startsWith('common:') ? common(error.slice(7) as 'apiError.network') : t(error as 'conflict')}</Typography>}

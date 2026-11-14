@@ -4,7 +4,8 @@
     "navigation": "Главная навигация",
     "openNavigation": "Открыть меню",
     "menu": "Меню",
-    "language": "Язык"
+    "language": "Язык",
+    "skipToContent": "Перейти к содержимому"
   },
   "navigation": {
     "competitions": "Соревнования",
@@ -80,7 +81,10 @@
     "representativeSettings": "Поля представителя",
     "categorySeats": "Категории и названия мест",
     "editCategory": "Изменить категорию",
-    "rosterVariant": "Вариант состава {{number}}"
+    "rosterVariant": "Вариант состава {{number}}",
+    "openApplication": "Открыть заявку",
+    "copyApplication": "Создать заявку на основе",
+    "chooseCategoryFirst": "Выберите категорию, чтобы создать экипаж."
   },
   "discipline": {
     "competition": "Соревнование",
@@ -149,7 +153,12 @@
     "workspace": "Рабочее пространство соревнования",
     "start": "Начать соревнование",
     "complete": "Завершить соревнование",
-    "confirmComplete": "Завершить соревнование? Ввод результатов будет закрыт."
+    "confirmComplete": "Завершить соревнование? Ввод результатов будет закрыт.",
+    "unsavedRows": "Несохранённых строк: {{count}}. Они будут отброшены.",
+    "discardAndComplete": "Отбросить и завершить",
+    "prepare": "Продолжить подготовку",
+    "enterResults": "Ввести результаты",
+    "openProtocol": "Открыть протокол"
   },
   "wizard": {
     "template": "Добавить активный шаблон",
@@ -193,7 +202,11 @@
     "step3": "Дисциплины и очки",
     "step4": "Проверка",
     "noRequirements": "Требований нет",
-    "blankPoints": "Создать пустую таблицу очков"
+    "blankPoints": "Создать пустую таблицу очков",
+    "continueDraft": "Продолжить создание",
+    "discardDraft": "Сбросить черновик создания соревнования?",
+    "searchZone": "Поиск часового пояса",
+    "configurePoints": "Настроить очки"
   },
   "startList": {
     "locked": "Заблокировано: результаты уже введены.",
@@ -289,7 +302,8 @@
     "hideFilters": "Скрыть фильтры",
     "showFilters": "Показать фильтры",
     "fullscreen": "Полный экран",
-    "appliedTiebreak": "Применённая дисциплина для разрешения равенства"
+    "appliedTiebreak": "Применённая дисциплина для разрешения равенства",
+    "updatedAt": "Обновлено: {{time}}"
   },
   "parallel": {
     "slot": "Позиция {{number}}",
@@ -308,7 +322,9 @@
     "round": "Раунд {{round}}",
     "heat": "Заезд {{heat}}",
     "bye": "Без соперника",
-    "pending": "Ожидание участника"
+    "pending": "Ожидание участника",
+    "chooseRound": "Выбор раунда",
+    "editHeat": "Открыть форму заезда {{heat}}"
   },
   "apiError": {
     "network": "Ошибка соединения. Повторите попытку.",
@@ -356,5 +372,13 @@
     "confirmationRequired": "Подтвердите восстановление перед продолжением.",
     "restoreNamed": "Восстановить копию от {{date}} ({{id}})",
     "downloadNamed": "Скачать копию от {{date}} ({{id}})"
+  },
+  "workspace": {
+    "preparation": "Подготовка",
+    "readiness": "Категорий: {{categories}} · Дисциплин: {{disciplines}}",
+    "input": "Ввод результатов",
+    "protocol": "Протокол",
+    "crewReadiness": "Заявок: {{total}} · Допущено: {{admitted}}",
+    "startReadiness": "Экипажей в выбранном старте: {{count}}"
   }
 }

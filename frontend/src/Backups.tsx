@@ -3,7 +3,7 @@ import {Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, type ApiErrorKey} from './api/errors'
-import {formatDate, formatNumber} from './i18n/format'
+import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
 type Backup = {id: string, createdAt: string, sizeBytes: number, formatVersion: string, schemaVersion: string}
@@ -68,20 +68,20 @@ export default function Backups() {
   }
   const date = (value: string | number) => {
     const parsed = new Date(value)
-    return Number.isNaN(parsed.getTime()) ? t('backup.unavailable') : formatDate(parsed, locale, zone, {dateStyle: 'medium', timeStyle: 'short'})
+    return Number.isNaN(parsed.getTime()) ? t('backup.unavailable') : formatDate(parsed, locale, zone, {dateStyle: 'medium', timeStyle: 'medium'})
   }
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    <Box><Button onClick={() => void create()} disabled={busy || loading}>{t('backup.create')}</Button><Button onClick={() => void load()} disabled={busy || loading}>{t('backup.refresh')}</Button></Box>
+    <Box><Button variant="contained" onClick={() => void create()} disabled={busy || loading}>{t('backup.create')}</Button><Button onClick={() => void load()} disabled={busy || loading}>{t('backup.refresh')}</Button></Box>
     {error && !source && <Typography role="alert">{t(error)}</Typography>}
     {loading ? <Typography>{t('backup.loading')}</Typography> : backups.length === 0 ? <Typography>{t('backup.empty')}</Typography> : <Box sx={{overflowX: 'auto'}}><Table><TableHead><TableRow>{(['created','format','schema','size','actions'] as const).map(key => <TableCell key={key}>{t(`backup.${key}`)}</TableCell>)}</TableRow></TableHead><TableBody>{backups.map(backup => <TableRow key={backup.id}>
-      <TableCell>{date(backup.createdAt)}</TableCell><TableCell>{backup.formatVersion}</TableCell><TableCell>{backup.schemaVersion}</TableCell><TableCell>{t('backup.bytes', {count: backup.sizeBytes, size: formatNumber(backup.sizeBytes, locale)})}</TableCell>
+      <TableCell>{date(backup.createdAt)} · {backup.id.slice(0, 8)}</TableCell><TableCell>{backup.formatVersion}</TableCell><TableCell><details><summary>{backup.schemaVersion.slice(0, 8)}</summary>{backup.schemaVersion}</details></TableCell><TableCell>{new Intl.NumberFormat(locale, {style: 'unit', unit: backup.sizeBytes >= 1048576 ? 'megabyte' : backup.sizeBytes >= 1024 ? 'kilobyte' : 'byte', maximumFractionDigits: 1}).format(backup.sizeBytes / (backup.sizeBytes >= 1048576 ? 1048576 : backup.sizeBytes >= 1024 ? 1024 : 1))}</TableCell>
       <TableCell><Button component="a" href={`/api/backups/${encodeURIComponent(backup.id)}/download`} download aria-label={t('backup.downloadNamed', {date: date(backup.createdAt), id: backup.id})} disabled={busy || loading}>{t('backup.download')}</Button><Button disabled={busy || loading} aria-label={t('backup.restoreNamed', {date: date(backup.createdAt), id: backup.id})} onClick={() => choose({kind: 'stored', backup})}>{t('backup.restore')}</Button></TableCell>
     </TableRow>)}</TableBody></Table></Box>}
     <Button disabled={busy || loading} onClick={() => uploadInput.current?.click()}>{t('backup.chooseUpload')}</Button><input ref={uploadInput} type="file" accept=".zip,application/zip" hidden onChange={event => {const file = event.target.files?.[0]; if (file) choose({kind: 'upload', file}); event.target.value = ''}}/>
     <Dialog open={!!source} onClose={busy ? undefined : cancel} aria-labelledby="restore-title" fullWidth>
       <DialogTitle id="restore-title">{t('backup.confirmTitle')}</DialogTitle><DialogContent sx={{display: 'grid', gap: 2}}>
         <Typography>{t('backup.warning')}</Typography>
-        {source?.kind === 'stored' && <Typography>{t('backup.storedSource', {date: date(source.backup.createdAt)})}</Typography>}
+        {source?.kind === 'stored' && <Typography>{t('backup.storedSource', {date: date(source.backup.createdAt)})} · {source.backup.id.slice(0, 8)}</Typography>}
         {source?.kind === 'upload' && <><Typography>{t('backup.uploadSource', {name: source.file.name})}</Typography><Typography>{t('backup.modified', {date: source.file.lastModified ? date(source.file.lastModified) : t('backup.unavailable')})}</Typography></>}
         <FormControlLabel control={<Checkbox checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={busy}/>} label={t('backup.confirm')}/>
         <TextField label={t('backup.password')} type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} disabled={busy}/>

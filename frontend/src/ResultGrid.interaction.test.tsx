@@ -94,10 +94,26 @@ test('resets gate page when changing discipline', async () => {
   await screen.findByLabelText('Gate 1 A')
   fireEvent.change(screen.getByLabelText('Gate page (20 per page)'), {target: {value: '2'}})
   expect(screen.getByLabelText('Gate 21 A')).toBeInTheDocument()
+  expect(screen.getByLabelText('Gate 23 A').closest('td')).toHaveAttribute('data-label', 'Gate 23')
+  const row = screen.getByLabelText('Time A').closest('tr')!
+  for (const label of ['Attempt', 'Time', 'Penalty', 'Status', 'Attempt total', 'Best / total', 'Place']) expect(row.querySelector(`[data-label="${label}"]`)).toBeInTheDocument()
   fireEvent.mouseDown(screen.getByLabelText('Discipline'))
   fireEvent.click(await screen.findByRole('option', {name: 'Short slalom'}))
   fireEvent.mouseDown(screen.getByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   expect(await screen.findByLabelText('Gate 1 A')).toBeInTheDocument()
   expect(screen.getByLabelText('Gate page (20 per page)')).toHaveValue(1)
+})
+
+test('rejects a parallel discipline in a direct timed grid link', async () => {
+  window.location.hash = '#/workspace/1/result-grid?discipline=8&category=2'
+  vi.mocked(apiRequest).mockImplementation(async p => {
+    if (p === '/api/competitions/1') return {id: 1, title: 'Race'}
+    if (p.endsWith('/disciplines')) return [{id: 8, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    throw new Error(p)
+  })
+  render(<ResultGrid fixedCompetition="1"/>)
+  await waitFor(() => expect(window.location.hash).toBe('#/workspace/1/result-grid?category=2'))
+  expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('/attempt-grid') || p.endsWith('/start-list'))).toBe(false)
 })

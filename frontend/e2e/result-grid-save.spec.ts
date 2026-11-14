@@ -6,7 +6,7 @@ type Attempt = { crewId: number, attemptNumber: number, durationCentiseconds: nu
 const admin = { username: 'e2e-admin', password: 'e2e-password' }
 const gateCount = 25
 
-test.use({ viewport: { width: 768, height: 900 }, locale: 'en-US' })
+test.use({ viewport: { width: 1440, height: 900 }, locale: 'en-US' })
 test.setTimeout(90000)
 
 async function read<T>(api: APIRequestContext, path: string): Promise<T> {
@@ -22,7 +22,7 @@ async function write(api: APIRequestContext, method: 'post' | 'put', path: strin
   return response
 }
 
-async function seed(api: APIRequestContext, title: string, crewCount: number, type = 'SPRINT') {
+async function seed(api: APIRequestContext, title: string, crewCount: number, type = 'SPRINT', parallel = false) {
   await write(api, 'post', '/api/auth/login', admin)
   const setup = await write(api, 'post', '/api/competitions/setup', {
     competition: { title, startDate: '2026-04-01', location: 'River', timeZone: 'UTC', admissionConfirmationRequired: false },
@@ -32,15 +32,16 @@ async function seed(api: APIRequestContext, title: string, crewCount: number, ty
       name: type === 'SLALOM' ? 'Slalom' : 'Sprint', type, displayOrder: 0, categoryIndexes: [0],
       ...(type === 'SLALOM' ? { gateCount, attemptCount: 1 } : {}),
       pointsTable: { name: 'Points', tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows: [{ place: 1, points: 100 }] },
-    }],
+    }, ...(parallel ? [{name: 'Head to head', type: 'PARALLEL_SPRINT', displayOrder: 1, categoryIndexes: [0]}] : [])],
   })
   const { id, version } = await setup.json()
   const competition = `/api/competitions/${id}`
   await write(api, 'put', `${competition}/status`, { status: 'STARTED', version })
-  const [[category], [discipline]] = await Promise.all([
+  const [[category], disciplines] = await Promise.all([
     read<{ id: number }[]>(api, `${competition}/categories`),
     read<{ id: number }[]>(api, `${competition}/disciplines`),
   ])
+  const [discipline, parallelDiscipline] = disciplines
   const crews: Crew[] = []
   for (let n = 1; n <= crewCount; n++) {
     const name = `Wave ${n}`
@@ -53,7 +54,7 @@ async function seed(api: APIRequestContext, title: string, crewCount: number, ty
   const base = `${competition}/disciplines/${discipline.id}/categories/${category.id}`
   await write(api, 'put', `${base}/start-list`, { random: false, crewIds: crews.map(crew => crew.id) })
   const route = `/?lang=en#/result-grid?competition=${id}&discipline=${discipline.id}&category=${category.id}`
-  return { route, base, crews }
+  return {route, base, crews, competitionId: id, categoryId: category.id, disciplineId: discipline.id, parallelDisciplineId: parallelDiscipline?.id}
 }
 
 function attemptPath(base: string, crew: Crew) {
@@ -94,6 +95,55 @@ async function prepareSprint(api: APIRequestContext, title: string) {
   })
   return fixture
 }
+
+test('opens the shared completion dialog from settings and retains the protocol filters', async ({page}) => {
+  const {competitionId, disciplineId, categoryId} = await prepareSprint(page.request, 'Complete from settings')
+  await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
+  await page.getByRole('main').getByRole('link', {name: 'Edit', exact: true}).click()
+  await page.getByRole('link', {name: 'Complete competition', exact: true}).click()
+  const dialog = page.getByRole('dialog', {name: 'Complete competition'})
+  await expect(dialog).toBeVisible()
+  await expect(page).not.toHaveURL(/complete=1/)
+  await expect(dialog.getByRole('button', {name: 'Cancel', exact: true})).toBeVisible()
+  await dialog.getByRole('button', {name: 'Complete competition', exact: true}).click()
+  await expect(page).toHaveURL(new RegExp(`/workspace/${competitionId}/results\\?`))
+  await expect(page).toHaveURL(new RegExp(`discipline=${disciplineId}`))
+  await expect(page).toHaveURL(new RegExp(`category=${categoryId}`))
+  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
+  await expect(page.getByText(/01:14\.01/).first()).toBeVisible()
+})
+
+test('updates the protocol in place when completing from the already open protocol', async ({page}) => {
+  const {competitionId, disciplineId, categoryId} = await prepareSprint(page.request, 'Complete on the protocol')
+  await page.goto(`/?lang=en#/workspace/${competitionId}/results?discipline=${disciplineId}&category=${categoryId}`)
+  await expect(page.getByRole('button', {name: 'Recalculate', exact: true})).toBeVisible()
+  const protocolUrl = page.url()
+  await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
+  const completion = page.getByRole('dialog', {name: 'Complete competition'})
+  await completion.getByRole('button', {name: 'Complete competition', exact: true}).click()
+  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
+  await expect(page).toHaveURL(protocolUrl)
+  await expect(page.getByRole('button', {name: 'Recalculate', exact: true})).toHaveCount(0)
+  await expect(page.getByRole('button', {name: 'Complete competition', exact: true})).toHaveCount(0)
+  await expect(page.getByText(/01:14\.01/).first()).toBeVisible()
+})
+
+test('completion does not count a draft discarded by clearing the grid category', async ({page}) => {
+  const {competitionId, disciplineId, categoryId, crews: [crew]} = await prepareSprint(page.request, 'Discard grid draft')
+  await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
+  await time(page, crew).fill('79.00')
+  const discard = page.waitForEvent('dialog', {timeout: 5000})
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('combobox', {name: 'Category', exact: true}).click()
+  await page.getByRole('option', {name: '—', exact: true}).click()
+  expect((await discard).type()).toBe('confirm')
+  await expect(time(page, crew)).toHaveCount(0)
+  await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
+  const completion = page.getByRole('dialog', {name: 'Complete competition'})
+  await expect(completion.getByText(/Unsaved rows:/i)).toHaveCount(0)
+  await completion.getByRole('button', {name: 'Complete competition', exact: true}).click()
+  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
+})
 
 test('keyboard saves 20 sprint results consecutively', async ({ page }) => {
   const { route, base, crews } = await seed(page.request, 'Keyboard sprint', 20)
@@ -242,12 +292,13 @@ test('requires an explicit conflict choice before a stale draft can be saved', a
   }
 })
 
-test('opens and focuses the missing slalom gate on the second page', async ({ page }) => {
+async function verifyMissingSlalomGate(page: Page, touch: boolean) {
   const { route, base, crews: [crew] } = await seed(page.request, 'Slalom with 25 gates', 1, 'SLALOM')
   await openGrid(page, route, crew)
   const input = time(page, crew)
   const gate = (number: number) => page.getByLabel(`Gate ${number} ${crew.name}`, { exact: true })
   const gatePage = page.getByLabel('Gate page (20 per page)', { exact: true })
+  const saveButton = page.getByRole('button', {name: 'Save', exact: true})
   await input.fill('90.00')
   for (let n = 1; n <= 20; n++) await gate(n).selectOption(n === 2 ? '5' : '0')
   await gatePage.fill('2')
@@ -255,12 +306,21 @@ test('opens and focuses the missing slalom gate on the second page', async ({ pa
   await gatePage.fill('1')
   await expect(gate(23)).toHaveCount(0)
 
-  await input.focus()
-  await page.keyboard.press('Control+s')
+  if (touch) await saveButton.tap()
+  else {
+    await input.focus()
+    await page.keyboard.press('Control+s')
+  }
   await expect(page.getByText('Complete gate 23.', { exact: true })).toBeVisible()
   await expect(gatePage).toHaveValue('2')
   await expect(gate(23)).toBeFocused()
   await expect(gate(23)).toHaveAttribute('aria-invalid', 'true')
+  if (touch) {
+    await expect.poll(() => gate(23).locator('xpath=ancestor::td[1]').evaluate(cell => {
+      const label = getComputedStyle(cell, '::before')
+      return label.display === 'none' ? '' : label.content
+    })).toMatch(/Gate 23/)
+  }
   await expect.poll(() => gate(23).evaluate(element => {
     const { left, top, width, height } = element.getBoundingClientRect()
     return document.elementFromPoint(left + width / 2, top + height / 2) === element
@@ -268,8 +328,15 @@ test('opens and focuses the missing slalom gate on the second page', async ({ pa
   expect(await storedAttempts(page.request, base)).toEqual([])
 
   await gate(23).selectOption('50')
-  await gate(23).focus()
-  expect((await saveWithKeyboard(page, attemptPath(base, crew))).status()).toBe(200)
+  const path = attemptPath(base, crew)
+  if (touch) {
+    const response = page.waitForResponse(r => r.url().endsWith(path) && r.request().method() === 'PUT')
+    await saveButton.tap()
+    expect((await response).status()).toBe(200)
+  } else {
+    await gate(23).focus()
+    expect((await saveWithKeyboard(page, path)).status()).toBe(200)
+  }
   await expect(input).toHaveValue('01:30.00')
   await expect(gate(23)).toHaveValue('50')
   await expect(page.getByText('02:25.00', { exact: true }).first()).toBeVisible()
@@ -278,4 +345,92 @@ test('opens and focuses the missing slalom gate on the second page', async ({ pa
   expect(saved.gates.toSorted((a, b) => a.number - b.number)).toEqual(Array.from({ length: gateCount }, (_, i) => ({
     number: i + 1, penaltySeconds: i === 1 ? 5 : i === 22 ? 50 : 0,
   })))
+}
+
+test('opens and focuses the missing slalom gate on the second page', async ({page}) => {
+  await verifyMissingSlalomGate(page, false)
+})
+
+for (const width of [360, 390]) {
+  test.describe(`slalom at ${width}px`, () => {
+    test.use({viewport: {width, height: 800}, isMobile: true, hasTouch: true})
+    test('opens, labels and focuses gate 23 after tapping Save', async ({page}) => {
+      await verifyMissingSlalomGate(page, true)
+    })
+  })
+}
+
+type Heat = {id: number, round: number, number: number, first: Crew | null, second: Crew | null, winnerSlot: number | null, winnerOverridden: boolean}
+
+test.describe('parallel sprint on a phone', () => {
+  test.use({viewport: {width: 390, height: 800}, isMobile: true, hasTouch: true})
+
+  test('records a manual winner and shows the advancing crew in the next round', async ({page}) => {
+    const {base, crews, competitionId, categoryId, disciplineId, parallelDisciplineId} = await seed(page.request, 'Manual parallel sprint', 4, 'SPRINT', true)
+    expect(parallelDisciplineId).toBeDefined()
+    const parallelBase = `/api/competitions/${competitionId}/disciplines/${parallelDisciplineId}/categories/${categoryId}`
+    for (const [index, crew] of crews.entries()) {
+      await write(page.request, 'put', attemptPath(base, crew), {durationCentiseconds: 7000 + index, penaltyCentiseconds: 0, status: 'FINISHED', gates: []})
+    }
+    await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
+    const workspace = page.getByRole('main')
+    await workspace.getByRole('link', {name: 'Parallel sprint', exact: true}).click()
+    await expect(page).toHaveURL(/\/parallel-sprint\?/)
+    await expect(page).not.toHaveURL(new RegExp(`[?&]discipline=${disciplineId}(?:&|$)`))
+    await expect(page).toHaveURL(new RegExp(`[?&]category=${categoryId}(?:&|$)`))
+    await page.getByRole('combobox', {name: 'Discipline', exact: true}).click()
+    await page.getByRole('option', {name: 'Head to head', exact: true}).click()
+    await expect(page.getByRole('combobox', {name: 'Category', exact: true})).toHaveText('R1 / Open')
+    const seeded = page.waitForResponse(response => response.url().endsWith(`${parallelBase}/bracket`) && response.request().method() === 'POST')
+    await page.getByRole('button', {name: 'Seed bracket'}).click()
+    const seedResponse = await seeded
+    expect(seedResponse.ok(), await seedResponse.text()).toBeTruthy()
+    const bracket = await read<{id: number, heats: Heat[]}>(page.request, `${parallelBase}/bracket`)
+    const firstHeat = bracket.heats.find(heat => heat.round === 1 && heat.number === 1)!
+    const {first, second} = firstHeat
+    expect(first).toBeTruthy()
+    expect(second).toBeTruthy()
+    await page.getByText('Open heat 1 form', {exact: true}).tap()
+    const firstTime = page.getByRole('textbox', {name: `Time Position 1 — ${first!.name}`, exact: true})
+    const secondTime = page.getByRole('textbox', {name: `Time Position 2 — ${second!.name}`, exact: true})
+    await firstTime.fill('1:10.00')
+    await secondTime.fill('1:20.00')
+    const discardConfirmation = page.waitForEvent('dialog', {timeout: 5000})
+    page.once('dialog', dialog => dialog.dismiss())
+    await page.getByRole('combobox', {name: 'Category', exact: true}).click()
+    await page.getByRole('option', {name: '—', exact: true}).click()
+    expect((await discardConfirmation).type()).toBe('confirm')
+    await expect(firstTime).toHaveValue('1:10.00')
+    await expect(secondTime).toHaveValue('1:20.00')
+    await page.getByRole('combobox', {name: 'Winner override', exact: true}).click()
+    await page.getByRole('option', {name: second!.name, exact: true}).click()
+    const save = page.waitForResponse(response => response.url().endsWith(`${parallelBase}/brackets/${bracket.id}/heats/${firstHeat.id}/result`) && response.request().method() === 'PUT')
+    page.once('dialog', dialog => dialog.accept())
+    await page.getByRole('button', {name: 'Save heat', exact: true}).tap()
+    const saveResponse = await save
+    expect(saveResponse.ok(), await saveResponse.text()).toBeTruthy()
+    await expect(page.getByText(new RegExp(`Winner.*${second!.name}.*manual`, 'i'))).toBeVisible()
+    const updated = await read<{heats: Heat[]}>(page.request, `${parallelBase}/bracket`)
+    expect(updated.heats.find(item => item.id === firstHeat.id)).toMatchObject({winnerSlot: 2, winnerOverridden: true})
+    expect(updated.heats.find(item => item.round === 2)?.first?.id).toBe(second!.id)
+    await page.getByRole('combobox', {name: 'Choose round'}).tap()
+    await page.getByRole('option', {name: 'Round 2', exact: true}).tap()
+    await expect(page.getByRole('heading', {name: 'Round 2', exact: true})).toBeVisible()
+    await expect(page.getByText(new RegExp(`^Position 1: .*${second!.name}`))).toBeVisible()
+
+    await page.setViewportSize({width: 1440, height: 900})
+    const roundOne = page.getByRole('heading', {name: 'Round 1', exact: true})
+    const roundTwo = page.getByRole('heading', {name: 'Round 2', exact: true})
+    await expect(roundOne).toBeVisible()
+    await expect(roundTwo).toBeVisible()
+    const [firstRoundBox, secondRoundBox] = await Promise.all([roundOne.boundingBox(), roundTwo.boundingBox()])
+    expect(secondRoundBox!.x).toBeGreaterThan(firstRoundBox!.x)
+    expect(secondRoundBox!.y).toBe(firstRoundBox!.y)
+    await workspace.getByRole('link', {name: 'Result entry', exact: true}).click()
+    await expect(page).toHaveURL(/\/result-grid\?/)
+    await expect(page).not.toHaveURL(new RegExp(`[?&]discipline=${parallelDisciplineId}(?:&|$)`))
+    await page.getByRole('combobox', {name: 'Discipline', exact: true}).click()
+    await page.getByRole('option', {name: 'Sprint', exact: true}).click()
+    await expect(page.getByRole('combobox', {name: 'Category', exact: true})).toHaveText('R1 / Open')
+  })
 })

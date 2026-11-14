@@ -17,9 +17,9 @@ async function confirmRestore() {
 }
 test('lists metadata, provides authenticated native download and creates a backup', async () => {
   render(<Backups/>)
-  expect(await screen.findByText('1,234 bytes')).toBeInTheDocument()
+  expect(await screen.findByText('1.2 kB')).toBeInTheDocument()
   expect(screen.getByRole('link', {name: /Download backup from/})).toHaveAttribute('href', `/api/backups/${backup.id}/download`)
-  expect(screen.getByText('2')).toBeInTheDocument(); expect(screen.getByText('3')).toBeInTheDocument()
+  expect(screen.getByText('2')).toBeInTheDocument(); expect(screen.getAllByText('3').length).toBeGreaterThan(0)
   fireEvent.click(screen.getByRole('button', {name: 'Create backup'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/backups', 'POST'))
   await waitFor(() => expect(vi.mocked(apiRequest).mock.calls.filter(([p]) => p === '/api/backups')).toHaveLength(2))
