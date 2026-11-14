@@ -18,12 +18,12 @@ const statuses: Status[] = ['FINISHED', 'DNS', 'DNF', 'DSQ_ATTEMPT', 'DSQ_DISCIP
 const time = (value: number | null) => value === null ? '' : `${Math.floor(value / 6000)}:${String(Math.floor(value / 100) % 60).padStart(2, '0')}.${String(value % 100).padStart(2, '0')}`
 const draftFor = (h: Heat): Draft => ({version: h.version, firstStatus: h.firstStatus ?? 'FINISHED', secondStatus: h.secondStatus ?? 'FINISHED', firstTime: time(h.firstTimeCentiseconds), secondTime: time(h.secondTimeCentiseconds), winner: h.winnerOverridden ? String(h.winnerSlot === 1 ? h.first?.id : h.second?.id) : ''})
 
-export default function ParallelSprint({readOnly}: {readOnly: boolean}) {
+export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
   const {t, i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const displayTime = (value: number | null) => time(value).replace('.', locale === 'ru' ? ',' : '.')
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-  const [competition, setCompetition] = useState(params.get('competition') ?? '')
+  const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
   const [category, setCategory] = useState(params.get('category') ?? '')
   const [competitions, setCompetitions] = useState<Competition[]>([])
@@ -36,9 +36,24 @@ export default function ParallelSprint({readOnly}: {readOnly: boolean}) {
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}`
-  useEffect(() => {let active = true; const load = async () => {const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [])
+  useEffect(() => {let active = true; const load = async () => {
+      if (fixedCompetition) {const item = await apiRequest<Competition>(`/api/competitions/${fixedCompetition}`); if (active) setCompetitions([item]); return}const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [fixedCompetition])
   useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([ds, cs]) => {if (active) {setDisciplines(ds.filter(d => d.type === 'PARALLEL_SPRINT')); setCategories(cs)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [competition])
   useEffect(() => {if (!competition || !discipline || !category) return; let active = true; apiRequest<Bracket>(`${base}/bracket`).then(b => {if (active) {setBracket(b); setDrafts({}); setConflict(null)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [base, competition, discipline, category])
+  const dirty = bracket?.heats.some(heat => {
+    const draft = drafts[heat.id]
+    if (!draft) return false
+    const saved = draftFor(heat)
+    return draft.firstStatus !== saved.firstStatus || draft.secondStatus !== saved.secondStatus
+      || draft.firstTime !== saved.firstTime || draft.secondTime !== saved.secondTime || draft.winner !== saved.winner
+  }) ?? false
+  useEffect(() => {
+    const listener = (event: Event) => {
+      if (busy || (dirty && !window.confirm(t('resultGrid.discard')))) event.preventDefault()
+    }
+    window.addEventListener('category-navigation', listener)
+    return () => window.removeEventListener('category-navigation', listener)
+  }, [busy, dirty, t])
   const clearSelection = () => {setBracket(null); setDrafts({}); setConflict(null); setError('')}
   const refresh = async () => setBracket(await apiRequest<Bracket>(`${base}/bracket`))
   const seed = async () => {setBusy(true); setError(''); try {setBracket(await csrfRequest<Bracket>(`${base}/bracket`, 'POST'))} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
@@ -58,7 +73,8 @@ export default function ParallelSprint({readOnly}: {readOnly: boolean}) {
   }
   const update = (h: Heat, patch: Partial<Draft>) => setDrafts(old => ({...old, [h.id]: {...(old[h.id] ?? draftFor(h)), ...patch}}))
   return <Box sx={{display: 'grid', gap: 2, mt: 2, minWidth: 0}}>
-    <TextField select disabled={busy} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setDiscipline(''); setCategory(''); setDisciplines([]); setCategories([]); clearSelection()}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
+    <TextField select disabled={busy || !!fixedCompetition} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setDiscipline(''); setCategory(''); setDisciplines([]); setCategories([]); clearSelection()}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
+    {!fixedCompetition && competition && <Button component="a" href={`#/workspace/${competition}`}>{t('competition.workspace')}</Button>}
     {competition && <TextField select disabled={busy} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); setCategory(''); clearSelection()}}><MenuItem value="">—</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}
     {discipline && <TextField select disabled={busy} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); clearSelection()}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error)}</Typography>}

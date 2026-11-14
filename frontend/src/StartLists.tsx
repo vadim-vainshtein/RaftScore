@@ -13,11 +13,11 @@ type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number, plannedTime: string | null}
 type StartList = {id: number | null, slots: Slot[], locked: boolean}
-export default function StartLists({readOnly}: {readOnly: boolean}) {
+export default function StartLists({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
   const {t, i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-  const [competition, setCompetition] = useState(params.get('competition') ?? '')
+  const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
   const [category, setCategory] = useState('')
   const [competitions, setCompetitions] = useState<Competition[]>([])
@@ -36,6 +36,7 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
   useEffect(() => {
     let active = true
     const load = async () => {
+      if (fixedCompetition) {const item = await apiRequest<Competition>(`/api/competitions/${fixedCompetition}`); if (active) setCompetitions([item]); return}
       const firstPage = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100')
       const pages = await Promise.all(Array.from({length: Math.max(0, firstPage.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`)))
       if (active) setCompetitions([...firstPage.content, ...pages.flatMap(page => page.content)])
@@ -102,7 +103,7 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
   }
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    <TextField select disabled={busy} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
+    <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
       <MenuItem value="">—</MenuItem>
       {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
     {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); setCategory(''); setList(null)}}>

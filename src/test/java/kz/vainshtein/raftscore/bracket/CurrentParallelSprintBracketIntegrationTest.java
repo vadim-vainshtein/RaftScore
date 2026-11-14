@@ -36,6 +36,8 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
     @Test
     void scopeAuthorizationSeedAndAdvancement() throws Exception {
         var competition = competitions.saveAndFlush(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competitions.flush();
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         var sprint = discipline(competition, category, DisciplineType.SPRINT);
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);

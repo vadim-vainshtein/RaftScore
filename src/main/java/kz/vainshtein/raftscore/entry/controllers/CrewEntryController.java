@@ -44,6 +44,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequiredArgsConstructor
 class CrewEntryController {
     private final CompetitionRepository competitions;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final CompetitionCategoryRepository categories;
     private final CrewEntryRepository entries;
     private final CrewMembershipRepository memberships;
@@ -175,6 +176,7 @@ class CrewEntryController {
     EntryResponse admission(@PathVariable Long competitionId, @PathVariable Long entryId, @Valid @RequestBody AdmissionRequest request) {
         var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
         var competition = entry.getCompetitionCategory().getCompetition();
+        lifecycle.requireEditable(competitionId);
         entityManager.refresh(competition, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         if (!competition.isAdmissionConfirmationRequired()) throw new AdmissionNotRequired();
         var updated = entityManager.createNativeQuery("update crew_entries set admission_decision = :decision, version = version + 1 where id = :id and version = :version")
@@ -200,6 +202,7 @@ class CrewEntryController {
     ResponseEntity<EntryResponse> create(@PathVariable Long competitionId, @Valid @RequestBody CreateRequest request) {
         if (!competitions.existsById(competitionId)) throw new CompetitionNotFound();
         var category = categories.findByIdAndCompetitionId(request.categoryId().longValueExact(), competitionId).orElseThrow(CategoryNotFound::new);
+        lifecycle.requireEditable(competitionId);
         validateRoster(request.roster(), category.getCrewSize());
         var entry = entries.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName(request.crewName())
                 .regionOrClub(request.regionOrClub()).representative(request.representative()).startNumber(request.startNumber().intValueExact()).build());
@@ -219,6 +222,7 @@ class CrewEntryController {
     @Transactional
     EntryResponse update(@PathVariable Long competitionId, @PathVariable Long entryId, @Valid @RequestBody UpdateRequest request) {
         var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
+        lifecycle.requireEditable(competitionId);
         if (entry.getVersion() != request.version().longValueExact()) throw new OptimisticLockingFailureException("Stale entry version");
         var roster = memberships.findByCrewEntryIdOrderByPositionAsc(entryId);
         validateRoster(request.roster() == null ? roster : request.roster(), entry.getCompetitionCategory().getCrewSize());

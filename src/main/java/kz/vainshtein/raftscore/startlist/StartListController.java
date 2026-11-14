@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/competitions/{competitionId}/disciplines/{disciplineId}/categories/{categoryId}/start-list")
 @RequiredArgsConstructor
 class StartListController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final StartListService service;
     record ReplaceRequest(@NotNull Boolean random, Boolean reverseOverall, List<@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal> crewIds, Instant firstStart, @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal intervalSeconds) { }
 
@@ -26,13 +27,17 @@ class StartListController {
     }
 
     @DeleteMapping("/source-results")
+    @org.springframework.transaction.annotation.Transactional
     @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
     void clearResults(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+        lifecycle.requireStarted(competitionId);
         service.clearResults(competitionId, disciplineId, categoryId);
     }
     @PutMapping
+    @org.springframework.transaction.annotation.Transactional
     StartListService.View replace(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
                                   @Valid @RequestBody ReplaceRequest request) {
+        lifecycle.requireEditable(competitionId);
         return service.replace(competitionId, disciplineId, categoryId, request.crewIds() == null ? null : request.crewIds().stream().map(BigDecimal::longValueExact).toList(), request.random(), Boolean.TRUE.equals(request.reverseOverall()),
                 request.firstStart(), request.intervalSeconds() == null ? null : request.intervalSeconds().longValueExact());
     }

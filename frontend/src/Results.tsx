@@ -14,11 +14,11 @@ type Part = {disciplineId: number, disciplineName: string, place: number | null,
 type Attempt = {number: number, durationCentiseconds: number | null, penaltyCentiseconds: number, status: Status, gates: {number: number, penaltySeconds: number}[]}
 type Result = {crewId: number, crewName: string, regionOrClub: string, startNumber: number, place: number | null, totalCentiseconds?: number | null, status?: Status, points?: number, totalPoints?: number, disqualified?: boolean, disciplines?: Part[], appliedTiebreakDisciplineId?: number | null, attempts?: Attempt[]}
 
-export default function Results({readOnly}: {readOnly: boolean}) {
+export default function Results({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
   const {t, i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-  const [competition, setCompetition] = useState(params.get('competition') ?? '')
+  const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [category, setCategory] = useState(params.get('category') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
   const [competitions, setCompetitions] = useState<Competition[]>([])
@@ -36,6 +36,7 @@ export default function Results({readOnly}: {readOnly: boolean}) {
   useEffect(() => {
     let active = true
     const load = async () => {
+      if (fixedCompetition) {const item = await apiRequest<Competition>(`/api/competitions/${fixedCompetition}`); if (active) setCompetitions([item]); return}
       const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100')
       const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`)))
       if (active) setCompetitions([...first.content, ...rest.flatMap(page => page.content)])
@@ -83,10 +84,11 @@ export default function Results({readOnly}: {readOnly: boolean}) {
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box ref={display} sx={{display: 'grid', gap: 2, mt: 2, bgcolor: 'background.paper', overflow: 'auto'}}>
     <Box><Button onClick={() => setFiltersVisible(value => !value)}>{t(filtersVisible ? 'results.hideFilters' : 'results.showFilters')}</Button><Button onClick={() => {if (document.fullscreenElement) void document.exitFullscreen(); else if (display.current?.requestFullscreen) void display.current.requestFullscreen().catch(() => setError('results.error'))}}>{t('results.fullscreen')}</Button></Box>
-    {filtersVisible && <><TextField select label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(null)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
+    {filtersVisible && <><TextField select disabled={!!fixedCompetition} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(null)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
+    {!fixedCompetition && competition && <Button component="a" href={`#/workspace/${competition}`}>{t('competition.workspace')}</Button>}
     {competition && <TextField select label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {competition && <TextField select label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}</>}
-    {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`#/result-grid?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
+    {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`${fixedCompetition ? `#/workspace/${competition}/parallel-sprint` : '#/parallel-sprint'}?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`${fixedCompetition ? `#/workspace/${competition}/result-grid` : '#/result-grid'}?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
     {rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
     {error && <Typography role="alert">{t(error)}</Typography>}
     {category && !rows && !error && <Typography>{t('results.loading')}</Typography>}

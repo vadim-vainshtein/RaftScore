@@ -34,6 +34,18 @@ public class Competition extends VersionedEntity {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String title;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(nullable = false)
+    private CompetitionStatus status = CompetitionStatus.CREATED;
+
+    public void transitionTo(CompetitionStatus next) {
+        if (!((status == CompetitionStatus.CREATED && next == CompetitionStatus.STARTED)
+                || (status == CompetitionStatus.STARTED && next == CompetitionStatus.COMPLETED))) {
+            throw new IllegalStateException("Invalid competition status transition");
+        }
+        status = next;
+    }
+
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
 

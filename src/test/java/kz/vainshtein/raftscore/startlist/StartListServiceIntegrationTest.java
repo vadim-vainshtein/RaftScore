@@ -105,6 +105,8 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Test
     void clearEndpointDeletesSlalomDependenciesOnlyForSelectedCategory() throws Exception {
         var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competitions.flush();
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
         var other = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Other").scoringGroupLabel("Other").crewSize(1).build());
         var discipline = disciplines.save(Discipline.builder().competition(competition).name("Slalom").type(DisciplineType.SLALOM).build());

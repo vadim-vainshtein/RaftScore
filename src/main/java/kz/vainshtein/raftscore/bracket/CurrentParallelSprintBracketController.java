@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/competitions/{competitionId}/disciplines/{disciplineId}/categories/{categoryId}/bracket")
 @RequiredArgsConstructor
 class CurrentParallelSprintBracketController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final DisciplineRepository disciplines;
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
@@ -35,6 +36,7 @@ class CurrentParallelSprintBracketController {
     @PostMapping
     @Transactional
     Bracket seed(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+        lifecycle.requireStarted(competitionId);
         checkScope(competitionId, disciplineId, categoryId);
         try {
             var bracket = seeding.seed(disciplineId, categoryId, null);

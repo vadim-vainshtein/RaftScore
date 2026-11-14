@@ -34,8 +34,9 @@ async function seed(api: APIRequestContext, title: string, crewCount: number, ty
       pointsTable: { name: 'Points', tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows: [{ place: 1, points: 100 }] },
     }],
   })
-  const { id } = await setup.json()
+  const { id, version } = await setup.json()
   const competition = `/api/competitions/${id}`
+  await write(api, 'put', `${competition}/status`, { status: 'STARTED', version })
   const [[category], [discipline]] = await Promise.all([
     read<{ id: number }[]>(api, `${competition}/categories`),
     read<{ id: number }[]>(api, `${competition}/disciplines`),

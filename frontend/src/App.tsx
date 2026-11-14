@@ -1,3 +1,4 @@
+import CompetitionWorkspace from './CompetitionWorkspace'
 import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {apiRequest, ApiError} from './api/client'
@@ -21,6 +22,7 @@ import {createTheme, ThemeProvider} from '@mui/material/styles'
 import {AppBar, Box, Button, CssBaseline, Drawer, List, ListItem, ListItemButton, ListItemText, Toolbar, Typography, MenuItem, TextField, useMediaQuery, useTheme} from '@mui/material'
 
 const routes = [
+  {path: '/workspace', label: 'navigation.competitions', readOnly: true},
   {path: '/competitions', label: 'navigation.competitions', readOnly: true},
   {path: '/crews', label: 'navigation.crews', readOnly: true},
   {path: '/disciplines', label: 'navigation.disciplines', readOnly: true},
@@ -44,7 +46,17 @@ function App() {
 }
 
 type Principal = {username: string, role: 'FULL_ACCESS' | 'READ_ONLY'}
+function workspaceRoute(path: string, role?: Principal['role']) {
+  if (role === 'READ_ONLY') path = path.replace(/^(\/workspace\/\d+)\/result-grid(?=\?|$)/, '$1/results')
+  const [route, query = ''] = path.split('?')
+  if (!['/results', '/parallel-sprint', '/result-grid'].includes(route)) return path
+  const id = new URLSearchParams(query).get('competition')
+  if (!id || !/^\d+$/.test(id)) return route === '/result-grid' ? '/competitions' : path
+  const section = route === '/result-grid' && role === 'READ_ONLY' ? 'results' : route.slice(1)
+  return `/workspace/${id}/${section}?${query}`
+}
 function safeRoute(path: string, role?: Principal['role']) {
+  path = workspaceRoute(path, role)
   const route = routes.find(route => path === route.path || path.startsWith(`${route.path}/`) || path.startsWith(`${route.path}?`))
   return route && (role !== 'READ_ONLY' || route.readOnly) ? path : '/competitions'
 }
@@ -167,9 +179,10 @@ function Shell({locale}: {locale: Locale}) {
     return () => { window.removeEventListener('popstate', onPopState); window.removeEventListener('hashchange', onHashChange) }
   }, [])
 
-  const requestedRoute = routes.find(route => path === route.path || path.startsWith(`${route.path}/`) || path.startsWith(`${route.path}?`))
+  const requestedPath = workspaceRoute(path, principal?.role)
+  const requestedRoute = routes.find(route => requestedPath === route.path || requestedPath.startsWith(`${route.path}/`) || requestedPath.startsWith(`${route.path}?`))
   const restricted = principal?.role === 'READ_ONLY' && requestedRoute && !requestedRoute.readOnly
-  const visiblePath = restricted ? '/competitions' : path
+  const visiblePath = restricted ? '/competitions' : requestedPath
 
   useEffect(() => {
     if (restricted) {
@@ -197,7 +210,7 @@ function Shell({locale}: {locale: Locale}) {
     <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth}}>
       <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
       <List>
-        {routes.filter(route => principal.role !== 'READ_ONLY' || route.readOnly).map(route => (
+        {routes.filter(route => !visiblePath.startsWith('/workspace/') && route.path !== '/workspace' && route.path !== '/result-grid' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
           <ListItem key={route.path} disablePadding>
           <ListItemButton
             component="a"
@@ -248,7 +261,7 @@ function Shell({locale}: {locale: Locale}) {
         <Box sx={{height: {xs: 128, md: 80}}}/>
         <Typography component="h1" variant="h4">{title}</Typography>
         {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
-        {(activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/seat-names' && principal.role === 'FULL_ACCESS' ? <SeatNames/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={visiblePath} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/seat-names' && principal.role === 'FULL_ACCESS' ? <SeatNames/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

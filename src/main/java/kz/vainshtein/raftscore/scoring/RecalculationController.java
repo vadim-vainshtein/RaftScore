@@ -10,13 +10,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/competitions/{competitionId}/recalculate")
 @RequiredArgsConstructor
 class RecalculationController {
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final CompetitionRepository competitions;
     private final RecalculationService recalculation;
 
     @PostMapping
+    @org.springframework.transaction.annotation.Transactional
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void recalculate(@PathVariable long competitionId) {
         if (!competitions.existsById(competitionId)) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        lifecycle.requireStarted(competitionId);
         recalculation.recalculateCompetition(competitionId);
     }
 }

@@ -24,6 +24,7 @@ async function seed(baseURL: string) {
       ],
     })
     const competition = await setup.json()
+    await write(api, 'put', `/api/competitions/${competition.id}/status`, {status: 'STARTED', version: competition.version})
     const categories = await (await api.get(`/api/competitions/${competition.id}/categories`)).json()
     const disciplines = await (await api.get(`/api/competitions/${competition.id}/disciplines`)).json()
     const category = categories[0], sprint = disciplines.find((d: {name: string}) => d.name === 'Спринт')

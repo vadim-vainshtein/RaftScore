@@ -30,6 +30,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequiredArgsConstructor
 class CompetitionCategoryController {
     private final CompetitionRepository competitions;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final CategoryTemplateRepository templates;
     private final CompetitionCategoryRepository categories;
     private final kz.vainshtein.raftscore.catalog.SeatNameDictionary seatNames;
@@ -65,6 +66,7 @@ class CompetitionCategoryController {
     ResponseEntity<CategorySnapshot> create(@PathVariable Long competitionId, @Valid @RequestBody CreateCategoryRequest request) {
         var competition = competitions.findById(competitionId).orElseThrow(CompetitionNotFound::new);
         var template = templates.findForSnapshot(request.templateId().longValueExact()).orElseThrow(TemplateNotFound::new);
+        lifecycle.requireEditable(competitionId);
         if (template.isArchived()) {
             throw new TemplateArchived();
         }
@@ -87,6 +89,7 @@ class CompetitionCategoryController {
                                @Valid @RequestBody SeatEdit request) {
         var category = categories.findByIdAndCompetitionId(categoryId, competitionId)
                 .orElseThrow(CategoryNotFound::new);
+        lifecycle.requireEditable(competitionId);
         if (category.getVersion() != request.version().longValueExact())
             throw new org.springframework.dao.OptimisticLockingFailureException("Stale category");
         var previous = java.util.List.copyOf(category.getSeatLabels());

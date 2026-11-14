@@ -174,6 +174,8 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
     @Test
     void resultApiEnforcesScopeConfirmationAndAuthorization() throws Exception {
         var competition = competitions.save(Competition.builder().title("API race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competitions.flush();
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         var bracket = kz.vainshtein.raftscore.bracket.entities.ParallelSprintBracket.builder().discipline(parallel).category(category).build();

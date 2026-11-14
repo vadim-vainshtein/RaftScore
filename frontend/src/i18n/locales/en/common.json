@@ -118,10 +118,16 @@
     "states": {
       "UPCOMING": "Upcoming",
       "IN_PROGRESS": "In progress",
-      "COMPLETED": "Completed"
+      "COMPLETED": "Completed",
+      "CREATED": "Created",
+      "STARTED": "Started"
     },
     "error": "Unable to load or save the competition. Check the values and try again.",
-    "conflict": "This competition changed elsewhere. Reopen it before saving."
+    "conflict": "This competition changed elsewhere. Reopen it before saving.",
+    "workspace": "Competition workspace",
+    "start": "Start competition",
+    "complete": "Complete competition",
+    "confirmComplete": "Complete this competition? Result entry will be closed."
   },
   "wizard": {
     "template": "Add active template",

@@ -14,7 +14,7 @@ public interface CompetitionRepository extends JpaRepository<Competition, Long> 
 
     @Query(value = """
             select c.id as id, c.title as title, c.startDate as startDate, c.endDate as endDate,
-                   c.location as location, c.timeZone as timeZone,
+                   c.location as location, c.timeZone as timeZone, c.status as status,
                    (select count(category) from CompetitionCategory category where category.competition = c) as categoryCount,
                    (select count(crew) from CrewEntry crew where crew.competitionCategory.competition = c) as crewCount
             from Competition c
