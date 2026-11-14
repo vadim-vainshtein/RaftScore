@@ -170,4 +170,45 @@ class CategoryTemplateControllerIntegrationTest extends PostgreSqlIntegrationTes
                 .andExpect(status().isBadRequest());
         assertThat(repository.count()).isZero();
     }
+
+    @Test
+    void storesOrderedSeatsAndMaintainsSoftDeletedDictionary() throws Exception {
+        var admin = user("admin").roles("FULL_ACCESS");
+        var created = mvc.perform(post("/api/category-templates").with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "classLabel":"Seat test", "scoringGroupLabel":"Open", "crewSize":3, "seatLabels":["левый нос", "", "Custom seat"] }
+                        """))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.seatLabels[1]").value(""))
+                .andReturn().getResponse();
+        Number categoryId = JsonPath.read(created.getContentAsString(), "$.id");
+        var names = mvc.perform(get("/api/seat-names?includeDeleted=true").with(admin)).andExpect(status().isOk()).andReturn().getResponse();
+        java.util.List<Number> ids = JsonPath.read(names.getContentAsString(), "$[?(@.name == 'Custom seat')].id");
+        assertThat(ids).hasSize(1);
+        Number seatId = ids.getFirst();
+        mvc.perform(put("/api/seat-names/{id}", seatId).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "name":"Custom seat", "deleted":true, "version":0 }
+                        """)).andExpect(status().isOk());
+        mvc.perform(put("/api/seat-names/{id}", seatId).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "name":"Custom seat", "deleted":false, "version":0 }
+                        """)).andExpect(status().isConflict());
+        mvc.perform(get("/api/seat-names").with(admin)).andExpect(content().string(org.hamcrest.Matchers.not(containsString("Custom seat"))));
+        mvc.perform(get("/api/category-templates/{id}", categoryId).with(admin)).andExpect(jsonPath("$.seatLabels[2]").value("Custom seat"));
+        mvc.perform(get("/api/seat-names").with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
+        mvc.perform(put("/api/seat-names/{id}", seatId).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "name":"Renamed seat", "deleted":false, "version":1 }
+                        """)).andExpect(status().isOk());
+        mvc.perform(put("/api/category-templates/{id}", categoryId).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "classLabel":"Seat test", "scoringGroupLabel":"Open", "crewSize":3, "version":0 }
+                        """)).andExpect(status().isOk());
+        mvc.perform(get("/api/seat-names?includeDeleted=true").with(admin)).andExpect(content().string(org.hamcrest.Matchers.not(containsString("Custom seat"))));
+        mvc.perform(put("/api/seat-names/{id}", seatId).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        { "name":"левый нос", "deleted":false, "version":2 }
+                        """)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("seat_name.duplicate"));
+
+    }
 }

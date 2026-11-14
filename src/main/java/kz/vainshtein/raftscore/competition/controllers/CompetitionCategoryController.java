@@ -32,16 +32,17 @@ class CompetitionCategoryController {
     private final CompetitionRepository competitions;
     private final CategoryTemplateRepository templates;
     private final CompetitionCategoryRepository categories;
+    private final kz.vainshtein.raftscore.catalog.SeatNameDictionary seatNames;
 
     record CreateCategoryRequest(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807")
                                  @Digits(integer = 19, fraction = 0)
                                  @Schema(implementation = Long.class, type = "integer", format = "int64", minimum = "1")
                                  BigDecimal templateId) { }
     record CategorySnapshot(long id, long competitionId, String classLabel, String scoringGroupLabel,
-                            int crewSize, String displayName, long version) {
+                            int crewSize, String displayName, long version, java.util.List<String> seatLabels) {
         static CategorySnapshot from(CompetitionCategory category) {
             return new CategorySnapshot(category.getId(), category.getCompetition().getId(), category.getClassLabel(),
-                    category.getScoringGroupLabel(), category.getCrewSize(), category.getDisplayName(), category.getVersion());
+                    category.getScoringGroupLabel(), category.getCrewSize(), category.getDisplayName(), category.getVersion(), category.getSeatLabels());
         }
     }
 
@@ -67,12 +68,37 @@ class CompetitionCategoryController {
         if (template.isArchived()) {
             throw new TemplateArchived();
         }
-        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
+        var category = CompetitionCategory.builder().competition(competition)
                 .classLabel(template.getClassLabel()).scoringGroupLabel(template.getScoringGroupLabel())
-                .crewSize(template.getCrewSize()).build());
+                .crewSize(template.getCrewSize()).build();
+        category.setSeatLabels(template.getSeatLabels());
+        categories.saveAndFlush(category);
         return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/categories/" + category.getId()))
                 .body(CategorySnapshot.from(category));
     }
+
+    record SeatEdit(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807")
+                    @Digits(integer = 19, fraction = 0) BigDecimal version,
+                    @NotNull java.util.List<String> seatLabels) { }
+
+    @PutMapping("/{categoryId}/seat-labels")
+    @Transactional
+    CategorySnapshot editSeats(@PathVariable Long competitionId, @PathVariable Long categoryId,
+                               @Valid @RequestBody SeatEdit request) {
+        var category = categories.findByIdAndCompetitionId(categoryId, competitionId)
+                .orElseThrow(CategoryNotFound::new);
+        if (category.getVersion() != request.version().longValueExact())
+            throw new org.springframework.dao.OptimisticLockingFailureException("Stale category");
+        var previous = java.util.List.copyOf(category.getSeatLabels());
+        category.setSeatLabels(request.seatLabels());
+        seatNames.registerIntroducedNames(previous, request.seatLabels());
+        return CategorySnapshot.from(categories.saveAndFlush(category));
+    }
+
+    @ExceptionHandler(CategoryNotFound.class)
+    ResponseEntity<ApiError> categoryNotFound() { return ResponseEntity.status(404).body(ApiError.of("competition_category.not_found")); }
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ApiError> invalidSeats() { return ResponseEntity.badRequest().body(ApiError.of("request.validation_failed")); }
 
     @ExceptionHandler(CompetitionNotFound.class)
     ResponseEntity<ApiError> competitionNotFound() { return ResponseEntity.status(404).body(ApiError.of("competition.not_found")); }
@@ -93,6 +119,7 @@ class CompetitionCategoryController {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ApiError> malformedPath() { return ResponseEntity.badRequest().body(ApiError.of("request.malformed")); }
 
+    private static class CategoryNotFound extends RuntimeException { }
     private static class CompetitionNotFound extends RuntimeException { }
     private static class TemplateNotFound extends RuntimeException { }
     private static class TemplateArchived extends RuntimeException { }

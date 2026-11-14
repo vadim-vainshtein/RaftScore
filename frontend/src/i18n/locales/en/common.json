@@ -16,7 +16,8 @@
     "startLists": "Start lists",
     "resultGrid": "Result entry",
     "results": "Results",
-    "parallelSprint": "Parallel sprint"
+    "parallelSprint": "Parallel sprint",
+    "seatNames": "Seat names"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -56,7 +57,10 @@
     "connection": "Connection error",
     "existingParticipant": "Existing participant",
     "newParticipant": "New participant",
-    "participantConflict": "Already in crew {{name}} in this category."
+    "participantConflict": "Already in crew {{name}} in this category.",
+    "editSeats": "Edit seat names",
+    "seat": "Seat {{number}}",
+    "addSeat": "Add seat"
   },
   "discipline": {
     "competition": "Competition",

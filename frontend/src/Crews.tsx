@@ -1,12 +1,12 @@
 import {useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
+import {Autocomplete, Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {apiRequest, csrfRequest} from './api/client'
 import {apiErrorKey} from './api/errors'
 
 type Competition = {id: number, title: string, admissionConfirmationRequired: boolean}
-type Category = {id: number, displayName: string, crewSize: number}
+type Category = {id: number, displayName: string, crewSize: number, version: number, seatLabels?: string[]}
 type Requirement = {id: number, name: string, valueType: 'YES_NO' | 'TEXT' | 'DATE' | 'NUMBER', required: boolean}
 type Member = {participantId?: number, surname: string, givenName: string, patronymic: string}
 type Answer = {requirementId: number, value: string | number | boolean}
@@ -22,6 +22,8 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
   const [categories, setCategories] = useState<Category[]>([]), [requirements, setRequirements] = useState<Requirement[]>([]), [crews, setCrews] = useState<Summary[]>([])
   const [category, setCategory] = useState(''), [search, setSearch] = useState(''), [admission, setAdmission] = useState('all'), [draft, setDraft] = useState<Draft | null>(null)
   const selection = useRef(0), editSelection = useRef(0)
+  const [seatDraft, setSeatDraft] = useState<{item: Category, labels: string[]} | null>(null)
+  const [seatNames, setSeatNames] = useState<string[]>([])
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0)
   const base = competition ? `/api/competitions/${competition.id}/entries` : ''
   const fail = (e: unknown) => setError(apiErrorKey(e))
@@ -46,7 +48,7 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
   }, [base, competition, revision, readOnly])
   const changeCompetition = async (id: string) => {
     editSelection.current++; const generation = ++selection.current
-    setCompetition(null); setDraft(null); setCategories([]); setCrews([]); setCategory(''); setAdmission('all'); setError('')
+    setCompetition(null); setDraft(null); setSeatDraft(null); setCategories([]); setCrews([]); setCategory(''); setAdmission('all'); setError('')
     if (!id) { setCompetition(null); return }
     try { const result = await apiRequest<Competition>(`/api/competitions/${id}`); if (selection.current === generation) setCompetition(result) } catch (e) { if (selection.current === generation) fail(e) }
   }
@@ -62,6 +64,23 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
       setDraft(null); setRevision(v => v + 1)
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
+  const editSeats = async () => {
+    const item = categories.find(c => String(c.id) === category)
+    if (!item) return
+    setSeatDraft({item, labels: item.seatLabels ?? []}); setError('')
+    try { setSeatNames((await apiRequest<{name: string}[]>('/api/seat-names')).map(value => value.name)) }
+    catch (e) { fail(e) }
+  }
+  const saveSeats = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!seatDraft || !competition || busy) return
+    if (seatDraft.labels.some(label => label.length > 200 || label.includes('\0'))) { setError('apiError.validation'); return }
+    setBusy(true); setError('')
+    try {
+      const updated = await csrfRequest<Category>('/api/competitions/' + competition.id + '/categories/' + seatDraft.item.id + '/seat-labels', 'PUT', {version: seatDraft.item.version, seatLabels: seatDraft.labels})
+      setCategories(items => items.map(item => item.id === updated.id ? updated : item)); setSeatDraft(null)
+    } catch (e) { fail(e) } finally { setBusy(false) }
+  }
   const decide = async (item: Summary, admitted: boolean) => {
     setBusy(true); setError('')
     try { await csrfRequest(`${base}/${item.id}/admission`, 'PUT', {admitted, version: item.version}); setRevision(v => v + 1) } catch (e) { fail(e) } finally { setBusy(false) }
@@ -73,14 +92,22 @@ export default function Crews({readOnly = false}: {readOnly?: boolean}) {
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     <TextField select disabled={busy} label={t('crew.competition')} value={competition?.id ?? ''} onChange={e => void changeCompetition(e.target.value)}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}</TextField>
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-    {competition && <><TextField select label={t('crew.category')} value={category} onChange={e => setCategory(e.target.value)}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
+    {competition && <><TextField select label={t('crew.category')} value={category} onChange={e => {setCategory(e.target.value); setSeatDraft(null)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
       <TextField label={t('crew.search')} value={search} onChange={e => setSearch(e.target.value)}/>
       {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}
       {!readOnly && <Button disabled={busy || !category} onClick={() => { editSelection.current++; const c = categories.find(c => String(c.id) === category); if (c) setDraft(empty(c)) }}>{t('crew.create')}</Button>}
+      {!readOnly && <Button disabled={busy || !category} onClick={() => void editSeats()}>{t('crew.editSeats')}</Button>}
+      {seatDraft && <Box component="form" onSubmit={saveSeats} sx={{display: 'grid', gap: 1}}>
+        {Array.from({length: Math.min(seatDraft.item.crewSize, Math.max(8, seatDraft.labels.length))}, (_, index) => <Autocomplete key={index} freeSolo options={seatNames} inputValue={seatDraft.labels[index] ?? ''} disabled={busy}
+          onInputChange={(_, value) => { const labels = Array.from({length: Math.max(index + 1, seatDraft.labels.length)}, (_, i) => seatDraft.labels[i] ?? ''); labels[index] = value; setSeatDraft({...seatDraft, labels}) }}
+          renderInput={params => <TextField {...params} label={t('crew.seat', {number: index + 1})} placeholder={t('crew.member', {number: index + 1})}/>}/>)}
+        <Button disabled={busy || Math.max(8, seatDraft.labels.length) >= seatDraft.item.crewSize} onClick={() => setSeatDraft({...seatDraft, labels: Array.from({length: Math.max(8, seatDraft.labels.length) + 1}, (_, i) => seatDraft.labels[i] ?? '')})}>{t('crew.addSeat')}</Button>
+        <Box><Button type="submit" disabled={busy}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => setSeatDraft(null)}>{t('crew.cancel')}</Button></Box>
+      </Box>}
       {visible.map(c => { const d = c; return <Box key={c.id}><Typography>{c.startNumber} — {c.crewName} — {c.regionOrClub} — {categories.find(category => category.id === c.categoryId)?.displayName} {readOnly ? null : ` — ${c.roster.length}`}</Typography>{!readOnly && d && <><Button disabled={busy} onClick={() => { const generation = selection.current, editGeneration = ++editSelection.current; void apiRequest<Crew>(`${base}/${d.id}`).then(item => { if (selection.current === generation && editSelection.current === editGeneration) edit(item) }).catch(e => { if (selection.current === generation && editSelection.current === editGeneration) fail(e) }) }}>{t('crew.edit')}</Button>{competition.admissionConfirmationRequired && <><Typography component="span">{t(d.admissionDecision === null ? 'crew.pending' : d.admissionDecision ? 'crew.admitted' : 'crew.rejected')}</Typography><Button disabled={busy} onClick={() => void decide(d, true)}>{t('crew.admit')}</Button><Button disabled={busy} onClick={() => void decide(d, false)}>{t('crew.reject')}</Button></>}</>}</Box> })}
       {draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2}}>
         {(['crewName', 'regionOrClub', 'representative', 'startNumber'] as const).map(key => <TextField key={key} required label={t(`crew.${key}`)} type={key === 'startNumber' ? 'number' : 'text'} value={draft[key]} onChange={e => setDraft({...draft, [key]: e.target.value})}/>)}
-        {draft.roster.map((m, i) => <Box key={i} component="fieldset"><legend>{t('crew.member', {number: i + 1})}</legend><TextField select label={t('crew.existingParticipant')} value={m.participantId ?? ''} onChange={e => { const selected = people.find(person => String(person.participantId) === String(e.target.value)); const roster = [...draft.roster]; roster[i] = selected ? {...selected} : member(); setDraft({...draft, roster}) }}><MenuItem value="">{t('crew.newParticipant')}</MenuItem>{people.map(person => <MenuItem key={person.participantId} value={person.participantId}>{person.surname} {person.givenName} {person.patronymic}</MenuItem>)}</TextField>{conflict(m) && <Typography role="status">{t('crew.participantConflict', {name: conflict(m)?.crewName})}</Typography>}{(['surname', 'givenName', 'patronymic'] as const).map(key => <TextField key={key} required={key !== 'patronymic'} label={t(`crew.${key}`)} value={m[key]} onChange={e => {const roster = [...draft.roster]; roster[i] = {...m, participantId: undefined, [key]: e.target.value}; setDraft({...draft, roster})}}/>)}</Box>)}
+        {draft.roster.map((m, i) => <Box key={i} component="fieldset"><legend>{categories.find(category => category.id === draft.categoryId)?.seatLabels?.[i]?.trim() || t('crew.member', {number: i + 1})}</legend><TextField select label={t('crew.existingParticipant')} value={m.participantId ?? ''} onChange={e => { const selected = people.find(person => String(person.participantId) === String(e.target.value)); const roster = [...draft.roster]; roster[i] = selected ? {...selected} : member(); setDraft({...draft, roster}) }}><MenuItem value="">{t('crew.newParticipant')}</MenuItem>{people.map(person => <MenuItem key={person.participantId} value={person.participantId}>{person.surname} {person.givenName} {person.patronymic}</MenuItem>)}</TextField>{conflict(m) && <Typography role="status">{t('crew.participantConflict', {name: conflict(m)?.crewName})}</Typography>}{(['surname', 'givenName', 'patronymic'] as const).map(key => <TextField key={key} required={key !== 'patronymic'} label={t(`crew.${key}`)} value={m[key]} onChange={e => {const roster = [...draft.roster]; roster[i] = {...m, participantId: undefined, [key]: e.target.value}; setDraft({...draft, roster})}}/>)}</Box>)}
         {requirements.map(r => <TextField key={r.id} select={r.valueType === 'YES_NO'} label={r.name} required={r.required} type={r.valueType === 'DATE' ? 'date' : r.valueType === 'NUMBER' ? 'number' : 'text'} slotProps={r.valueType === 'DATE' ? {inputLabel: {shrink: true}} : r.valueType === 'NUMBER' ? {htmlInput: {step: 'any'}} : undefined} value={draft.answers[r.id] ?? ''} onChange={e => setDraft({...draft, answers: {...draft.answers, [r.id]: e.target.value}})}>{r.valueType === 'YES_NO' && [<MenuItem key="empty" value="">—</MenuItem>, <MenuItem key="yes" value="true">{t('crew.yes')}</MenuItem>, <MenuItem key="no" value="false">{t('crew.no')}</MenuItem>]}</TextField>)}
         <Box><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { editSelection.current++; setDraft(null) }}>{t('crew.cancel')}</Button></Box>
       </Box>}</>}

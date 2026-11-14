@@ -16,7 +16,8 @@
     "startLists": "Стартовые протоколы",
     "resultGrid": "Ввод результатов",
     "results": "Результаты",
-    "parallelSprint": "Параллельный спринт"
+    "parallelSprint": "Параллельный спринт",
+    "seatNames": "Названия мест"
   },
   "placeholder": {
     "unavailable": "Этот раздел пока недоступен.",
@@ -47,7 +48,7 @@
     "regionOrClub": "Регион или клуб",
     "representative": "Представитель",
     "startNumber": "Стартовый номер",
-    "member": "Участник {{number}}",
+    "member": "Участник №{{number}}",
     "surname": "Фамилия",
     "givenName": "Имя",
     "patronymic": "Отчество",
@@ -58,7 +59,10 @@
     "connection": "Ошибка соединения",
     "existingParticipant": "Существующий участник",
     "newParticipant": "Новый участник",
-    "participantConflict": "Уже состоит в экипаже {{name}} этой категории."
+    "participantConflict": "Уже состоит в экипаже {{name}} этой категории.",
+    "editSeats": "Изменить названия мест",
+    "seat": "Место {{number}}",
+    "addSeat": "Добавить место"
   },
   "discipline": {
     "competition": "Соревнование",

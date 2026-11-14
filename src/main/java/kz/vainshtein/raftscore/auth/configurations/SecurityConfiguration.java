@@ -68,7 +68,7 @@ class SecurityConfiguration {
                         .access(AuthorizationPolicies.authenticated())
                         .requestMatchers("/api/backups", "/api/backups/**")
                         .access(AuthorizationPolicies.fullAccess())
-                        .requestMatchers("/api/category-templates", "/api/category-templates/**")
+                        .requestMatchers("/api/category-templates", "/api/category-templates/**", "/api/seat-names", "/api/seat-names/**")
                         .access(AuthorizationPolicies.fullAccess())
                         .requestMatchers("/api/competitions/*/entries/*")
                         .access(AuthorizationPolicies.fullAccess())
