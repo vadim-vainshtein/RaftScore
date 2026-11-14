@@ -46,7 +46,9 @@ test('clears a qualification selection when categories make it incompatible', as
   const sprint = {...slalom, id: 4, name: 'Qualifier', type: 'SPRINT', attemptCount: null}
   const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', gateCount: null, attemptCount: null, qualificationDisciplineId: 4}
   load([sprint, parallel]); render(<Disciplines readOnly={false}/>); await selectCompetition()
-  const row = (await screen.findByText(/Parallel.*Parallel sprint/)).parentElement!
+  const label = await screen.findByText(/Parallel —/)
+  expect(label).not.toHaveTextContent('Parallel sprint')
+  const row = label.parentElement!
   fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
   expect(screen.getByLabelText('Qualification discipline')).toHaveTextContent('Qualifier')
   fireEvent.click(screen.getByLabelText('R6'))

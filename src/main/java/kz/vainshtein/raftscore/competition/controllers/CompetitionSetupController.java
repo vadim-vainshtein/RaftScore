@@ -4,10 +4,13 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import kz.vainshtein.raftscore.catalog.entities.CategoryTemplateRepository;
+import kz.vainshtein.raftscore.catalog.entities.CategoryTemplate;
+import kz.vainshtein.raftscore.catalog.SeatNameDictionary;
 import kz.vainshtein.raftscore.competition.entities.*;
 import kz.vainshtein.raftscore.discipline.entities.*;
 import kz.vainshtein.raftscore.scoring.entities.*;
@@ -29,6 +32,7 @@ import tools.jackson.databind.annotation.JsonDeserialize;
 class CompetitionSetupController {
     private final CompetitionRepository competitions;
     private final CategoryTemplateRepository templates;
+    private final SeatNameDictionary seatNames;
     private final CompetitionCategoryRepository categories;
     private final EntryRequirementRepository requirements;
     private final DisciplineRepository disciplines;
@@ -43,11 +47,11 @@ class CompetitionSetupController {
     record Category(@JsonDeserialize(using = StrictLong.class) Long templateId,
                     @Pattern(regexp = "[^\\x00]*") String classLabel,
                     @Pattern(regexp = "[^\\x00]*") String scoringGroupLabel,
-                    @Positive @JsonDeserialize(using = StrictInteger.class) Integer crewSize) { }
+                    @Positive @JsonDeserialize(using = StrictInteger.class) Integer crewSize, List<String> seatLabels) { }
     record Requirement(@NotBlank @Pattern(regexp = "[^\\x00]*") String name,
                        @NotNull EntryRequirementValueType valueType, @NotNull Boolean required,
                        @NotNull @PositiveOrZero @JsonDeserialize(using = StrictInteger.class) Integer displayOrder) { }
-    record DisciplineDraft(@NotBlank @Pattern(regexp = "[^\\x00]*") String name, @NotNull DisciplineType type,
+    record DisciplineDraft(@Pattern(regexp = "[^\\x00]*") String name, @NotNull DisciplineType type,
                            @NotNull @PositiveOrZero @JsonDeserialize(using = StrictInteger.class) Integer displayOrder,
                            @NotNull @JsonDeserialize(contentUsing = StrictInteger.class) List<@NotNull Integer> categoryIndexes,
                            @Positive @JsonDeserialize(using = StrictInteger.class) Integer gateCount,
@@ -83,12 +87,32 @@ class CompetitionSetupController {
             var group = draft.scoringGroupLabel() != null ? draft.scoringGroupLabel() : template == null ? null : template.getScoringGroupLabel();
             var size = draft.crewSize() != null ? draft.crewSize() : template == null ? null : template.getCrewSize();
             if (size == null) throw new IllegalArgumentException("crew size required");
+            var labels = draft.seatLabels() != null ? draft.seatLabels() : template == null ? List.<String>of()
+                    : template.getSeatLabels().subList(0, Math.min(size, template.getSeatLabels().size()));
+            if (template == null || !Objects.equals(classLabel, template.getClassLabel())
+                    || !Objects.equals(group, template.getScoringGroupLabel()) || size != template.getCrewSize()
+                    || !sameSeatLabels(labels, template.getSeatLabels())) {
+                var newTemplate = CategoryTemplate.builder().classLabel(classLabel).scoringGroupLabel(group).crewSize(size).build();
+                newTemplate.setSeatLabels(labels);
+                templates.save(newTemplate);
+            }
             var category = CompetitionCategory.builder().competition(competition).classLabel(classLabel)
                     .scoringGroupLabel(group).crewSize(size).build();
-            if (template != null) category.setSeatLabels(template.getSeatLabels().subList(0, Math.min(size, template.getSeatLabels().size())));
+            category.setSeatLabels(labels);
+            seatNames.registerIntroducedNames(List.of(), labels);
             result.add(categories.save(category));
         }
         return result;
+    }
+
+    private static boolean sameSeatLabels(List<String> left, List<String> right) {
+        return withoutTrailingEmptySeats(left).equals(withoutTrailingEmptySeats(right));
+    }
+
+    private static List<String> withoutTrailingEmptySeats(List<String> labels) {
+        var end = labels.size();
+        while (end > 0 && "".equals(labels.get(end - 1))) end--;
+        return labels.subList(0, end);
     }
 
     private void saveRequirements(Competition competition, List<Requirement> drafts) {

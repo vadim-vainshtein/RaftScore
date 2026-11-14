@@ -8,7 +8,7 @@ import {supportedLocale} from './i18n/supported-locales'
 import {wallTimeToInstant} from './i18n/wall-time'
 
 type Competition = {id: number, title: string, timeZone: string}
-type Discipline = {id: number, name: string, categoryIds: number[]}
+type Discipline = {id: number, name: string, type: string, categoryIds: number[]}
 type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number, plannedTime: string | null}
@@ -107,7 +107,7 @@ export default function StartLists({readOnly}: {readOnly: boolean}) {
       {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>
     {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); setCategory(''); setList(null)}}>
       <MenuItem value="">—</MenuItem>
-      {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name}</MenuItem>)}</TextField>
+      {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>
     }
     {discipline && <TextField select disabled={busy} label={t('startList.category')} value={category} onChange={e => {setManualOrder(null); setCategory(e.target.value); setList(null)}}>
       <MenuItem value="">—</MenuItem>

@@ -38,12 +38,12 @@ test.each([false, true])('submits all five steps with explicit tiebreak=%s', asy
   fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', {name: 'Slalom'}))
   fireEvent.click(screen.getByRole('button', {name: 'Next'}))
   expect(screen.getByText(`Tiebreak discipline: ${explicit ? 'Sprint' : 'Slalom'}`)).toBeInTheDocument()
-  expect(screen.getByText(/Sprint · Sprint · R4 \/ Open · Order: 0/)).toBeInTheDocument()
+  expect(screen.getByText('Sprint · R4 / Open · Attempts: 1')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(saved).toHaveBeenCalled())
   expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/setup', 'POST', expect.objectContaining({
     competition: expect.objectContaining({title: 'River', startDate: '2026-04-01', endDate: null, location: 'Bank', timeZone: 'UTC'}),
-    categories: [{classLabel: 'R4', scoringGroupLabel: 'Open', crewSize: 1}],
+    categories: [{classLabel: 'R4', scoringGroupLabel: 'Open', crewSize: 1, seatLabels: []}],
     requirements: [{name: 'Waiver', valueType: 'YES_NO', required: true, displayOrder: 0}],
     disciplines: [expect.objectContaining({name: 'Sprint', pointsTable: expect.objectContaining({rows: expect.arrayContaining([{place: 1, points: 100}, {place: 20, points: 5}])})}), expect.objectContaining({name: 'Slalom', type: 'SLALOM', gateCount: 1, attemptCount: 2})],
     tiebreakDisciplineIndex: explicit ? 0 : 1,
@@ -63,16 +63,12 @@ test('returns to and focuses an invalid field from a server error', async () => 
   fireEvent.click(await screen.findByRole('button', {name: 'Time zone (IANA)'}))
   expect(screen.getByLabelText('Time zone (IANA)')).toHaveFocus()
 })
-test('rejects invalid time zones and nonpositive or fractional slalom counts', () => {
+test('rejects nonpositive or fractional slalom counts', () => {
   vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
   render(<CompetitionWizard onCancel={vi.fn()} onSaved={vi.fn()}/> )
   fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River'}})
   fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-04-01'}})
   fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
-  fireEvent.change(screen.getByLabelText('Time zone (IANA)'), {target: {value: 'invalid/zone'}})
-  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
-  fireEvent.click(screen.getByRole('button', {name: 'Time zone (IANA)'}))
-  expect(screen.getByLabelText('Time zone (IANA)')).toHaveFocus()
   fireEvent.change(screen.getByLabelText('Time zone (IANA)'), {target: {value: 'UTC'}})
   for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', {name: 'Next'}))
   fireEvent.click(screen.getByRole('button', {name: 'Add discipline'}))
@@ -84,4 +80,72 @@ test('rejects invalid time zones and nonpositive or fractional slalom counts', (
   fireEvent.click(screen.getByRole('button', {name: 'Next'}))
   expect(screen.getByRole('button', {name: 'Gates'})).toBeInTheDocument()
   expect(screen.getByRole('button', {name: 'Attempts'})).toBeInTheDocument()
+})
+
+
+test('explains an invalid date and focuses its field', () => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  render(<CompetitionWizard onCancel={vi.fn()} onSaved={vi.fn()}/> )
+  fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River'}})
+  fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-05-02'}})
+  fireEvent.change(screen.getByLabelText('End date'), {target: {value: '2026-05-01'}})
+  fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  expect(screen.getByText('End date must not be before the start date.')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'End date'}))
+  expect(screen.getByLabelText('End date')).toHaveFocus()
+})
+
+test('accepts a seat name and an unnamed discipline', async () => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  vi.mocked(csrfRequest).mockResolvedValue({id: 1})
+  render(<CompetitionWizard onCancel={vi.fn()} onSaved={vi.fn()}/> )
+  expect(screen.getByRole('option', {name: /Asia\/Almaty UTC\+5/})).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River'}})
+  fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-05-01'}})
+  fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Add custom category'}))
+  fireEvent.change(screen.getByLabelText('Class'), {target: {value: 'R1'}})
+  fireEvent.change(screen.getByLabelText('Scoring group'), {target: {value: 'Open'}})
+  fireEvent.change(screen.getByLabelText('Seat 1'), {target: {value: 'Bow'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Add discipline'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  expect(screen.getByText('Sprint · Attempts: 1')).toBeInTheDocument()
+  expect(screen.getByText('Categories: R1 / Open')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/setup', 'POST', expect.objectContaining({categories: [expect.objectContaining({seatLabels: ['Bow']})], disciplines: [expect.objectContaining({name: ''})]})))
+})
+
+
+test('explains an overlong seat label and focuses it', () => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  render(<CompetitionWizard onCancel={vi.fn()} onSaved={vi.fn()}/>)
+  fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River'}})
+  fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-05-01'}})
+  fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Add custom category'}))
+  fireEvent.change(screen.getByLabelText('Class'), {target: {value: 'R1'}})
+  fireEvent.change(screen.getByLabelText('Scoring group'), {target: {value: 'Open'}})
+  fireEvent.change(screen.getByLabelText('Seat 1'), {target: {value: 'x'.repeat(201)}})
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  expect(screen.getByText(/Seat labels must be at most 200 characters/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Seat 1'}))
+  expect(screen.getByLabelText('Seat 1')).toHaveFocus()
+})
+
+
+test('shows a generic server failure as an error alert', async () => {
+  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  vi.mocked(csrfRequest).mockRejectedValueOnce(new ApiError(500, {code: 'unexpected'}))
+  render(<CompetitionWizard onCancel={vi.fn()} onSaved={vi.fn()}/>)
+  fireEvent.change(screen.getByLabelText('Title'), {target: {value: 'River'}})
+  fireEvent.change(screen.getByLabelText('Start date'), {target: {value: '2026-05-01'}})
+  fireEvent.change(screen.getByLabelText('Location'), {target: {value: 'Bank'}})
+  for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByRole('alert')).toHaveStyle({color: 'rgb(211, 47, 47)'})
 })

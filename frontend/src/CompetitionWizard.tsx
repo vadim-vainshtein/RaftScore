@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react'
+import {useEffect, useMemo, useRef, useState} from 'react'
 import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
@@ -8,8 +8,8 @@ import {supportedLocale} from './i18n/supported-locales'
 
 type FieldIssue = {step: number, field: string, label: string, message?: string}
 type Competition = {title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}
-type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean}
-type Category = {templateId?: number, classLabel: string, scoringGroupLabel: string, crewSize: number}
+type Template = {seatLabels?: string[], id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean}
+type Category = {seatLabels?: string[], templateId?: number, classLabel: string, scoringGroupLabel: string, crewSize: number}
 type Requirement = {name: string, valueType: string, required: boolean, displayOrder: number}
 type Row = {place: number, points: number}
 type Discipline = {name: string, type: string, displayOrder: number, categoryIndexes: number[], gateCount: number | null, attemptCount: number | null, qualificationDisciplineIndex: number | null, pointsTable: {name: string, tiePolicy: string, rows: Row[]} | null}
@@ -19,9 +19,19 @@ const freshDiscipline = (order: number): Discipline => ({name: '', type: 'SPRINT
 
 export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => void, onSaved: (value: {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}) => void}) {
   const {t, i18n} = useTranslation()
+  const {t: categoryT} = useTranslation('categories')
+  const disciplineName = (d: Discipline) => d.name.trim() || t(('discipline.types.' + d.type) as 'discipline.types.SPRINT')
   const displayDate = (value: string) => value ? formatDate(new Date(`${value}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC') : '—'
   const [step, setStep] = useState(0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [competition, setCompetition] = useState<Competition>({title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false})
+  const zones = useMemo(() => {
+    const date = competition.startDate ? new Date(competition.startDate + 'T12:00:00Z') : new Date()
+    const reference = Number.isNaN(date.getTime()) ? new Date() : date
+    return [...new Set(['UTC', Intl.DateTimeFormat().resolvedOptions().timeZone, ...Intl.supportedValuesOf('timeZone')])].filter(Boolean).map(zone => {
+      const offset = new Intl.DateTimeFormat('en', {timeZone: zone, timeZoneName: 'shortOffset'}).formatToParts(reference).find(part => part.type === 'timeZoneName')?.value.replace('GMT', 'UTC') ?? 'UTC'
+      return {zone, label: zone + ' ' + offset}
+    })
+  }, [competition.startDate])
   const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>([])
   const [requirements, setRequirements] = useState<Requirement[]>([]), [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [issues, setIssues] = useState<FieldIssue[]>([])
@@ -37,30 +47,30 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
   const updateDiscipline = (i: number, patch: Partial<Discipline>) => setDisciplines(items => items.map((d, index) => index === i ? {...d, ...patch} : d))
   const fieldIssues = (currentStep: number): FieldIssue[] => {
     const found: FieldIssue[] = []
-    const add = (field: string, label: string) => found.push({step: currentStep, field, label})
+    const add = (field: string, label: string, message = 'apiError.required') => found.push({step: currentStep, field, label, message})
     if (currentStep === 0) {
       if (!competition.title.trim()) add('competition.title', t('competition.title'))
       if (!competition.startDate) add('competition.startDate', t('competition.startDate'))
-      if (competition.endDate && competition.endDate < competition.startDate) add('competition.endDate', t('competition.endDate'))
+      if (competition.endDate && competition.endDate < competition.startDate) add('competition.endDate', t('competition.endDate'), 'wizard.endDateBeforeStart')
       if (!competition.location.trim()) add('competition.location', t('competition.location'))
-      try { new Intl.DateTimeFormat('en', {timeZone: competition.timeZone}) } catch { add('competition.timeZone', t('competition.timeZone')) }
+      try { new Intl.DateTimeFormat('en', {timeZone: competition.timeZone}) } catch { add('competition.timeZone', t('competition.timeZone'), 'apiError.invalidField') }
     }
     if (currentStep === 1) categories.forEach((c, i) => {
       if (!c.classLabel.trim()) add(`categories[${i}].classLabel`, t('wizard.classLabel'))
       if (!c.scoringGroupLabel.trim()) add(`categories[${i}].scoringGroupLabel`, t('wizard.scoringGroupLabel'))
-      if (!Number.isInteger(c.crewSize) || c.crewSize < 1) add(`categories[${i}].crewSize`, t('wizard.crewSize'))
+      if (!Number.isInteger(c.crewSize) || c.crewSize < 1) add(`categories[${i}].crewSize`, t('wizard.crewSize'), 'wizard.positiveInteger')
+      c.seatLabels?.slice(0, c.crewSize).forEach((label, n) => { if (label.length > 200 || label.includes('\0')) add(`categories[${i}].seatLabels[${n}]`, categoryT('seat', {number: n + 1}), 'wizard.invalidSeatLabel') })
     })
     if (currentStep === 2) requirements.forEach((r, i) => { if (!r.name.trim()) add(`requirements[${i}].name`, t('wizard.requirementName')) })
     if (currentStep === 3) disciplines.forEach((d, i) => {
-      if (!d.name.trim()) add(`disciplines[${i}].name`, t('discipline.name'))
       if (d.type === 'SLALOM') {
-        if (!Number.isInteger(d.gateCount) || (d.gateCount ?? 0) < 1) add(`disciplines[${i}].gateCount`, t('discipline.gateCount'))
-        if (!Number.isInteger(d.attemptCount) || (d.attemptCount ?? 0) < 1) add(`disciplines[${i}].attemptCount`, t('discipline.attemptCount'))
+        if (!Number.isInteger(d.gateCount) || (d.gateCount ?? 0) < 1) add(`disciplines[${i}].gateCount`, t('discipline.gateCount'), 'wizard.positiveInteger')
+        if (!Number.isInteger(d.attemptCount) || (d.attemptCount ?? 0) < 1) add(`disciplines[${i}].attemptCount`, t('discipline.attemptCount'), 'wizard.positiveInteger')
       }
-      if (d.qualificationDisciplineIndex !== null && (!disciplines[d.qualificationDisciplineIndex] || disciplines[d.qualificationDisciplineIndex].type === 'PARALLEL_SPRINT' || !d.categoryIndexes.every(x => disciplines[d.qualificationDisciplineIndex!].categoryIndexes.includes(x)))) add(`disciplines[${i}].qualificationDisciplineIndex`, t('discipline.qualification'))
+      if (d.qualificationDisciplineIndex !== null && (!disciplines[d.qualificationDisciplineIndex] || disciplines[d.qualificationDisciplineIndex].type === 'PARALLEL_SPRINT' || !d.categoryIndexes.every(x => disciplines[d.qualificationDisciplineIndex!].categoryIndexes.includes(x)))) add(`disciplines[${i}].qualificationDisciplineIndex`, t('discipline.qualification'), 'wizard.invalidQualification')
       d.pointsTable?.rows.forEach((r, n) => {
-        if (!Number.isInteger(r.place) || r.place < 1 || d.pointsTable!.rows.filter(x => x.place === r.place).length > 1) add(`disciplines[${i}].pointsTable.rows[${n}].place`, t('wizard.place'))
-        if (!Number.isInteger(r.points) || r.points < 0) add(`disciplines[${i}].pointsTable.rows[${n}].points`, t('wizard.points'))
+        if (!Number.isInteger(r.place) || r.place < 1 || d.pointsTable!.rows.filter(x => x.place === r.place).length > 1) add(`disciplines[${i}].pointsTable.rows[${n}].place`, t('wizard.place'), 'wizard.uniquePlace')
+        if (!Number.isInteger(r.points) || r.points < 0) add(`disciplines[${i}].pointsTable.rows[${n}].points`, t('wizard.points'), 'wizard.nonnegativeInteger')
       })
     })
     return found
@@ -89,28 +99,30 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
     updateDiscipline(index, {pointsTable: {name: t('wizard.preset'), tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows}})
     setPresetSelected(true)
   }
-  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories, requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
+  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories: categories.map(c => ({...c, seatLabels: c.seatLabels?.slice(0, c.crewSize)})), requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
   return <Box sx={{display: 'grid', gap: 2, maxWidth: 850}}>
     <Typography variant="h5">{t(("wizard.step" + step) as "wizard.step0")}
       </Typography>
-      <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-      {issues.length > 0 && <Box role="alert">{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button onClick={() => {setStep(issue.step); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
+      <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert" color="error">{t(error as 'apiError.network')}</Typography>}
+      {issues.length > 0 && <Box role="alert" sx={{color: 'error.main', border: 1, p: 1}}>{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button color="error" onClick={() => {setStep(issue.step); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
     {step === 0 && <>
       <TextField id="competition.title" label={t('competition.title')} value={competition.title} onChange={e => setCompetition({...competition, title: e.target.value})}/>
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>
       <TextField id="competition.endDate" type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.endDate} onChange={e => setCompetition({...competition, endDate: e.target.value})}/>
       <TextField id="competition.location" label={t('competition.location')} value={competition.location} onChange={e => setCompetition({...competition, location: e.target.value})}/>
-      <TextField id="competition.timeZone" label={t('competition.timeZone')} value={competition.timeZone} onChange={e => setCompetition({...competition, timeZone: e.target.value})}/>
+      <TextField select slotProps={{select: {native: true}}} id="competition.timeZone" label={t('competition.timeZone')} value={competition.timeZone} onChange={e => setCompetition({...competition, timeZone: e.target.value})}>{zones.map(({zone, label}) => <option key={zone} value={zone}>{label}</option>)}</TextField>
       <TextField id="competition.description" label={t('competition.description')} multiline value={competition.description ?? ''} onChange={e => setCompetition({...competition, description: e.target.value})}/>
       </>}
     {step === 1 && <>
-      <TextField select label={t('wizard.template')} value="" onChange={e => {const item = templates.find(x => x.id === Number(e.target.value)); if (item) setCategories([...categories, {templateId: item.id, classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: item.crewSize}])}}>{templates.map(item => <MenuItem key={item.id} value={item.id}>{item.displayName}</MenuItem>)}
+      <TextField select label={t('wizard.template')} value="" onChange={e => {const item = templates.find(x => x.id === Number(e.target.value)); if (item) setCategories([...categories, {templateId: item.id, classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: item.crewSize, seatLabels: item.seatLabels ?? []}])}}>{templates.map(item => <MenuItem key={item.id} value={item.id}>{item.displayName}</MenuItem>)}
       </TextField>
-      <Button onClick={() => setCategories([...categories, {classLabel: '', scoringGroupLabel: '', crewSize: 1}])}>{t('wizard.addCategory')}
+      <Button onClick={() => setCategories([...categories, {classLabel: '', scoringGroupLabel: '', crewSize: 1, seatLabels: []}])}>{t('wizard.addCategory')}
       </Button>{categories.map((c, i) => <Box key={i} sx={{display: 'flex', gap: 1, flexWrap: 'wrap'}}>{(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} id={`categories[${i}].${key}`} label={t(`wizard.${key}`)} type={key === 'crewSize' ? 'number' : 'text'} value={c[key]} onChange={e => setCategories(categories.map((item, index) => index === i ? {...item, [key]: key === 'crewSize' ? Number(e.target.value) : e.target.value} : item))}/>)}
       <Button onClick={() => {setCategories(categories.filter((_, index) => index !== i)); setDisciplines(disciplines.map(d => ({...d, categoryIndexes: d.categoryIndexes.filter(x => x !== i).map(x => x > i ? x - 1 : x)})))}}>{t('wizard.remove')}
       </Button>
-      <Typography>{c.classLabel} / {c.scoringGroupLabel} ({c.crewSize})</Typography>
+      <Typography>{c.classLabel} / {c.scoringGroupLabel}</Typography>
+      {Array.from({length: Math.min(Math.max(0, c.crewSize), Math.max(8, c.seatLabels?.length ?? 0))}, (_, n) => <TextField key={n} id={`categories[${i}].seatLabels[${n}]`} label={categoryT('seat', {number: n + 1})} value={c.seatLabels?.[n] ?? ''} onChange={e => setCategories(categories.map((item, index) => { if (index !== i) return item; const labels = Array.from({length: Math.max(n + 1, item.seatLabels?.length ?? 0)}, (_, k) => item.seatLabels?.[k] ?? ''); labels[n] = e.target.value; return {...item, seatLabels: labels} }))}/>)}
+      <Button disabled={Math.max(8, c.seatLabels?.length ?? 0) >= c.crewSize} onClick={() => setCategories(categories.map((item, index) => index !== i ? item : {...item, seatLabels: Array.from({length: Math.max(8, item.seatLabels?.length ?? 0) + 1}, (_, n) => item.seatLabels?.[n] ?? '')}))}>{categoryT('addSeat')}</Button>
       </Box>)}
       </>}
     {step === 2 && <>{requirements.length === 0 && <Typography>{t('wizard.noRequirements')}
@@ -137,14 +149,13 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <TextField id={`disciplines[${i}].attemptCount`} type="number" label={t('discipline.attemptCount')} value={d.attemptCount ?? ''} onChange={e => updateDiscipline(i, {attemptCount: Number(e.target.value)})}/>
       </>}{d.type === 'PARALLEL_SPRINT' && <TextField select id={`disciplines[${i}].qualificationDisciplineIndex`} label={t('discipline.qualification')} value={d.qualificationDisciplineIndex ?? ''} onChange={e => updateDiscipline(i, {qualificationDisciplineIndex: e.target.value === '' ? null : Number(e.target.value)})}>
       <MenuItem value="">{t('discipline.automatic')}
-      </MenuItem>{disciplines.map((other, n) => n !== i && other.type !== 'PARALLEL_SPRINT' && d.categoryIndexes.every(x => other.categoryIndexes.includes(x)) ? <MenuItem key={n} value={n}>{other.name}</MenuItem> : null)}
+      </MenuItem>{disciplines.map((other, n) => n !== i && other.type !== 'PARALLEL_SPRINT' && d.categoryIndexes.every(x => other.categoryIndexes.includes(x)) ? <MenuItem key={n} value={n}>{disciplineName(other)}</MenuItem> : null)}
       </TextField>}
-      <TextField id={`disciplines[${i}].displayOrder`} type="number" label={t('discipline.order')} value={d.displayOrder} onChange={e => updateDiscipline(i, {displayOrder: Number(e.target.value)})}/>
       <Button onClick={() => updateDiscipline(i, {pointsTable: {name: '', tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows: []}})}>{t('wizard.blankPoints')}
       </Button>
       <Button onClick={() => applyPreset(i, d)}>{t('wizard.preset')}
       </Button>
-      <TextField select label={t('wizard.copyPoints')} value="" onChange={e => {const source = disciplines[Number(e.target.value)].pointsTable; if (source) updateDiscipline(i, {pointsTable: structuredClone(source)})}}>{disciplines.map((x, n) => n !== i && x.pointsTable ? <MenuItem key={n} value={n}>{x.name}</MenuItem> : null)}
+      <TextField select label={t('wizard.copyPoints')} value="" onChange={e => {const source = disciplines[Number(e.target.value)].pointsTable; if (source) updateDiscipline(i, {pointsTable: structuredClone(source)})}}>{disciplines.map((x, n) => n !== i && x.pointsTable ? <MenuItem key={n} value={n}>{disciplineName(x)}</MenuItem> : null)}
       </TextField>{d.pointsTable && <>
       <TextField label={t('wizard.tableName')} value={d.pointsTable.name} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, name: e.target.value}})}/>{d.pointsTable.rows.map((row, n) => <Box key={n} sx={{display: 'flex', gap: 1}}>
       <TextField id={`disciplines[${i}].pointsTable.rows[${n}].place`} type="number" label={t('wizard.place')} value={row.place} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.map((x, k) => k === n ? {...x, place: Number(e.target.value)} : x)}})}/>
@@ -160,7 +171,7 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       </Box>)}
       <TextField select label={t('wizard.tiebreak')} value={tiebreak ?? ''} onChange={e => {setTiebreakExplicit(true); setTiebreak(e.target.value === '' ? null : Number(e.target.value))}}>
       <MenuItem value="">{t('discipline.noPoints')}
-      </MenuItem>{disciplines.map((d, i) => <MenuItem key={i} value={i}>{d.name}</MenuItem>)}
+      </MenuItem>{disciplines.map((d, i) => <MenuItem key={i} value={i}>{disciplineName(d)}</MenuItem>)}
       </TextField>
       </>}
     {step === 4 && <>
@@ -168,13 +179,13 @@ export default function CompetitionWizard({onCancel, onSaved}: {onCancel: () => 
       <Typography>{competition.description}</Typography>
       <Typography>{t('competition.admission')}: {t(competition.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}
       </Typography>
-      <Typography>{t('wizard.step1')}: {categories.map(c => `${c.classLabel} / ${c.scoringGroupLabel} (${c.crewSize})`).join(', ') || '—'}</Typography>
+      <Typography>{t('wizard.step1')}: {categories.map(c => `${c.classLabel} / ${c.scoringGroupLabel}`).join(', ') || '—'}</Typography>
       <Typography>{t('wizard.step2')}: {requirements.map(r => `${r.name} (${t(('wizard.valueTypes.' + r.valueType) as 'wizard.valueTypes.TEXT')}, ${t(r.required ? 'competition.yes' : 'competition.no')})`).join(', ') || '—'}</Typography>{disciplines.map((d, i) => <Box key={i}>
-      <Typography>{d.name} · {t(('discipline.types.' + d.type) as 'discipline.types.SPRINT')} · {d.categoryIndexes.map(n => categories[n] ? `${categories[n].classLabel} / ${categories[n].scoringGroupLabel}` : '').join(', ')} · {t('discipline.order')}: {d.displayOrder} · {d.gateCount ?? '—'} / {d.attemptCount ?? '—'} · {disciplines[d.qualificationDisciplineIndex ?? -1]?.name}</Typography>
+      <Typography>{disciplineName(d)}{d.categoryIndexes.length > 0 && ` · ${d.categoryIndexes.map(n => categories[n] ? `${categories[n].classLabel} / ${categories[n].scoringGroupLabel}` : '').join(', ')}`}{!!d.gateCount && ` · ${t('discipline.gateCount')}: ${d.gateCount}`}{d.type !== 'PARALLEL_SPRINT' && ` · ${t('discipline.attemptCount')}: ${d.type === 'SLALOM' ? d.attemptCount : 1}`}{d.qualificationDisciplineIndex != null && disciplines[d.qualificationDisciplineIndex] && ` · ${disciplineName(disciplines[d.qualificationDisciplineIndex])}`}</Typography>
       <Typography>{d.pointsTable?.name}: {d.pointsTable?.rows.map(r => `${r.place}: ${r.points}`).join(', ')}
       </Typography>
       </Box>)}
-      <Typography>{t('wizard.tiebreak')}: {disciplines[tiebreak ?? -1]?.name || '—'}</Typography>
+      <Typography>{t('wizard.tiebreak')}: {tiebreak != null && disciplines[tiebreak] ? disciplineName(disciplines[tiebreak]) : '—'}</Typography>
       </>}
     <Box>{step > 0 && <Button disabled={busy} onClick={() => {setStep(step - 1); setError('')}}>{t('competition.previous')}
       </Button>}{step < 4 ? <Button onClick={next}>{t('competition.next')}

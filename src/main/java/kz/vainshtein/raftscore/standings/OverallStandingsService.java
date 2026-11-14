@@ -36,7 +36,7 @@ public class OverallStandingsService {
             var total = rows.stream().mapToLong(row -> row.getPoints()).sum();
             var disqualified = rows.stream().anyMatch(row -> row.getStatus() == CalculatedResultStatus.DSQ_COMPETITION);
             var breakdown = rows.stream().map(row -> new DisciplineResult(row.getDiscipline().getId(),
-                    row.getDiscipline().getName(), row.getPlace(), row.getStatus(), row.getPoints())).toList();
+                    displayName(row.getDiscipline()), row.getPlace(), row.getStatus(), row.getPoints())).toList();
             standings.add(new Standing(crew.getId(), crew.getCrewName(), crew.getRegionOrClub(), crew.getStartNumber(),
                     null, total, disqualified, breakdown, null));
         }
@@ -73,6 +73,10 @@ public class OverallStandingsService {
             first = end;
         }
         return List.copyOf(ranked);
+    }
+
+    private static String displayName(kz.vainshtein.raftscore.discipline.entities.Discipline discipline) {
+        return discipline.getName().isBlank() ? discipline.getType().name() : discipline.getName();
     }
 
     private Integer tiebreakPlace(Standing standing, Long disciplineId) {
