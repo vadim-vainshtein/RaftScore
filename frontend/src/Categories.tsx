@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
 import {Autocomplete, Box, Button, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography} from '@mui/material'
+import SeatNames from './SeatNames'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, fieldErrorKey, type FieldErrorKey} from './api/errors'
 type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean, version: number, seatLabels?: string[]}
@@ -114,6 +115,7 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
       {duplicate && <Typography role="status">{t('duplicate')}</Typography>}{lookup?.key === lookupKey && lookup.failed && <Typography role="alert">{t('lookupFailed')} <Button onClick={() => {setLookup(null); setLookupRevision(v => v + 1)}}>{t('retry')}</Button></Typography>}
       <Box><Button type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>
     </Box>}
+    {form && <SeatNameDictionary label={t('seatNames')} onChanged={() => setRevision(v => v + 1)}/>}
     {error && <Typography role="alert">{error.startsWith('common:') ? common(error.slice(7) as 'apiError.network') : t(error as 'conflict')}</Typography>}
     {error === 'conflict' && <Box><Button onClick={() => void reload()} disabled={busy}>{t('reload')}</Button><Button onClick={() => {setDraft(null); setError(null); setRevision(v => v + 1)}} disabled={busy}>{t('discard')}</Button></Box>}
     <TextField select label={t('filter')} value={filter} disabled={busy} onChange={e => {setFilter(e.target.value); setPage(0); setError(null)}} sx={{my: 2, minWidth: 160}}><MenuItem value="all">{t('all')}</MenuItem><MenuItem value="false">{t('active')}</MenuItem><MenuItem value="true">{t('archived')}</MenuItem></TextField>
@@ -121,4 +123,9 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
       {current.value.content.map(item => <TableRow key={item.id}><TableCell>{item.classLabel}</TableCell><TableCell>{item.scoringGroupLabel}</TableCell><TableCell>{item.displayName}</TableCell><TableCell>{item.crewSize}</TableCell><TableCell>{t(item.archived ? 'archived' : 'active')}</TableCell><TableCell><Button onClick={() => start(item)} disabled={busy}>{t('edit')}</Button><Button onClick={() => void toggle(item)} disabled={busy || !!form}>{t(item.archived ? 'restore' : 'archive')}</Button></TableCell></TableRow>)}
     </TableBody></Table></Box>{!current.value.content.length && <Typography>{t('empty')}</Typography>}<Button onClick={() => setPage(v => v - 1)} disabled={busy || page === 0}>{t('previous')}</Button>{t('page', {page: page + 1, total: Math.max(1, current.value.totalPages)})}<Button onClick={() => setPage(v => v + 1)} disabled={busy || page + 1 >= current.value.totalPages}>{t('next')}</Button></> : !current?.failed && error !== 'conflict' && <Typography>{t('loading')}</Typography>}
   </Box>
+}
+
+function SeatNameDictionary({label, onChanged}: {label: string, onChanged: () => void}) {
+  const [open, setOpen] = useState(false)
+  return <details onToggle={event => setOpen(event.currentTarget.open)}><summary>{label}</summary>{open && <SeatNames onChanged={onChanged}/>}</details>
 }

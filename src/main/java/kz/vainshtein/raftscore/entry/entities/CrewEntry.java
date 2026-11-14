@@ -33,6 +33,19 @@ public class CrewEntry extends VersionedEntity {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String representative;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "representative_contacts", nullable = false, columnDefinition = "jsonb")
+    private java.util.Map<String, String> representativeContacts = new java.util.HashMap<>();
+
+    public void setRepresentativeContacts(java.util.Map<String, String> contacts) {
+        this.representativeContacts = contacts == null ? new java.util.HashMap<>() : new java.util.HashMap<>(contacts);
+    }
+
+    @Column(name = "representative_position")
+    private Integer representativePosition;
+
+    public void setRepresentativePosition(Integer position) { this.representativePosition = position; }
+
     @Column(name = "start_number", nullable = false)
     private int startNumber;
 
@@ -48,8 +61,8 @@ public class CrewEntry extends VersionedEntity {
 
     public void updateDetails(String crewName, String regionOrClub, String representative, int startNumber) {
         var validatedName = requireText(crewName, "crewName");
-        var validatedRegion = requireText(regionOrClub, "regionOrClub");
-        var validatedRepresentative = requireText(representative, "representative");
+        var validatedRegion = regionOrClub == null ? "" : regionOrClub;
+        var validatedRepresentative = representative == null ? "" : representative;
         if (startNumber <= 0) {
             throw new IllegalArgumentException("startNumber must be positive");
         }

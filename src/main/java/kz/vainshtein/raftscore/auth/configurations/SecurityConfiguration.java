@@ -70,7 +70,7 @@ class SecurityConfiguration {
                         .access(AuthorizationPolicies.fullAccess())
                         .requestMatchers("/api/category-templates", "/api/category-templates/**", "/api/seat-names", "/api/seat-names/**")
                         .access(AuthorizationPolicies.fullAccess())
-                        .requestMatchers("/api/competitions/*/entries/*")
+                        .requestMatchers("/api/crew-search", "/api/competitions/*/entries/*")
                         .access(AuthorizationPolicies.fullAccess())
                         .requestMatchers("/api/competitions/*/disciplines/*/categories/*/attempt-grid")
                         .access(AuthorizationPolicies.fullAccess())

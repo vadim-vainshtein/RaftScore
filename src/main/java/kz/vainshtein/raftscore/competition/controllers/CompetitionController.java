@@ -111,6 +111,7 @@ class CompetitionController {
         }
         competition.updateDetails(details.title(), details.startDate(), details.endDate(), details.location(),
                 details.timeZone(), details.description(), details.admissionConfirmationRequired());
+        competition.setRepresentativeFields(request.representativeFields());
         repository.flush();
         return CompetitionResponse.from(competition);
     }
@@ -186,7 +187,7 @@ class CompetitionController {
                          @NotBlank @Pattern(regexp = "[^\\x00]*") String location,
                          @NotBlank @Pattern(regexp = "[^\\x00]*") String timeZone,
                          @Pattern(regexp = "[^\\x00]*") String description,
-                         @NotNull Boolean admissionConfirmationRequired) {
+                         @NotNull Boolean admissionConfirmationRequired, Map<String, String> representativeFields) {
         // PostgreSQL and JSON clients share the conventional four-digit ISO calendar range.
         void validateDates() {
             if (!supportedDate(startDate) || (endDate != null && !supportedDate(endDate))) {
@@ -200,9 +201,11 @@ class CompetitionController {
 
         Competition toCompetition() {
             validateDates();
-            return Competition.builder().title(title).startDate(startDate).endDate(endDate).location(location)
+            var competition = Competition.builder().title(title).startDate(startDate).endDate(endDate).location(location)
                     .timeZone(timeZone).description(description)
                     .admissionConfirmationRequired(admissionConfirmationRequired).build();
+            competition.setRepresentativeFields(representativeFields);
+            return competition;
         }
     }
 
@@ -211,22 +214,22 @@ class CompetitionController {
                          @NotBlank @Pattern(regexp = "[^\\x00]*") String location,
                          @NotBlank @Pattern(regexp = "[^\\x00]*") String timeZone,
                          @Pattern(regexp = "[^\\x00]*") String description,
-                         @NotNull Boolean admissionConfirmationRequired,
+                         @NotNull Boolean admissionConfirmationRequired, Map<String, String> representativeFields,
                          @NotNull @PositiveOrZero @Digits(integer = 19, fraction = 0) @DecimalMax("9223372036854775807")
                          @Schema(implementation = Long.class, type = "integer", format = "int64") BigDecimal version) {
         CreateRequest details() {
             return new CreateRequest(title, startDate, endDate, location, timeZone, description,
-                    admissionConfirmationRequired);
+                    admissionConfirmationRequired, representativeFields);
         }
     }
 
     record CompetitionResponse(Long id, long version, String title, LocalDate startDate, LocalDate endDate,
                                String location, String timeZone, String description,
-                               boolean admissionConfirmationRequired, CompetitionStatus status) {
+                               boolean admissionConfirmationRequired, CompetitionStatus status, Map<String, String> representativeFields) {
         static CompetitionResponse from(Competition competition) {
             return new CompetitionResponse(competition.getId(), competition.getVersion(), competition.getTitle(),
                     competition.getStartDate(), competition.getEndDate(), competition.getLocation(),
-                    competition.getTimeZone(), competition.getDescription(), competition.isAdmissionConfirmationRequired(), competition.getStatus());
+                    competition.getTimeZone(), competition.getDescription(), competition.isAdmissionConfirmationRequired(), competition.getStatus(), competition.getRepresentativeFields());
         }
     }
 }

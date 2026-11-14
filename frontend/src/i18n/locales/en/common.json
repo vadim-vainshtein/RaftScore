@@ -60,7 +60,25 @@
     "participantConflict": "Already in crew {{name}} in this category.",
     "editSeats": "Edit seat names",
     "seat": "Seat {{number}}",
-    "addSeat": "Add seat"
+    "addSeat": "Add seat",
+    "phone": "Phone",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram",
+    "email": "Email",
+    "representativeChoice": "Representative from roster",
+    "newRepresentative": "Another person",
+    "useSearch": "Use roster",
+    "policy": {
+      "HIDDEN": "Hidden",
+      "OPTIONAL": "Optional",
+      "REQUIRED": "Required"
+    },
+    "chooseTarget": "Choose a competition and category for registration.",
+    "sizeMismatch": "The roster size does not match the selected category.",
+    "representativeSettings": "Representative fields",
+    "categorySeats": "Categories and seat names",
+    "editCategory": "Edit category",
+    "rosterVariant": "Roster variant {{number}}"
   },
   "discipline": {
     "competition": "Competition",

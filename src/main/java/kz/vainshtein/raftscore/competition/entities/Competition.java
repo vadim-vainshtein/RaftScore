@@ -64,6 +64,16 @@ public class Competition extends VersionedEntity {
     @Column(name = "admission_confirmation_required", nullable = false)
     private boolean admissionConfirmationRequired;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "representative_fields", nullable = false, columnDefinition = "jsonb")
+    private java.util.Map<String, String> representativeFields = new java.util.HashMap<>(java.util.Map.of("representative", "REQUIRED", "phone", "OPTIONAL", "whatsapp", "OPTIONAL", "telegram", "OPTIONAL", "email", "OPTIONAL"));
+
+    public void setRepresentativeFields(java.util.Map<String, String> fields) {
+        if (fields == null) return;
+        if (!fields.keySet().equals(java.util.Set.of("representative", "phone", "whatsapp", "telegram", "email")) || fields.values().stream().anyMatch(v -> v == null || !java.util.Set.of("HIDDEN", "OPTIONAL", "REQUIRED").contains(v))) throw new IllegalArgumentException("invalid representative fields");
+        this.representativeFields = new java.util.HashMap<>(fields);
+    }
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "tiebreak_discipline_id")
     private Discipline tiebreakDiscipline;

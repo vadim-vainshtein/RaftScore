@@ -134,3 +134,17 @@ test('ignores discarded seat labels when crew size shrinks', async () => {
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/category-templates', 'POST', expect.objectContaining({seatLabels: ['']})))
 })
+
+test('manages the seat name dictionary within a category editor', async () => {
+  vi.mocked(apiRequest).mockImplementation(async path => path.includes('includeDeleted=true') ? [{id: 7, name: 'Bow', deleted: false, version: 2}] : path === '/api/seat-names' ? [{name: 'Bow'}] : path.includes('/duplicate?') ? {exists: false} : {content: [item], totalPages: 1})
+  vi.mocked(csrfRequest).mockResolvedValue({id: 7, name: 'Front', deleted: true, version: 3})
+  render(<Categories/>)
+  await screen.findByText('R4 / Open')
+  fireEvent.click(screen.getByRole('button', {name: 'Create template'}))
+  fireEvent.click(screen.getByText('Seat names'))
+  const name = await screen.findByDisplayValue('Bow')
+  fireEvent.change(name, {target: {value: 'Front'}})
+  fireEvent.click(screen.getByRole('checkbox'))
+  fireEvent.click(screen.getAllByRole('button', {name: 'Save'}).at(-1)!)
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/seat-names/7', 'PUT', {name: 'Front', deleted: true, version: 2}))
+})

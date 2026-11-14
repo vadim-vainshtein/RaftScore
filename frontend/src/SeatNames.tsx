@@ -6,7 +6,7 @@ import {apiRequest, ApiError, csrfRequest} from './api/client'
 type Seat = {id: number, name: string, deleted: boolean, version: number}
 type ErrorKey = 'error' | 'seatDuplicate'
 
-export default function SeatNames() {
+export default function SeatNames({onChanged}: {onChanged?: () => void}) {
   const {t} = useTranslation('categories')
   const [items, setItems] = useState<Seat[]>([])
   const [error, setError] = useState<ErrorKey | null>(null)
@@ -22,7 +22,7 @@ export default function SeatNames() {
       const saved = await csrfRequest<Seat>(`/api/seat-names/${item.id}`, 'PUT', {
         name: item.name, deleted: item.deleted, version: item.version,
       })
-      update(saved)
+      update(saved); onChanged?.()
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 && (e.body as {code?: string})?.code === 'seat_name.duplicate' ? 'seatDuplicate' : 'error')
     } finally { setBusy(false) }

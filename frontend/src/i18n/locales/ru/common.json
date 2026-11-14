@@ -62,7 +62,25 @@
     "participantConflict": "Уже состоит в экипаже {{name}} этой категории.",
     "editSeats": "Изменить названия мест",
     "seat": "Место {{number}}",
-    "addSeat": "Добавить место"
+    "addSeat": "Добавить место",
+    "phone": "Телефон",
+    "whatsapp": "WhatsApp",
+    "telegram": "Telegram",
+    "email": "Электронная почта",
+    "representativeChoice": "Представитель из состава",
+    "newRepresentative": "Другой человек",
+    "useSearch": "Использовать состав",
+    "policy": {
+      "HIDDEN": "Скрыто",
+      "OPTIONAL": "Необязательно",
+      "REQUIRED": "Обязательно"
+    },
+    "chooseTarget": "Выберите соревнование и категорию для регистрации.",
+    "sizeMismatch": "Число участников не соответствует выбранной категории.",
+    "representativeSettings": "Поля представителя",
+    "categorySeats": "Категории и названия мест",
+    "editCategory": "Изменить категорию",
+    "rosterVariant": "Вариант состава {{number}}"
   },
   "discipline": {
     "competition": "Соревнование",

@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import Competitions from './Competitions'
 import {apiRequest, csrfRequest} from './api/client'
@@ -33,7 +33,7 @@ test('opens the latest details directly for editing from the list', async () => 
 
 test('starts a created competition using its version', async () => {
   const details = {id: 1, version: 7, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
-  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : {content: [{...details, state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? [] : {content: [{...details, state: 'CREATED', categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
   vi.mocked(csrfRequest).mockResolvedValue({...details, status: 'STARTED', version: 8})
   render(<Competitions readOnly={false}/>);
   fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
@@ -49,6 +49,7 @@ test('hides edit for completed competitions in the list and details', async () =
   fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
   expect(await screen.findByRole('heading', {name: 'River race'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Edit category'})).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', {name: 'Back to list'}))
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
 })
@@ -60,4 +61,16 @@ test('opens completed details instead of editing if status changed since listing
   expect(await screen.findByRole('heading', {name: 'River race'})).toBeInTheDocument()
   expect(screen.queryByLabelText('Title')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
+})
+
+test('edits seat labels inside the selected competition category', async () => {
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? {id: 1, version: 0, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'} : path.endsWith('/categories') ? [{id: 2, displayName: 'R1 / Open', crewSize: 1, version: 4, seatLabels: ['Bow']}] : {content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state: 'CREATED', categoryCount: 1, crewCount: 0}], page: 0, totalPages: 1, totalElements: 1})
+  vi.mocked(csrfRequest).mockResolvedValue({id: 2, displayName: 'R1 / Open', crewSize: 1, version: 5, seatLabels: ['Front']})
+  render(<Competitions readOnly={false}/>)
+  fireEvent.click(await screen.findByRole('button', {name: 'Open'}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit category'}))
+  const editor = screen.getByRole('group', {name: 'Edit category: R1 / Open'})
+  fireEvent.change(within(editor).getByLabelText('Seat 1'), {target: {value: 'Front'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2/seat-labels', 'PUT', {version: 4, seatLabels: ['Front']}))
 })
