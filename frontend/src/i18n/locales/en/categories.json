@@ -18,7 +18,7 @@
   "duplicate": "A template with this class and scoring group already exists.",
   "lookupIncomplete": "Duplicate check is incomplete.",
   "invalid": "Enter both labels and a whole crew size from 1 to 2147483647.",
-  "error": "Could not complete the request. Please try again.",
+  "error": "Could not save. Reload and try again.",
   "conflict": "This template has changed. Your edits are preserved; cancel and reload before trying again.",
   "forbidden": "Access denied.",
   "notFound": "This template no longer exists.",
@@ -36,5 +36,13 @@
   "lookupFailed": "Duplicate check failed. Check your connection and try again.",
   "reload": "Reload latest",
   "discard": "Discard changes",
-  "retry": "Retry"
+  "retry": "Retry",
+  "seat": "Seat {{number}}",
+  "member": "Participant #{{number}}",
+  "addSeat": "Add seat label",
+  "seatNames": "Seat names",
+  "deleted": "Deleted",
+  "name": "Name",
+  "seatDuplicate": "This seat name already exists.",
+  "seatInvalid": "Seat names may contain at most 200 characters."
 }

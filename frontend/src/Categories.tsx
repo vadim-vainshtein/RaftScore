@@ -1,15 +1,15 @@
 import {useCallback, useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Box, Button, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography} from '@mui/material'
+import {Autocomplete, Box, Button, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography} from '@mui/material'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, fieldErrorKey, type FieldErrorKey} from './api/errors'
-type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean, version: number}
+type Template = {id: number, classLabel: string, scoringGroupLabel: string, crewSize: number, displayName: string, archived: boolean, version: number, seatLabels?: string[]}
 type Page = {content: Template[], totalPages: number}
-type Form = {classLabel: string, scoringGroupLabel: string, crewSize: string}
+type Form = {classLabel: string, scoringGroupLabel: string, crewSize: string, seatLabels: string[]}
 export type Draft = {form: Form, editing: Template | null, dirty: boolean}
 type Fields = Partial<Record<keyof Form, boolean | FieldErrorKey>>
-const blank: Form = {classLabel: '', scoringGroupLabel: '', crewSize: ''}
+const blank: Form = {classLabel: '', scoringGroupLabel: '', crewSize: '', seatLabels: []}
 const endpoint = '/api/category-templates'
 const validLabel = (value: string) => !!value.trim() && !value.includes('\0')
 export default function Categories({initialDraft = null, onDraft = () => {}}: {initialDraft?: Draft | null, onDraft?: (draft: Draft | null) => void}) {
@@ -21,6 +21,8 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [fields, setFields] = useState<Fields>({})
+  const [seatNames, setSeatNames] = useState<string[]>([])
+  useEffect(() => { apiRequest<{name: string}[]>('/api/seat-names').then(items => setSeatNames(items.map(item => item.name))).catch(() => setSeatNames([])) }, [revision])
   const [lookupRevision, setLookupRevision] = useState(0)
   const [lookup, setLookup] = useState<{key: string, exists?: boolean, failed?: boolean} | null>(null)
   const form = draft?.form, editing = draft?.editing, dirty = draft?.dirty
@@ -68,7 +70,7 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
   const close = () => { if (!busyRef.current && (!dirty || window.confirm(t('leave')))) { setDraft(null); setError(null); setFields({}); setRevision(v => v + 1) } }
   const start = (item?: Template) => {
     if (busyRef.current || (dirty && !window.confirm(t('leave')))) return
-    setDraft({editing: item ?? null, form: item ? {classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: String(item.crewSize)} : blank, dirty: false}); setError(null); setFields({})
+    setDraft({editing: item ?? null, form: item ? {classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: String(item.crewSize), seatLabels: item.seatLabels ?? []} : blank, dirty: false}); setError(null); setFields({})
   }
   const save = async (event: FormEvent) => {
     event.preventDefault()
@@ -76,9 +78,11 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
     const size = Number(form.crewSize)
     const invalid: Fields = {classLabel: !validLabel(form.classLabel), scoringGroupLabel: !validLabel(form.scoringGroupLabel), crewSize: !/^\d+$/.test(form.crewSize) || !Number.isInteger(size) || size < 1 || size > 2147483647}
     if (Object.values(invalid).some(Boolean)) { setFields(invalid); setError('invalid'); return }
+    const labels = form.seatLabels.slice(0, size)
+    if (labels.some(label => label.length > 200 || label.includes('\0'))) { setError('seatInvalid'); return }
     if (!begin()) return
     setError(null); setFields({})
-    try { await csrfRequest(editing ? `${endpoint}/${editing.id}` : endpoint, editing ? 'PUT' : 'POST', {...form, crewSize: size, ...(editing ? {version: editing.version} : {})}); setDraft(null); setRevision(v => v + 1) }
+    try { await csrfRequest(editing ? `${endpoint}/${editing.id}` : endpoint, editing ? 'PUT' : 'POST', {...form, crewSize: size, seatLabels: labels, ...(editing ? {version: editing.version} : {})}); setDraft(null); setRevision(v => v + 1) }
     catch (e) { fail(e) } finally { end() }
   }
   const toggle = async (item: Template) => {
@@ -90,7 +94,7 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
   const reload = async () => {
     if (!begin()) return
     try {
-      if (editing) { const item = await apiRequest<Template>(`${endpoint}/${editing.id}`); setDraft({editing: item, form: {classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: String(item.crewSize)}, dirty: false}) }
+      if (editing) { const item = await apiRequest<Template>(`${endpoint}/${editing.id}`); setDraft({editing: item, form: {classLabel: item.classLabel, scoringGroupLabel: item.scoringGroupLabel, crewSize: String(item.crewSize), seatLabels: item.seatLabels ?? []}, dirty: false}) }
       setError(null); setFields({}); setRevision(v => v + 1)
     } catch (e) { fail(e) } finally { end() }
   }
@@ -101,6 +105,11 @@ export default function Categories({initialDraft = null, onDraft = () => {}}: {i
     {form && <Box component="form" onSubmit={save} noValidate sx={{display: 'grid', gap: 2, my: 2, maxWidth: 500}}>
       {dirty && <Typography>{t('dirty')}</Typography>}
       {(['classLabel', 'scoringGroupLabel', 'crewSize'] as const).map(key => <TextField key={key} label={t(key === 'classLabel' ? 'class' : key === 'scoringGroupLabel' ? 'group' : 'size')} value={form[key]} disabled={busy} error={!!fields[key]} helperText={fields[key] ? typeof fields[key] === 'string' ? common(fields[key] as FieldErrorKey) : t(key === 'crewSize' ? 'sizeError' : 'labelError') : undefined} onChange={e => {if (draft) setDraft({...draft, form: {...form, [key]: e.target.value}, dirty: true})}} required/>)}
+      {Array.from({length: Math.min(Math.max(0, Number(form.crewSize) || 0), Math.max(8, form.seatLabels.length))}, (_, index) => form.seatLabels[index] ?? '').map((label, index) => <Autocomplete key={index}
+        freeSolo options={seatNames} inputValue={label} disabled={busy}
+        onInputChange={(_, value) => { const labels = Array.from({length: Math.max(index + 1, form.seatLabels.length)}, (_, i) => form.seatLabels[i] ?? ''); labels[index] = value; if (draft) setDraft({...draft, form: {...form, seatLabels: labels}, dirty: true}) }}
+        renderInput={params => <TextField {...params} label={t('seat', {number: index + 1})} placeholder={t('member', {number: index + 1})}/>}/>) }
+      <Button disabled={busy || !/^\d+$/.test(form.crewSize) || Math.max(8, form.seatLabels.length) >= Number(form.crewSize)} onClick={() => {if (draft) setDraft({...draft, form: {...form, seatLabels: Array.from({length: Math.max(8, form.seatLabels.length) + 1}, (_, i) => form.seatLabels[i] ?? '')}, dirty: true})}}>{t('addSeat')}</Button>
       <Typography>{t('preview')}: {form.classLabel} / {form.scoringGroupLabel}</Typography>
       {duplicate && <Typography role="status">{t('duplicate')}</Typography>}{lookup?.key === lookupKey && lookup.failed && <Typography role="alert">{t('lookupFailed')} <Button onClick={() => {setLookup(null); setLookupRevision(v => v + 1)}}>{t('retry')}</Button></Typography>}
       <Box><Button type="submit" disabled={busy || lookupPending || (!!lookupKey && lookup?.key === lookupKey && !!lookup.failed) || error === 'conflict'}>{t('save')}</Button><Button onClick={close} disabled={busy}>{t('cancel')}</Button></Box>

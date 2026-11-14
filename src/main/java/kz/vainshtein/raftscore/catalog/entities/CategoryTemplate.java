@@ -1,6 +1,9 @@
 package kz.vainshtein.raftscore.catalog.entities;
 
 import jakarta.persistence.Column;
+import java.util.List;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -36,6 +39,15 @@ public class CategoryTemplate extends VersionedEntity {
     @Setter
     @Column(nullable = false)
     private boolean archived;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "seat_labels", nullable = false, columnDefinition = "jsonb")
+    private List<String> seatLabels = List.of();
+
+    public void setSeatLabels(List<String> labels) {
+        if (labels == null || labels.size() > crewSize || labels.stream().anyMatch(s -> s == null || s.length() > 200 || s.indexOf('\0') >= 0)) throw new IllegalArgumentException("invalid seat labels");
+        this.seatLabels = List.copyOf(labels);
+    }
 
     @Builder
     private CategoryTemplate(String classLabel, String scoringGroupLabel, int crewSize, boolean archived) {

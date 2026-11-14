@@ -96,3 +96,20 @@ test('localizes known API errors and never displays server details', async () =>
   expect(screen.getByRole('alert')).toHaveTextContent('Этот стартовый номер уже используется.')
   await act(async () => { await i18n.changeLanguage('en') })
 })
+
+test('edits category seat labels and uses them in the crew form', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path === '/api/seat-names' ? Promise.resolve([{name: 'Bow'}]) : path.endsWith('/categories') ? Promise.resolve([{id: 2, displayName: 'R1', crewSize: 1, version: 3, seatLabels: []}]) : previous(path))
+  vi.mocked(csrfRequest).mockResolvedValue({id: 2, displayName: 'R1', crewSize: 1, version: 4, seatLabels: ['Bow']})
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Edit seat names'}))
+  fireEvent.change(await screen.findByLabelText('Seat 1'), {target: {value: 'Bow'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2/seat-labels', 'PUT', {version: 3, seatLabels: ['Bow']}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Create crew'}))
+  expect(screen.getByRole('group', {name: 'Bow'})).toBeInTheDocument()
+})

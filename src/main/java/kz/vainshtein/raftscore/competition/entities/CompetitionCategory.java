@@ -3,6 +3,9 @@ package kz.vainshtein.raftscore.competition.entities;
 import java.util.Objects;
 
 import jakarta.persistence.Column;
+import java.util.List;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -39,6 +42,15 @@ public class CompetitionCategory extends VersionedEntity {
 
     @Column(name = "crew_size", nullable = false)
     private int crewSize;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "seat_labels", nullable = false, columnDefinition = "jsonb")
+    private List<String> seatLabels = List.of();
+
+    public void setSeatLabels(List<String> labels) {
+        if (labels == null || labels.size() > crewSize || labels.stream().anyMatch(s -> s == null || s.length() > 200 || s.indexOf('\0') >= 0)) throw new IllegalArgumentException("invalid seat labels");
+        this.seatLabels = List.copyOf(labels);
+    }
 
     @Builder
     private CompetitionCategory(Competition competition, String classLabel, String scoringGroupLabel, int crewSize) {

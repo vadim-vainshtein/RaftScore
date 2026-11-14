@@ -49,24 +49,28 @@ class CompetitionCategoryControllerIntegrationTest extends PostgreSqlIntegration
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void createsIndependentSnapshot() throws Exception {
         try {
+            template.setSeatLabels(java.util.List.of("Bow", "", "Stern"));
+            template = templates.saveAndFlush(template);
             var response = mvc.perform(post("/api/competitions/{id}/categories", competition.getId())
                     .with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                     .content("{\"templateId\":" + template.getId() + "}"))
                     .andExpect(status().isCreated()).andExpect(jsonPath("$.competitionId").value(competition.getId()))
                     .andExpect(jsonPath("$.classLabel").value("R4")).andExpect(jsonPath("$.scoringGroupLabel").value("Open"))
-                    .andExpect(jsonPath("$.crewSize").value(4)).andExpect(jsonPath("$.displayName").value("R4 / Open"))
+                    .andExpect(jsonPath("$.crewSize").value(4)).andExpect(jsonPath("$.seatLabels[2]").value("Stern")).andExpect(jsonPath("$.displayName").value("R4 / Open"))
                     .andReturn().getResponse();
             Number id = JsonPath.read(response.getContentAsString(), "$.id");
             assertThat(response.getHeader("Location")).isEqualTo("/api/competitions/" + competition.getId() + "/categories/" + id);
             template.setClassLabel("R6");
             template.setScoringGroupLabel("Women");
             template.setCrewSize(6);
+            template.setSeatLabels(java.util.List.of("Changed"));
             template.setArchived(true);
             templates.saveAndFlush(template);
             var snapshot = categories.findById(id.longValue()).orElseThrow();
             assertThat(snapshot.getClassLabel()).isEqualTo("R4");
             assertThat(snapshot.getScoringGroupLabel()).isEqualTo("Open");
             assertThat(snapshot.getCrewSize()).isEqualTo(4);
+            assertThat(snapshot.getSeatLabels()).containsExactly("Bow", "", "Stern");
         } finally {
             jdbc.update("delete from competition_categories where competition_id = ?", competition.getId());
             competitions.deleteById(competition.getId());
@@ -121,6 +125,27 @@ class CompetitionCategoryControllerIntegrationTest extends PostgreSqlIntegration
         mvc.perform(post(url).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"templateId\":" + template.getId() + "}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("category_template.archived"));
         assertThat(categories.count()).isZero();
+    }
+
+    @Test
+    void editsExistingCategorySeatsAndRestoresDeletedName() throws Exception {
+        var category = categories.saveAndFlush(kz.vainshtein.raftscore.competition.entities.CompetitionCategory.builder()
+                .competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        jdbc.update("insert into seat_names(name, deleted) values ('Restored seat', true)");
+        var url = "/api/competitions/" + competition.getId() + "/categories/" + category.getId() + "/seat-labels";
+        var body = "{\"version\":0,\"seatLabels\":[\"Restored seat\",\"\",\"Stern\"]}";
+        mvc.perform(put(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mvc.perform(put(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.seatLabels[0]").value("Restored seat"))
+                .andExpect(jsonPath("$.classLabel").value("R4")).andExpect(jsonPath("$.crewSize").value(4));
+        assertThat(jdbc.queryForObject("select deleted from seat_names where name = 'Restored seat'", Boolean.class)).isFalse();
+        assertThat(jdbc.queryForObject("select version from seat_names where name = 'Restored seat'", Long.class)).isEqualTo(1);
+        mvc.perform(put(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isConflict());
+        jdbc.update("update seat_names set deleted = true where name = 'Restored seat'");
+        mvc.perform(put(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"version\":1,\"seatLabels\":[\"Restored seat\",\"\",\"Stern\"]}")).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select deleted from seat_names where name = 'Restored seat'", Boolean.class)).isTrue();
+        assertThat(template.getSeatLabels()).isEmpty();
     }
 
     @Test

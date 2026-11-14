@@ -37,17 +37,18 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequiredArgsConstructor
 class CategoryTemplateController {
     private final CategoryTemplateRepository repository;
+    private final kz.vainshtein.raftscore.catalog.SeatNameDictionary seatNames;
 
     record Details(@NotBlank @Pattern(regexp = "[^\\x00]*") String classLabel, @NotBlank @Pattern(regexp = "[^\\x00]*") String scoringGroupLabel,
-                   @Schema(implementation = Integer.class, type = "integer", format = "int32", minimum = "1", maximum = "2147483647") @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal crewSize) { }
+                   @Schema(implementation = Integer.class, type = "integer", format = "int32", minimum = "1", maximum = "2147483647") @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal crewSize, List<String> seatLabels) { }
     record Edit(@NotBlank @Pattern(regexp = "[^\\x00]*") String classLabel, @NotBlank @Pattern(regexp = "[^\\x00]*") String scoringGroupLabel,
-                @Schema(implementation = Integer.class, type = "integer", format = "int32", minimum = "1", maximum = "2147483647") @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal crewSize, @Schema(implementation = Long.class, type = "integer", format = "int64", minimum = "0", maximum = "9223372036854775807") @NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version) { }
+                @Schema(implementation = Integer.class, type = "integer", format = "int32", minimum = "1", maximum = "2147483647") @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal crewSize, @Schema(implementation = Long.class, type = "integer", format = "int64", minimum = "0", maximum = "9223372036854775807") @NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version, List<String> seatLabels) { }
     record Version(@Schema(implementation = Long.class, type = "integer", format = "int64", minimum = "0", maximum = "9223372036854775807") @NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version) { }
     record Template(long id, String classLabel, String scoringGroupLabel, int crewSize,
-                    String displayName, boolean archived, long version) {
+                    String displayName, boolean archived, long version, List<String> seatLabels) {
         static Template from(CategoryTemplate entity) {
             return new Template(entity.getId(), entity.getClassLabel(), entity.getScoringGroupLabel(),
-                    entity.getCrewSize(), entity.getDisplayName(), entity.isArchived(), entity.getVersion());
+                    entity.getCrewSize(), entity.getDisplayName(), entity.isArchived(), entity.getVersion(), entity.getSeatLabels());
         }
     }
     record TemplatePage(List<Template> content, int page, int size, long totalElements, int totalPages) { }
@@ -61,8 +62,10 @@ class CategoryTemplateController {
     @PostMapping
     @Transactional
     ResponseEntity<Template> create(@Valid @RequestBody Details request) {
-        var entity = repository.saveAndFlush(CategoryTemplate.builder().classLabel(request.classLabel())
-                .scoringGroupLabel(request.scoringGroupLabel()).crewSize(request.crewSize().intValueExact()).build());
+        var entity = CategoryTemplate.builder().classLabel(request.classLabel())
+                .scoringGroupLabel(request.scoringGroupLabel()).crewSize(request.crewSize().intValueExact()).build();
+        if (request.seatLabels() != null) setSeats(entity, request.seatLabels(), List.of());
+        repository.saveAndFlush(entity);
         return ResponseEntity.created(URI.create("/api/category-templates/" + entity.getId())).body(Template.from(entity));
     }
 
@@ -96,9 +99,12 @@ class CategoryTemplateController {
     @Transactional
     Template edit(@PathVariable Long id, @Valid @RequestBody Edit request) {
         var entity = find(id, request.version().longValueExact());
+        var previousSeats = List.copyOf(entity.getSeatLabels());
         entity.setClassLabel(request.classLabel());
         entity.setScoringGroupLabel(request.scoringGroupLabel());
         entity.setCrewSize(request.crewSize().intValueExact());
+        var seats = request.seatLabels() == null ? entity.getSeatLabels().subList(0, Math.min(entity.getSeatLabels().size(), entity.getCrewSize())) : request.seatLabels();
+        setSeats(entity, seats, previousSeats);
         return Template.from(repository.saveAndFlush(entity));
     }
 
@@ -146,6 +152,13 @@ class CategoryTemplateController {
                 ? repository.existsByClassLabelAndScoringGroupLabel(classLabel, scoringGroupLabel)
                 : repository.existsByClassLabelAndScoringGroupLabelAndIdNot(classLabel, scoringGroupLabel, excludeId));
     }
+
+    private void setSeats(CategoryTemplate entity, List<String> seats, List<String> previousSeats) {
+        entity.setSeatLabels(seats);
+        seatNames.registerIntroducedNames(previousSeats, seats);
+    }
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<ApiError> invalidSeats() { return ResponseEntity.badRequest().body(ApiError.of("request.validation_failed")); }
 
     private static class InvalidPageException extends RuntimeException { }
 

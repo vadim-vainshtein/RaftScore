@@ -83,8 +83,10 @@ class CompetitionSetupController {
             var group = draft.scoringGroupLabel() != null ? draft.scoringGroupLabel() : template == null ? null : template.getScoringGroupLabel();
             var size = draft.crewSize() != null ? draft.crewSize() : template == null ? null : template.getCrewSize();
             if (size == null) throw new IllegalArgumentException("crew size required");
-            result.add(categories.save(CompetitionCategory.builder().competition(competition).classLabel(classLabel)
-                    .scoringGroupLabel(group).crewSize(size).build()));
+            var category = CompetitionCategory.builder().competition(competition).classLabel(classLabel)
+                    .scoringGroupLabel(group).crewSize(size).build();
+            if (template != null) category.setSeatLabels(template.getSeatLabels().subList(0, Math.min(size, template.getSeatLabels().size())));
+            result.add(categories.save(category));
         }
         return result;
     }
