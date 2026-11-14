@@ -35,7 +35,7 @@ class DisciplineConfigurationController {
     private final EntityManager entityManager;
     private final PlacementPointsTableRepository tables;
 
-    record Configuration(@NotBlank String name, @NotNull DisciplineType type,
+    record Configuration(@Pattern(regexp = "[^\\x00]*") String name, @NotNull DisciplineType type,
                          @NotNull @Min(0) @JsonDeserialize(using = StrictInteger.class) Integer displayOrder,
                          @NotNull @JsonDeserialize(contentUsing = StrictLong.class) List<@NotNull Long> categoryIds,
                          @Positive @JsonDeserialize(using = StrictInteger.class) Integer gateCount,

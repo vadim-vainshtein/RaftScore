@@ -123,6 +123,27 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
     }
     @Test
     @Transactional
+    void standingsExposeTypeWhenDisciplineHasNoName() {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Race")
+                .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = category(competition, "Open");
+        var unnamed = discipline(competition, category);
+        unnamed.setName("");
+        var named = discipline(competition, category);
+        named.setName("Custom sprint");
+        var crew = result(unnamed, category, 1, 1, CalculatedResultStatus.FINISHED).getCrewEntry();
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(named).crewEntry(crew)
+                .place(1).status(CalculatedResultStatus.FINISHED).points(10).build());
+        entityManager.flush(); entityManager.clear();
+
+        var breakdown = standings.standings(category.getId()).getFirst().disciplines();
+        assertThat(breakdown).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.DisciplineResult::disciplineName)
+                .containsExactlyInAnyOrder("SPRINT", "Custom sprint");
+        assertThat(disciplines.findById(unnamed.getId()).orElseThrow().getName()).isEmpty();
+    }
+
+    @Test
+    @Transactional
     void tiebreakRequiresResultsForTheWholeEqualTotalGroup() {
         var competition = competitions.saveAndFlush(Competition.builder().title("Race")
                 .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());

@@ -102,15 +102,16 @@ class DisciplineRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
     }
     @Test
     void rejectsInvalidValuesInEntityAndDatabase() {
-        assertThatThrownBy(() -> Discipline.builder().competition(newCompetition()).name(" ")
-                .type(DisciplineType.SPRINT).build()).isInstanceOf(IllegalArgumentException.class);
+        var unnamed = Discipline.builder().competition(newCompetition()).name(" ")
+                .type(DisciplineType.SPRINT).build();
+        assertThat(unnamed.getName()).isEmpty();
         assertThatThrownBy(() -> Discipline.builder().competition(newCompetition()).name("Sprint")
                 .type(DisciplineType.SPRINT).displayOrder(-1).build()).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Discipline.builder().competition(newCompetition()).name("Sprint")
                 .type(null).build()).isInstanceOf(NullPointerException.class);
         assertInvalidInsert(null, "Sprint", "SPRINT", 0);
         assertInvalidInsert(-1L, "Sprint", "SPRINT", 0);
-        assertInvalidWithOwner(" ", "SPRINT", 0);
+        assertInvalidWithOwner(null, "SPRINT", 0);
         assertInvalidWithOwner("Sprint", "OTHER", 0);
         assertInvalidWithOwner("Sprint", "SPRINT", -1);
     }

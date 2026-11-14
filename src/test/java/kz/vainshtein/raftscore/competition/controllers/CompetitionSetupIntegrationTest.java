@@ -26,7 +26,7 @@ class CompetitionSetupIntegrationTest extends PostgreSqlIntegrationTest {
     @BeforeEach void setup() { mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build(); }
     private static final String BODY = """
         {"competition":{"title":"Setup integration","startDate":"2026-05-01","location":"River","timeZone":"Asia/Almaty","admissionConfirmationRequired":true},
-         "categories":[{"classLabel":"R4","scoringGroupLabel":"Open","crewSize":4}],
+         "categories":[{"classLabel":"R4","scoringGroupLabel":"Open","crewSize":4,"seatLabels":["Bow","Stern"]}],
          "requirements":[{"name":"License","valueType":"TEXT","required":true,"displayOrder":0}],
          "disciplines":[{"name":"Slalom","type":"SLALOM","displayOrder":0,"categoryIndexes":[0],"gateCount":12,"attemptCount":2,
            "pointsTable":{"name":"Points","tiePolicy":"%s","rows":[{"place":1,"points":100}]}},
@@ -39,18 +39,38 @@ class CompetitionSetupIntegrationTest extends PostgreSqlIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content(BODY)).andExpect(status().isCreated()).andReturn();
         Number id = JsonPath.read(response.getResponse().getContentAsString(), "$.id");
         assertThat(jdbc.queryForObject("select count(*) from competition_categories where competition_id=?", Integer.class, id.longValue())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from category_templates where class_label='R4' and scoring_group_label='Open' and seat_labels::text like '%Bow%'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from seat_names where name='Bow'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from competition_categories where competition_id=? and seat_labels::text like '%Stern%'", Integer.class, id.longValue())).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from entry_requirements where competition_id=? and value_type='TEXT'", Integer.class, id.longValue())).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from disciplines d join slalom_configurations s on s.discipline_id=d.id join placement_points_tables p on p.id=d.points_table_id join placement_points_rows r on r.table_id=p.id where d.competition_id=? and s.gate_count=12 and r.points=100", Integer.class, id.longValue())).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from competitions c join disciplines d on d.id=c.tiebreak_discipline_id join disciplines q on q.id=d.qualification_discipline_id where c.id=?", Integer.class, id.longValue())).isEqualTo(1);
     }
     @Test @org.springframework.transaction.annotation.Transactional void snapshotsActiveTemplateWithOverrides() throws Exception {
         var template = jdbc.queryForObject("insert into category_templates (class_label, scoring_group_label, crew_size, archived) values ('R6', 'Women', 6, false) returning id", Long.class);
-        var body = BODY.replace("{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":4}",
-                "{\"templateId\":" + template + ",\"scoringGroupLabel\":\"Mixed\"}");
+        var body = BODY.replace("{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":4,\"seatLabels\":[\"Bow\",\"Stern\"]}",
+                "{\"templateId\":" + template + ",\"scoringGroupLabel\":\"Mixed\",\"seatLabels\":[\"Captain\"]}");
         var response = mvc.perform(post("/api/competitions/setup").with(user("admin").roles("FULL_ACCESS")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated()).andReturn();
         Number id = JsonPath.read(response.getResponse().getContentAsString(), "$.id");
         assertThat(jdbc.queryForObject("select count(*) from competition_categories where competition_id=? and class_label='R6' and scoring_group_label='Mixed' and crew_size=6", Integer.class, id.longValue())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from category_templates where class_label='R6' and scoring_group_label='Mixed' and crew_size=6 and seat_labels::text like '%Captain%'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select scoring_group_label from category_templates where id=?", String.class, template)).isEqualTo("Women");
+    }
+    @Test @org.springframework.transaction.annotation.Transactional void unchangedTemplateDoesNotCreateDuplicate() throws Exception {
+        var template = jdbc.queryForObject("insert into category_templates (class_label, scoring_group_label, crew_size, archived, seat_labels) values ('R2', 'Open', 2, false, '[\"Bow\"]'::jsonb) returning id", Long.class);
+        var body = BODY.replace("{\"classLabel\":\"R4\",\"scoringGroupLabel\":\"Open\",\"crewSize\":4,\"seatLabels\":[\"Bow\",\"Stern\"]}",
+                "{\"templateId\":" + template + ",\"classLabel\":\"R2\",\"scoringGroupLabel\":\"Open\",\"crewSize\":2,\"seatLabels\":[\"Bow\",\"\"]}");
+        mvc.perform(post("/api/competitions/setup").with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("select count(*) from category_templates where class_label='R2' and scoring_group_label='Open'", Integer.class)).isEqualTo(1);
+    }
+    @Test @org.springframework.transaction.annotation.Transactional void permitsUnnamedDisciplines() throws Exception {
+        var response = mvc.perform(post("/api/competitions/setup").with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(BODY.replace("\"name\":\"Slalom\"", "\"name\":\"\"")))
+                .andExpect(status().isCreated()).andReturn();
+        Number id = JsonPath.read(response.getResponse().getContentAsString(), "$.id");
+        assertThat(jdbc.queryForObject("select name from disciplines where competition_id=? and type='SLALOM'", String.class, id.longValue())).isEmpty();
     }
     @Test void invalidLateReferenceRollsBackAndSecurityApplies() throws Exception {
         var before = jdbc.queryForObject("select count(*) from competitions where title='Setup integration'", Integer.class);

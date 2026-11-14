@@ -97,10 +97,7 @@ public class Discipline extends VersionedEntity {
     }
 
     public void setName(String name) {
-        if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("name must not be blank");
-        }
-        this.name = name;
+        this.name = name == null || name.isBlank() ? "" : name;
     }
 
     public void setType(DisciplineType type) {

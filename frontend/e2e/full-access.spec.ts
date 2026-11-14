@@ -16,7 +16,7 @@ test('full access configures a race and corrects results', async ({ page }) => {
   await page.getByLabel('Title', { exact: true }).fill('Browser race')
   await page.getByLabel('Start date').fill('2026-04-01')
   await page.getByLabel('Location').fill('River')
-  await page.getByLabel('Time zone (IANA)').fill('UTC')
+  await page.getByLabel('Time zone (IANA)').selectOption('UTC')
   await page.getByRole('button', { name: 'Next' }).click()
   await page.getByRole('button', { name: 'Add custom category' }).click()
   await page.getByLabel('Class', { exact: true }).fill('R1')
