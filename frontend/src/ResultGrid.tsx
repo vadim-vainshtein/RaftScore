@@ -20,6 +20,7 @@ const fromResult = (r: Result): Row => ({duration: formatTime(r.durationCentisec
 
 export default function ResultGrid({fixedCompetition}: {fixedCompetition?: string}) {
   const {t} = useTranslation()
+  const tableRef = useRef<HTMLTableElement>(null)
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
@@ -66,6 +67,24 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
     target?.scrollIntoView?.({block: 'nearest', inline: 'nearest'})
     target?.focus()
   }, [busy, focusTarget, gate])
+  useEffect(() => {
+    const table = tableRef.current
+    const headers = table?.querySelectorAll('thead th')
+    if (!table || !headers || headers.length < 2) return
+    const updateOffsets = () => {
+      const first = headers[0].getBoundingClientRect().width
+      const second = headers[1].getBoundingClientRect().width
+      if (first && second) {
+        table.style.setProperty('--first-column-width', first + 'px')
+        table.style.setProperty('--second-column-end', (first + second) + 'px')
+      }
+    }
+    updateOffsets()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateOffsets)
+    observer?.observe(headers[0]); observer?.observe(headers[1])
+    window.addEventListener('resize', updateOffsets)
+    return () => {observer?.disconnect(); window.removeEventListener('resize', updateOffsets)}
+  }, [category])
   const dirtyCount = Object.values(rows).filter(r => r.dirty).length
   const dirty = dirtyCount > 0
   const completingNavigation = useRef(false)
@@ -151,12 +170,13 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
       else setError(e instanceof ApiError ? apiErrorKey(e) : 'saveFailed')
     } finally {setBusy(false)}
   }
-  return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    {!fixedCompetition && <TextField select label={t('startList.competition')} value={competition} disabled={busy || !!fixedCompetition} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setCompetition(e.target.value); setGate(1); setDiscipline(''); setCategory(''); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
+  return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
+    <Box className="section-heading"><Typography component="h2" variant="h6">{t('navigation.resultGrid')}</Typography>{category && <Typography color="text.secondary" variant="body2">{t('resultGrid.progress', {entered: slots.filter(slot => results.some(result => result.crewId === slot.crewId && result.attemptNumber === attempt)).length, total: slots.length})}</Typography>}</Box>
+    <Box className="filter-panel">{!fixedCompetition && <TextField select label={t('startList.competition')} value={competition} disabled={busy || !!fixedCompetition} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setCompetition(e.target.value); setGate(1); setDiscipline(''); setCategory(''); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
     {competition && <TextField select label={t('startList.discipline')} value={discipline} disabled={busy} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setDiscipline(e.target.value); setGate(1); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{disciplines.filter(d => ['SPRINT', 'SLALOM', 'LONG_RACE'].includes(d.type)).map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}
     {discipline && <TextField select label={t('startList.category')} value={category} disabled={busy} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setCategory(e.target.value); setGate(1); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {category && selected?.type === 'SLALOM' && <><TextField type="number" label={t('resultGrid.attempt')} disabled={busy} value={attempt} slotProps={{htmlInput: {min: 1, max: selected.attemptCount ?? 1}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= (selected.attemptCount ?? 1) && canLeave()) {setConflicts({}); setMissingGate(null); currentAttempt.current = n; setAttempt(n); setRows(Object.fromEntries(slots.map(s => {const r = results.find(x => x.crewId === s.crewId && x.attemptNumber === n); return [s.crewId, r ? fromResult(r) : empty()]})))}}}/><TextField type="number" label={t('resultGrid.gatePage')} value={gate} slotProps={{htmlInput: {min: 1, max: Math.max(1, Math.ceil((selected.gateCount ?? 1) / 20))}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= Math.ceil((selected.gateCount ?? 1) / 20)) setGate(n)}}/></>}
-    {category && <Typography>{t('resultGrid.statusHelp')}</Typography>}
+    </Box>{category && <Typography className="result-grid-hint" color="text.secondary" variant="body2">{t('resultGrid.statusHelp')}</Typography>}
     {error && <Typography role="alert">{t(error === 'invalid' ? 'resultGrid.invalid' : error === 'saveFailed' ? 'resultGrid.saveFailed' : error as 'apiError.network')}</Typography>}
     {missingGate && <Typography role="alert">{t('resultGrid.missingGate', {number: missingGate.number})}</Typography>}
     {savedNotice && <Typography role="status">{t('resultGrid.saved', savedNotice)}</Typography>}
@@ -174,7 +194,7 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
           <Button disabled={busy} onClick={() => void loadConflict(slot.crewId)}>{t('resultGrid.loadCurrent')}</Button>}
       </Box>
     })}
-    {category && <Box sx={{overflow: {xs: 'visible', md: 'auto'}, maxHeight: {md: '65vh'}}}><Box component="table" className="result-grid" sx={{borderCollapse: 'collapse', '& th': {position: 'sticky', top: 0, backgroundColor: 'background.paper', zIndex: 2}, '& th:nth-of-type(1), & td:nth-of-type(1)': {position: 'sticky', left: 0, minWidth: 180, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(2), & td:nth-of-type(2)': {position: 'sticky', left: 180, minWidth: 70, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(3), & td:nth-of-type(3)': {position: 'sticky', left: 250, backgroundColor: 'background.paper', zIndex: 3}}} onKeyDown={e => {const target = e.target as HTMLElement; const row = Number(target.dataset.row); const col = Number(target.dataset.col); if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {e.preventDefault(); const slot = slots[row]; if (slot) void save(slot.crewId, row)} else if (!(target instanceof HTMLSelectElement) && ['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key) && Number.isInteger(row) && Number.isInteger(col)) {e.preventDefault(); const next = e.key === 'ArrowUp' ? row - 1 : row + 1; document.querySelector<HTMLInputElement>(`[data-row="${next}"][data-col="${col}"]`)?.focus()}}}>
+    {category && <Box sx={{overflow: {xs: 'visible', md: 'auto'}, maxHeight: {md: '65vh'}}}><Box component="table" ref={tableRef} className="result-grid" sx={{borderCollapse: 'collapse', '& th': {position: 'sticky', top: 0, backgroundColor: 'background.paper', zIndex: 2}, '& th:nth-of-type(1), & td:nth-of-type(1)': {position: 'sticky', left: 0, minWidth: 180, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(2), & td:nth-of-type(2)': {position: 'sticky', left: 'var(--first-column-width, 180px)', minWidth: 70, backgroundColor: 'background.paper', zIndex: 3}, '& th:nth-of-type(3), & td:nth-of-type(3)': {position: 'sticky', left: 'var(--second-column-end, 250px)', backgroundColor: 'background.paper', zIndex: 3}}} onKeyDown={e => {const target = e.target as HTMLElement; const row = Number(target.dataset.row); const col = Number(target.dataset.col); if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {e.preventDefault(); const slot = slots[row]; if (slot) void save(slot.crewId, row)} else if (!(target instanceof HTMLSelectElement) && ['Enter', 'ArrowDown', 'ArrowUp'].includes(e.key) && Number.isInteger(row) && Number.isInteger(col)) {e.preventDefault(); const next = e.key === 'ArrowUp' ? row - 1 : row + 1; document.querySelector<HTMLInputElement>(`[data-row="${next}"][data-col="${col}"]`)?.focus()}}}>
       <thead><tr><th>{t('startList.crew')}</th><th>{t('resultGrid.attempt')}</th><th>{t('resultGrid.time')}</th><th>{t('resultGrid.penalty')}</th><th>{t('resultGrid.status')}</th>{selected?.type === 'SLALOM' && Array.from({length: Math.min(20, Math.max(0, (selected.gateCount ?? 0) - (gate - 1) * 20))}, (_, i) => <th key={i}>{t('resultGrid.gate')} {(gate - 1) * 20 + i + 1}</th>)}<th>{t('resultGrid.total')}</th><th>{t('resultGrid.best')}</th><th>{t('resultGrid.place')}</th><th>{t('resultGrid.save')}</th></tr></thead>
       <tbody>{slots.map((slot, index) => {
         const row = rows[slot.crewId]

@@ -206,7 +206,7 @@ function Shell({locale}: {locale: Locale}) {
   </Box>
 
   const navigation = (
-    <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth}}>
+    <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth, maxWidth: '100%', overflowX: 'hidden'}}>
       <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
       <List>
         {routes.filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
@@ -215,7 +215,7 @@ function Shell({locale}: {locale: Locale}) {
             component="a"
             href={`#${route.path}`}
             selected={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions')}
-            sx={{borderLeft: '4px solid transparent', '&.Mui-selected': {borderLeftColor: 'currentColor', '& .MuiListItemText-primary': {fontWeight: 'bold'}}}}
+            sx={{mx: 1, borderRadius: 2, color: '#d7e8e6', '&.Mui-selected': {backgroundColor: '#28565a', color: '#fff', '& .MuiListItemText-primary': {fontWeight: 'bold'}}, '&.Mui-selected:hover': {backgroundColor: '#306469'}}}
             aria-current={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions') ? 'page' : undefined}
             onClick={event => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
@@ -242,7 +242,7 @@ function Shell({locale}: {locale: Locale}) {
         <Toolbar sx={{flexWrap: 'nowrap', py: 1, gap: 1}}>
           <Button color="inherit" aria-label={t('app.openNavigation')} aria-expanded={menuOpen && !isDesktop} onClick={() => setMenuOpen(true)} sx={{display: {md: 'none'}, mr: 2}}>{t('app.menu')}</Button>
           <Box sx={{flexGrow: 1}}/>
-          <Typography>{auth(`roles.${principal.role}`)}</Typography><Box component="details" sx={{position: 'relative', '& summary': {maxWidth: {xs: 110, md: 240}, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}}><summary title={principal.username}>{principal.username}</summary><Box sx={{position: 'absolute', right: 0, top: '100%', p: 2, display: 'grid', gap: 1, minWidth: 180, backgroundColor: '#1d3140', boxShadow: 4}}>
+          <Typography>{auth(`roles.${principal.role}`)}</Typography><Box component="details" sx={{position: 'relative', '& summary': {maxWidth: {xs: 110, md: 240}, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}}><summary title={principal.username}>{principal.username}</summary><Box sx={{position: 'absolute', right: 0, top: '100%', p: 2, display: 'grid', gap: 1, minWidth: 180, backgroundColor: '#17383b', boxShadow: 4}}>
 
           <Button color="inherit" disabled={busy} onClick={logout}>{auth('logout')}</Button>
           <TextField select size="small" label={t('app.language')} value={locale} onChange={event => changeLanguage(event.target.value)} sx={{minWidth: 120, backgroundColor: 'background.paper', borderRadius: 1}}>
@@ -250,10 +250,10 @@ function Shell({locale}: {locale: Locale}) {
           </TextField></Box></Box>
         </Toolbar>
       </AppBar>
-      <Drawer variant="temporary" slotProps={{paper: {"aria-label": t('app.navigation')}}} open={menuOpen && !isDesktop} onClose={() => setMenuOpen(false)} sx={{display: {xs: 'block', md: 'none'}, '& .MuiDrawer-paper': {backgroundColor: '#1d3140', color: '#fff'}}}>
+      <Drawer variant="temporary" slotProps={{paper: {"aria-label": t('app.navigation')}}} open={menuOpen && !isDesktop} onClose={() => setMenuOpen(false)} sx={{display: {xs: 'block', md: 'none'}, '& .MuiDrawer-paper': {backgroundColor: '#17383b', color: '#fff'}}}>
         {navigation}
       </Drawer>
-      <Drawer variant="permanent" open sx={{display: {xs: 'none', md: 'block'}, width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': {width: drawerWidth, boxSizing: 'border-box', backgroundColor: '#1d3140', color: '#fff'}}}>
+      <Drawer variant="permanent" open sx={{display: {xs: 'none', md: 'block'}, width: drawerWidth, flexShrink: 0, '& .MuiDrawer-paper': {width: drawerWidth, boxSizing: 'border-box', backgroundColor: '#17383b', color: '#fff'}}}>
         {navigation}
       </Drawer>
       <Box component="main" id="main-content" tabIndex={-1} sx={{flexGrow: 1, minWidth: 0, p: {xs: 2, sm: 3}}}>

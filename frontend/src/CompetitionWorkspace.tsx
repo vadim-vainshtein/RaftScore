@@ -8,10 +8,12 @@ import Results from './Results'
 import ResultGrid from './ResultGrid'
 import ParallelSprint from './ParallelSprint'
 import {apiRequest, csrfRequest} from './api/client'
+import {formatDate} from './i18n/format'
+import {supportedLocale} from './i18n/supported-locales'
 
-type Competition = {id: number, title: string, version: number, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
+type Competition = {id: number, title: string, version: number, startDate?: string, endDate?: string | null, location?: string, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
 export default function CompetitionWorkspace({path, readOnly}: {path: string, readOnly: boolean}) {
-  const {t} = useTranslation()
+  const {t, i18n} = useTranslation()
   const id = /^\/workspace\/(\d+)(?:\/(results|result-grid|parallel-sprint|start-lists|crews|disciplines))?(?:\?.*)?$/.exec(path)?.[1]
   const [competition, setCompetition] = useState<Competition | null>(null)
   const [error, setError] = useState(false)
@@ -88,29 +90,15 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
     window.dispatchEvent(new CustomEvent('result-dirty-count', {detail}))
     if (!detail.busy) setCompletionDrafts(detail.count)
   }
-  return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    <Typography component="h1" variant="h5">{competition.title}</Typography>
-    <Typography>{t(`competition.states.${competition.status}`)}</Typography>
-    <Box sx={{pointerEvents: completing ? 'none' : undefined, '& a[aria-current]': {backgroundColor: 'primary.main', color: 'primary.contrastText', fontWeight: 700}}}>
-      <Button component="a" href={`#/workspace/${id}${query}`} aria-current={!section ? 'page' : ['crews', 'disciplines', 'start-lists'].includes(section) ? 'location' : undefined}>{t('workspace.preparation')}</Button>
-      {readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}
-      {crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}
-      {query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}
-      {!readOnly && competition.status !== 'COMPLETED' && <Button component="a" href={`#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}
-      {!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}
-      <Button component="a" href={`#/workspace/${id}/crews${query}`} aria-current={section === 'crews' ? 'page' : undefined}>{t('navigation.crews')}</Button>
-      <Button component="a" href={`#/workspace/${id}/disciplines${query}`} aria-current={section === 'disciplines' ? 'page' : undefined}>{t('navigation.disciplines')}</Button>
-      <Button component="a" href={`#/workspace/${id}/start-lists${query}`} aria-current={section === 'start-lists' ? 'page' : undefined} onClick={preserveQuery}>{t('navigation.startLists')}</Button>
-      <Typography variant="h6">{t('workspace.protocol')}</Typography>
-      <Button component="a" aria-current={section === 'results' ? 'page' : undefined} href={`#/workspace/${id}/results${query}`} onClick={preserveQuery}>{t('navigation.results')}</Button>
-      {competition.status === 'STARTED' && !readOnly && <>
-        <Typography variant="h6">{t('workspace.input')}</Typography>
-        <Button aria-current={section === 'result-grid' ? 'page' : undefined} component="a" href={`#/workspace/${id}/result-grid${queryForInput('result-grid', query)}`} onClick={preserveInputQuery('result-grid')}>{t('navigation.resultGrid')}</Button>
-      </>}
-      <Button component="a" href={`#/workspace/${id}/parallel-sprint${queryForInput('parallel-sprint', query)}`} onClick={preserveInputQuery('parallel-sprint')} aria-current={section === 'parallel-sprint' ? 'page' : undefined}>{t('navigation.parallelSprint')}</Button>
-      {!readOnly && competition.status === 'STARTED' && <Button disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}
-      <Button component="a" href="#/competitions">{t('competition.back')}</Button>
+  return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
+    <Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
+    <Box className="workspace-navigation" sx={{pointerEvents: completing ? 'none' : undefined}}>
+      <Box className="workspace-stage"><Button component="a" href={`#/workspace/${id}${query}`} aria-current={!section ? 'page' : ['crews', 'disciplines', 'start-lists'].includes(section) ? 'location' : undefined}>{t('workspace.preparation')}</Button>{(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="workspace-stage-links"><Button variant="outlined" component="a" href={`#/workspace/${id}/crews${query}`} aria-current={section === 'crews' ? 'page' : undefined}>{t('navigation.crews')}</Button><Button variant="outlined" component="a" href={`#/workspace/${id}/disciplines${query}`} aria-current={section === 'disciplines' ? 'page' : undefined}>{t('navigation.disciplines')}</Button><Button variant="outlined" component="a" href={`#/workspace/${id}/start-lists${query}`} aria-current={section === 'start-lists' ? 'page' : undefined} onClick={preserveQuery}>{t('navigation.startLists')}</Button></Box>}</Box>
+      {competition.status === 'STARTED' && !readOnly && <Box className="workspace-stage"><Button component="a" aria-current={section === 'result-grid' ? 'page' : undefined} href={`#/workspace/${id}/result-grid${queryForInput('result-grid', query)}`} onClick={preserveInputQuery('result-grid')}>{t('workspace.input')}</Button></Box>}
+      <Box className="workspace-stage"><Button component="a" aria-current={section === 'results' ? 'page' : undefined} href={`#/workspace/${id}/results${query}`} onClick={preserveQuery}>{t('workspace.protocol')}</Button><Box className="workspace-stage-links"><Button variant="outlined" component="a" href={`#/workspace/${id}/parallel-sprint${queryForInput('parallel-sprint', query)}`} onClick={preserveInputQuery('parallel-sprint')} aria-current={section === 'parallel-sprint' ? 'page' : undefined}>{t('navigation.parallelSprint')}</Button></Box></Box>
     </Box>
+    {(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>}
+    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
     <div inert={completing}>
       <fieldset disabled={completing} style={{border: 0, margin: 0, padding: 0, minWidth: 0}}>{body}</fieldset>

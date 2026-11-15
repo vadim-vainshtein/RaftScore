@@ -21,6 +21,7 @@ test('saves a versioned row with Ctrl+S and advances focus', async () => {
   fireEvent.mouseDown(await screen.findByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   const input = await screen.findByLabelText('Time A')
+  expect(screen.getByText('Entered 1 of 2')).toBeInTheDocument()
   fireEvent.change(input, {target: {value: '1:14.25'}})
   fireEvent.keyDown(input, {key: 's', ctrlKey: true})
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/categories/2/crews/4/attempts/1', 'PUT', expect.objectContaining({version: 7, durationCentiseconds: 7425})))

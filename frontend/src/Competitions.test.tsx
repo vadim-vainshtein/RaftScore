@@ -8,7 +8,9 @@ beforeEach(() => {vi.mocked(apiRequest).mockReset().mockResolvedValue({content: 
 afterEach(() => {cleanup(); window.location.hash = ''})
 test('lists, searches and paginates competitions for read-only users', async () => {
   render(<Competitions readOnly/>)
-  expect(await screen.findByText(/River race/)).toHaveTextContent('Categories: 2, crews: 4')
+  const card = (await screen.findByRole('heading', {name: 'River race'})).closest('article')!
+  expect(within(card).getByText('Categories: 2, crews: 4')).toBeInTheDocument()
+  expect(within(card).getByText('River')).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Create competition'})).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('Search title'), {target: {value: 'River'}})
   await waitFor(() => expect(vi.mocked(apiRequest)).toHaveBeenLastCalledWith(expect.stringContaining('search=River')))
