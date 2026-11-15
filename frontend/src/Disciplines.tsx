@@ -5,7 +5,7 @@ import {useTranslation} from 'react-i18next'
 import {apiRequest, csrfRequest} from './api/client'
 import {apiErrorKey} from './api/errors'
 
-type Competition = {id: number, title: string}
+type Competition = {id: number, title: string, status?: 'CREATED' | 'STARTED' | 'COMPLETED', state?: 'CREATED' | 'STARTED' | 'COMPLETED'}
 type Category = {id: number, displayName: string}
 type DisciplineType = 'SPRINT' | 'PARALLEL_SPRINT' | 'SLALOM' | 'LONG_RACE'
 const types: DisciplineType[] = ['SPRINT', 'PARALLEL_SPRINT', 'SLALOM', 'LONG_RACE']
@@ -13,7 +13,7 @@ type Discipline = {id: number, name: string, type: DisciplineType, displayOrder:
 type Draft = Omit<Discipline, 'id' | 'pointsTableId' | 'version' | 'resultsEntered' | 'status'> & {editing?: Discipline}
 const blank = (): Draft => ({name: '', type: 'SPRINT', displayOrder: 0, categoryIds: [], gateCount: null, attemptCount: null, qualificationDisciplineId: null})
 
-export default function Disciplines({readOnly, fixedCompetition, onReadinessChange, scoringAllowed = false}: {readOnly: boolean, fixedCompetition?: string, onReadinessChange?: () => void, scoringAllowed?: boolean}) {
+export default function Disciplines({readOnly, fixedCompetition, onReadinessChange, scoringAllowed = false, compositionEditing = true, competitionStatus, onDeleted, onDeletionStateChange}: {readOnly: boolean, fixedCompetition?: string, onReadinessChange?: () => void, scoringAllowed?: boolean, compositionEditing?: boolean, competitionStatus?: Competition['status'], onDeleted?: () => Promise<void>, onDeletionStateChange?: (busy: boolean) => void}) {
   const {t} = useTranslation()
   const [competitions, setCompetitions] = useState<Competition[]>([]), [competition, setCompetition] = useState(fixedCompetition ?? '')
   const [tables, setTables] = useState<{id: number, name: string | null}[]>([])
@@ -49,6 +49,12 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
       setDraft(null); setRevision(v => v + 1); onReadinessChange?.()
     } catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
+  const remove = async (item: Discipline) => {
+    if (!window.confirm(t('discipline.confirmDelete'))) return
+    setBusy(true); setError(''); onDeletionStateChange?.(true)
+    try {await csrfRequest(base + '/' + item.id, 'DELETE', {version: item.version}); setRevision(v => v + 1); onReadinessChange?.(); window.dispatchEvent(new Event('discipline-status-change')); await onDeleted?.()}
+    catch (e) {setError(apiErrorKey(e))} finally {setBusy(false); onDeletionStateChange?.(false)}
+  }
   const setPoints = async (item: Discipline, value: string) => {
     const selected = value ? Number(value) : null
     if (selected === item.pointsTableId || (item.resultsEntered && !window.confirm(t('discipline.confirmPoints')))) return
@@ -65,8 +71,8 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('discipline.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setItems([]); setCategories([]); setDraft(null); setError('')}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
     {competition && <>
-      {!readOnly && <Button disabled={busy} onClick={() => setDraft(blank())}>{t('discipline.create')}</Button>}
-      {items.map(item => <Box key={item.id}><Typography>{item.displayOrder} — {item.name || t(`discipline.types.${item.type}`)} — {item.categoryIds.map(id => categories.find(c => c.id === id)?.displayName).filter(Boolean).join(', ')} — {t(item.resultsEntered ? 'discipline.resultsEntered' : 'discipline.noResults')} — {t(`discipline.states.${item.status}`)}{item.type !== 'PARALLEL_SPRINT' && <> — {t('discipline.attemptCount')}: {item.type === 'SLALOM' ? item.attemptCount ?? '—' : 1}</>}</Typography>{!readOnly && item.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => void changeStatus(item, item.status === 'CREATED' ? 'STARTED' : 'COMPLETED')}>{t(item.status === 'CREATED' ? 'discipline.start' : 'discipline.complete')}</Button>}<Button component="a" href={disciplineLink(item, 'start-lists')}>{t('navigation.startLists')}</Button><Button component="a" href={disciplineLink(item, 'results')}>{t('navigation.results')}</Button>{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type !== 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'result-grid')}>{t('navigation.resultGrid')}</Button>}{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type === 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'parallel-sprint')}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <TextField select size="small" label={t('discipline.points')} value={item.pointsTableId ?? ''} disabled={busy || !!draft} onChange={e => void setPoints(item, e.target.value)}><MenuItem value="">{t('discipline.noPoints')}</MenuItem>{tables.map(table => <MenuItem key={table.id} value={table.id}>{table.name || `#${table.id}`}</MenuItem>)}</TextField>}{!readOnly && <Button disabled={busy} onClick={() => setDraft({...item, editing: item})}>{t('discipline.edit')}</Button>}</Box>)}
+      {!readOnly && compositionEditing && <Button disabled={busy} onClick={() => setDraft(blank())}>{t('discipline.create')}</Button>}
+      {items.map(item => <Box key={item.id}><Typography>{item.displayOrder} — {item.name || t(`discipline.types.${item.type}`)} — {item.categoryIds.map(id => categories.find(c => c.id === id)?.displayName).filter(Boolean).join(', ')} — {t(item.resultsEntered ? 'discipline.resultsEntered' : 'discipline.noResults')} — {t(`discipline.states.${item.status}`)}{item.type !== 'PARALLEL_SPRINT' && <> — {t('discipline.attemptCount')}: {item.type === 'SLALOM' ? item.attemptCount ?? '—' : 1}</>}</Typography>{!readOnly && item.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => void changeStatus(item, item.status === 'CREATED' ? 'STARTED' : 'COMPLETED')}>{t(item.status === 'CREATED' ? 'discipline.start' : 'discipline.complete')}</Button>}<Button component="a" href={disciplineLink(item, 'start-lists')}>{t('navigation.startLists')}</Button><Button component="a" href={disciplineLink(item, 'results')}>{t('navigation.results')}</Button>{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type !== 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'result-grid')}>{t('navigation.resultGrid')}</Button>}{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type === 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'parallel-sprint')}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <TextField select size="small" label={t('discipline.points')} value={item.pointsTableId ?? ''} disabled={busy || !!draft} onChange={e => void setPoints(item, e.target.value)}><MenuItem value="">{t('discipline.noPoints')}</MenuItem>{tables.map(table => <MenuItem key={table.id} value={table.id}>{table.name || `#${table.id}`}</MenuItem>)}</TextField>}{!readOnly && compositionEditing && <Button disabled={busy} onClick={() => setDraft({...item, editing: item})}>{t('discipline.edit')}</Button>}{!readOnly && compositionEditing && (competitionStatus ?? competitions.find(c => String(c.id) === competition)?.status ?? competitions.find(c => String(c.id) === competition)?.state) === 'CREATED' && item.status === 'CREATED' && <Button disabled={busy || !!draft} onClick={() => void remove(item)}>{t('discipline.delete')}</Button>}</Box>)}
       {draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
         <TextField label={t('discipline.name')} value={draft.name} onChange={e => setDraft({...draft, name: e.target.value})}/>
         <TextField select disabled={!!draft.editing} label={t('discipline.type')} value={draft.type} onChange={e => {const type = e.target.value as DisciplineType; setDraft({...draft, type, gateCount: type === 'SLALOM' ? 1 : null, attemptCount: type === 'SLALOM' ? 2 : null, qualificationDisciplineId: null})}}>{types.map(type => <MenuItem key={type} value={type}>{t(`discipline.types.${type}`)}</MenuItem>)}</TextField>

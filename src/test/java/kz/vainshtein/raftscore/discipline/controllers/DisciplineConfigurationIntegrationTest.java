@@ -77,4 +77,30 @@ class DisciplineConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
         mvc.perform(put(base + "/999999999/configuration").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isNotFound());
     }
 
+    @Test void deletionProtectsReferencesAndActivityAndClearsTiebreak() throws Exception {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Delete").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var qualifier = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        qualifier.replaceCategories(List.of(category)); qualifier = disciplines.saveAndFlush(qualifier);
+        var parallel = Discipline.builder().competition(competition).name("Parallel").type(DisciplineType.PARALLEL_SPRINT).build();
+        parallel.setQualificationDiscipline(qualifier); parallel = disciplines.saveAndFlush(parallel);
+        competition.setTiebreakDiscipline(qualifier); competitions.saveAndFlush(competition);
+        var mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var url = "/api/competitions/" + competition.getId() + "/disciplines/" + qualifier.getId();
+        var json = "{\"version\":" + qualifier.getVersion() + "}";
+        mvc.perform(delete(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isForbidden());
+        mvc.perform(delete(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("discipline.qualification_in_use"));
+        parallel.setQualificationDiscipline(null); disciplines.saveAndFlush(parallel);
+        startLists.saveAndFlush(StartList.builder().discipline(qualifier).category(category).build());
+        mvc.perform(delete(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content(json)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("discipline.delete_blocked"));
+        assertThat(disciplines.existsById(qualifier.getId())).isTrue();
+        var removable = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Other").type(DisciplineType.SLALOM).build());
+        configurations.saveAndFlush(new SlalomConfiguration(removable, 3, 2));
+        competition = competitions.findById(competition.getId()).orElseThrow();
+        competition.setTiebreakDiscipline(removable); competitions.saveAndFlush(competition);
+        mvc.perform(delete("/api/competitions/" + competition.getId() + "/disciplines/" + removable.getId()).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType("application/json").content("{\"version\":" + removable.getVersion() + "}")).andExpect(status().isNoContent());
+        assertThat(disciplines.existsById(removable.getId())).isFalse();
+        assertThat(competitions.findById(competition.getId()).orElseThrow().getTiebreakDiscipline()).isNull();
+    }
+
 }

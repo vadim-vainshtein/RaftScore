@@ -1,10 +1,11 @@
-import {useEffect, useMemo, useRef, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, fieldErrorKey} from './api/errors'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
+import TimeZoneField from './TimeZoneField'
 
 type FieldIssue = {step: number, field: string, label: string, message?: string}
 type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
@@ -27,16 +28,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
   const [stored] = useState(() => { try { return draftKey ? JSON.parse(localStorage.getItem(draftKey) ?? 'null') : null } catch { return null } })
   const [step, setStep] = useState<number>(stored?.step ?? 0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [competition, setCompetition] = useState<Competition>(stored?.competition ?? {title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
-  const [zoneSearch, setZoneSearch] = useState('')
   const [expandedPoints, setExpandedPoints] = useState<Record<number, boolean>>({})
-  const zones = useMemo(() => {
-    const date = competition.startDate ? new Date(competition.startDate + 'T12:00:00Z') : new Date()
-    const reference = Number.isNaN(date.getTime()) ? new Date() : date
-    return [...new Set(['UTC', Intl.DateTimeFormat().resolvedOptions().timeZone, ...Intl.supportedValuesOf('timeZone')])].filter(Boolean).map(zone => {
-      const offset = new Intl.DateTimeFormat('en', {timeZone: zone, timeZoneName: 'shortOffset'}).formatToParts(reference).find(part => part.type === 'timeZoneName')?.value.replace('GMT', 'UTC') ?? 'UTC'
-      return {zone, label: zone + ' ' + offset}
-    })
-  }, [competition.startDate])
   const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>(stored?.categories ?? [])
   const [requirements, setRequirements] = useState<Requirement[]>(stored?.requirements ?? []), [disciplines, setDisciplines] = useState<Discipline[]>(stored?.disciplines ?? [])
   const [issues, setIssues] = useState<FieldIssue[]>([])
@@ -116,8 +108,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>
       <TextField id="competition.endDate" type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.endDate} onChange={e => setCompetition({...competition, endDate: e.target.value})}/>
       <TextField id="competition.location" label={t('competition.location')} value={competition.location} onChange={e => setCompetition({...competition, location: e.target.value})}/>
-      <TextField label={t('wizard.searchZone')} value={zoneSearch} onChange={e => setZoneSearch(e.target.value)}/>
-      <TextField select slotProps={{select: {native: true}}} id="competition.timeZone" label={t('competition.timeZone')} value={competition.timeZone} onChange={e => setCompetition({...competition, timeZone: e.target.value})}>{zones.filter(({zone, label}) => zone === competition.timeZone || label.toLowerCase().includes(zoneSearch.toLowerCase())).map(({zone, label}) => <option key={zone} value={zone}>{label}</option>)}</TextField>
+      <TimeZoneField id="competition.timeZone" value={competition.timeZone} date={competition.startDate} onChange={timeZone => setCompetition({...competition, timeZone})}/>
       <TextField id="competition.description" label={t('competition.description')} multiline value={competition.description ?? ''} onChange={e => setCompetition({...competition, description: e.target.value})}/>
       </>}
     {step === 1 && <>

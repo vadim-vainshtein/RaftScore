@@ -95,6 +95,42 @@ class DisciplineConfigurationController {
         return view(discipline);
     }
 
+    record DeleteRequest(@NotNull @PositiveOrZero Long version) { }
+
+    @DeleteMapping("/{disciplineId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    void delete(@PathVariable Long competitionId, @PathVariable Long disciplineId, @Valid @RequestBody DeleteRequest request) {
+        var competition = competitions.findForDisciplineConfiguration(competitionId).orElseThrow(DisciplineConfigurationController::notFound);
+        var discipline = disciplines.findForStartListUpdate(disciplineId)
+                .filter(d -> d.getCompetition().getId().equals(competitionId)).orElseThrow(DisciplineConfigurationController::notFound);
+        if (discipline.getVersion() != request.version()) throw new OptimisticLockingFailureException("Stale discipline version");
+        if (competition.getStatus() != CompetitionStatus.CREATED || discipline.getStatus() != DisciplineStatus.CREATED || hasActivity(disciplineId)
+                || Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from calculated_discipline_results where discipline_id = ?)", Boolean.class, disciplineId)))
+            throw new DeleteBlocked();
+        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from disciplines where qualification_discipline_id = ?)", Boolean.class, disciplineId)))
+            throw new QualificationInUse();
+        if (competition.getTiebreakDiscipline() != null && competition.getTiebreakDiscipline().getId().equals(disciplineId)) {
+            competition.setTiebreakDiscipline(null);
+            competitions.saveAndFlush(competition);
+        }
+        slalom.findByDisciplineId(disciplineId).ifPresent(slalom::delete);
+        slalom.flush();
+        disciplines.delete(discipline);
+        disciplines.flush();
+    }
+
+    @ExceptionHandler(DeleteBlocked.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> deleteBlocked() {
+        return org.springframework.http.ResponseEntity.status(409).body(kz.vainshtein.raftscore.api.ApiError.of("discipline.delete_blocked"));
+    }
+    @ExceptionHandler(QualificationInUse.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> qualificationInUse() {
+        return org.springframework.http.ResponseEntity.status(409).body(kz.vainshtein.raftscore.api.ApiError.of("discipline.qualification_in_use"));
+    }
+    private static class DeleteBlocked extends RuntimeException { }
+    private static class QualificationInUse extends RuntimeException { }
+
     record StatusRequest(@NotNull DisciplineStatus status, @NotNull @PositiveOrZero Long version) { }
 
     @PutMapping("/{disciplineId}/status")

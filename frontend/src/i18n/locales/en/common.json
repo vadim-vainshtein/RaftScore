@@ -115,6 +115,8 @@
     "noPoints": "None",
     "resultsEntered": "Results entered",
     "noResults": "No results",
+    "delete": "Delete",
+    "confirmDelete": "Delete this discipline? Its points table will be retained.",
     "confirmPoints": "Changing the points table will recalculate existing results. Continue?",
     "start": "Start discipline",
     "complete": "Complete discipline",
@@ -167,7 +169,8 @@
     "discardAndComplete": "Discard and complete",
     "prepare": "Continue preparation",
     "enterResults": "Enter results",
-    "openProtocol": "Open protocol"
+    "openProtocol": "Open protocol",
+    "discardChanges": "Discard unsaved competition changes?"
   },
   "wizard": {
     "template": "Add active template",
@@ -350,7 +353,9 @@
     "participantDuplicate": "This participant is already in a crew in this category.",
     "startNumberDuplicate": "This start number is already in use.",
     "invalidRoster": "Check the crew roster.",
-    "invalidRequirements": "Check the entry requirements."
+    "invalidRequirements": "Check the entry requirements.",
+    "disciplineDeleteBlocked": "A discipline can be deleted only before the competition and discipline start, and when it has no start lists or results.",
+    "disciplineQualificationInUse": "This discipline is used for qualification. Edit the dependent parallel sprint to change its qualification first."
   },
   "backup": {
     "create": "Create backup",

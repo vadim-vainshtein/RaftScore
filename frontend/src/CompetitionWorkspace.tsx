@@ -19,6 +19,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   const [error, setError] = useState(false)
   const [completionError, setCompletionError] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [refreshingCompetition, setRefreshingCompetition] = useState(false), [competitionRefreshFailed, setCompetitionRefreshFailed] = useState(false)
   const intentionalNavigation = useRef(false)
   const [nextRoute, setNextRoute] = useState<string | null>(null)
   useEffect(() => {if (!completing && nextRoute) {window.location.hash = nextRoute}}, [completing, nextRoute])
@@ -48,8 +49,14 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   const settingsParams = new URLSearchParams({view: id})
   const workspaceParams = new URLSearchParams(query)
   for (const key of ['discipline', 'category']) {const value = workspaceParams.get(key); if (value) settingsParams.set(key, value)}
+  const disciplineEditParams = new URLSearchParams(workspaceParams)
+  disciplineEditParams.set('editDisciplines', '1')
+  const refreshCompetition = async () => {
+    try {setCompetition(await apiRequest<Competition>(`/api/competitions/${id}`)); setCompetitionRefreshFailed(false)}
+    catch (error) {setCompetitionRefreshFailed(true); throw error}
+  }
   const body = section === 'crews' ? <Crews fixedCompetition={id} readOnly={readOnly} canEdit={!readOnly && competition.status !== 'COMPLETED'} onReadinessChange={() => setCrewRevision(value => value + 1)}/>
-    : section === 'disciplines' ? <Disciplines fixedCompetition={id} scoringAllowed={competition.status === 'STARTED'} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
+    : section === 'disciplines' ? <Disciplines onDeletionStateChange={setRefreshingCompetition} competitionStatus={competition.status} onDeleted={refreshCompetition} compositionEditing={new URLSearchParams(path.split('?')[1] ?? '').get('editDisciplines') === '1'} fixedCompetition={id} scoringAllowed={competition.status === 'STARTED'} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
     : section === 'results' ? <Results fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'}/>
     : section === 'start-lists' ? <StartLists fixedCompetition={id} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setStartRevision(value => value + 1)}/>
     : section === 'result-grid' && !readOnly && competition.status === 'STARTED' ? <ResultGrid fixedCompetition={id}/>
@@ -83,7 +90,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     <Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
     {(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>}
-    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>
+    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={section === 'disciplines' ? `#/workspace/${id}/disciplines?${disciplineEditParams}` : `#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
     <div inert={completing}>
       <fieldset disabled={completing} style={{border: 0, margin: 0, padding: 0, minWidth: 0}}>{body}</fieldset>

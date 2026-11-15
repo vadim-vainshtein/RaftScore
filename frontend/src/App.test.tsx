@@ -444,3 +444,28 @@ test('created workspace navigation opens overview and hides generic scoring', as
   expect(window.location.hash).toBe('#/workspace/1')
   expect(await screen.findByText('Categories: 0 · Disciplines: 0')).toBeInTheDocument()
 })
+
+test('refreshes workspace navigation after deleting a discipline', async () => {
+  desktop = true
+  window.history.replaceState(null, '', '/#/workspace/1/disciplines?editDisciplines=1')
+  let deleted = false
+  const item = {id: 3, name: 'Sprint to remove', type: 'SPRINT', status: 'CREATED', displayOrder: 0, categoryIds: [], pointsTableId: null, version: 0, resultsEntered: false}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0}
+    if (path.endsWith('/disciplines')) return deleted ? [] : [item]
+    if (path.endsWith('/categories') || path.endsWith('/entries/private') || path.endsWith('/points-tables')) return []
+    return {content: [], totalPages: 0}
+  })
+  vi.mocked(csrfRequest).mockImplementation(async () => {deleted = true; return undefined})
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  const remove = await screen.findByRole('button', {name: 'Delete'})
+  const callsBefore = vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/competitions/1').length
+  fireEvent.click(remove)
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument())
+  await waitFor(() => expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/competitions/1').length).toBeGreaterThanOrEqual(callsBefore + 2))
+  expect(within(nav).queryByRole('link', {name: 'Sprint to remove'})).not.toBeInTheDocument()
+  vi.restoreAllMocks()
+})
