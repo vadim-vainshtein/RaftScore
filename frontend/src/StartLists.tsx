@@ -129,7 +129,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     {error && <Typography role="alert">{t(error === 'invalid' ? 'startList.invalid' : error as 'apiError.network')}</Typography>}
     {list && <>
       {list.locked && <Typography role="status">{t('startList.locked')}</Typography>}
-      {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box component="table">
+      {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box component="table" className="start-list-table">
         <thead><tr><th>{t('startList.position')}</th>
           <th>{t('startList.number')}</th>
           <th>{t('startList.crew')}</th>
