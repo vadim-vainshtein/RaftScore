@@ -337,6 +337,34 @@ test('successful restore rechecks the session and returns to sign-in after expir
   expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/auth/principal')).toHaveLength(2)
 })
 
+test('workspace navigation shows the active competition and clears it when leaving or switching', async () => {
+  desktop = true
+  window.history.replaceState(null, '', '/#/workspace/1/crews')
+  let resolveSecond!: (value: unknown) => void
+  const second = new Promise(resolve => {resolveSecond = resolve})
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'First race', status: 'CREATED'}
+    if (path === '/api/competitions/2') return second
+    if (path.endsWith('/disciplines') || path.endsWith('/categories') || path.endsWith('/entries/private') || path.endsWith('/requirements')) return []
+    return {content: [], totalPages: 0, totalElements: 0}
+  })
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  expect(await within(nav).findByText('First race')).toBeInTheDocument()
+  expect(within(nav).getByText('RaftScore')).toBeInTheDocument()
+  fireEvent.click(within(nav).getByRole('link', {name: 'Disciplines'}))
+  expect(within(nav).getByText('First race')).toBeInTheDocument()
+  window.history.replaceState(null, '', '/#/workspace/2/crews')
+  fireEvent(window, new HashChangeEvent('hashchange'))
+  expect(within(nav).queryByText('First race')).not.toBeInTheDocument()
+  await act(async () => resolveSecond({id: 2, title: 'Second race', status: 'CREATED'}))
+  expect(await within(nav).findByText('Second race')).toBeInTheDocument()
+  fireEvent.click(within(nav).getByRole('link', {name: 'Back to list'}))
+  expect(within(nav).queryByText('Second race')).not.toBeInTheDocument()
+  expect(within(nav).getByText('RaftScore')).toBeInTheDocument()
+})
+
 test('selects only the current discipline in workspace navigation', async () => {
   desktop = true
   window.history.replaceState(null, '', '/#/workspace/1/result-grid?discipline=3')

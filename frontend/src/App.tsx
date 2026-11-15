@@ -190,6 +190,7 @@ function Shell({locale}: {locale: Locale}) {
   const workspaceId = /^\/workspace\/(\d+)/.exec(visiblePath)?.[1]
   const [workspaceLoadedId, setWorkspaceLoadedId] = useState<string | undefined>()
   const [workspaceCompetitionStatus, setWorkspaceCompetitionStatus] = useState('')
+  const [workspaceCompetition, setWorkspaceCompetition] = useState<{id: string, title: string} | null>(null)
   const [workspaceDisciplines, setWorkspaceDisciplines] = useState<{id: number, name: string, type: string, status: string, categoryIds: number[]}[]>([])
   const [workspaceRevision, setWorkspaceRevision] = useState(0)
   const [navigationRevision, setNavigationRevision] = useState(0)
@@ -198,7 +199,7 @@ function Shell({locale}: {locale: Locale}) {
     if (!workspaceId || !principal) return
     let active = true
     Promise.all([
-      apiRequest<{status: string}>(`/api/competitions/${workspaceId}`),
+      apiRequest<{status: string, title: string}>(`/api/competitions/${workspaceId}`).then(competition => {if (active) setWorkspaceCompetition({id: workspaceId, title: competition.title}); return competition}, error => {if (active) setWorkspaceCompetition(null); throw error}),
       apiRequest<{id: number, name: string, type: string, status: string, categoryIds: number[]}[]>(`/api/competitions/${workspaceId}/disciplines`),
     ]).then(([competition, items]) => {if (active) {setWorkspaceLoadedId(workspaceId); setWorkspaceCompetitionStatus(competition.status); setWorkspaceDisciplines(items)}})
       .catch(() => {if (active) {setWorkspaceCompetitionStatus(''); setWorkspaceDisciplines([])}})
@@ -244,7 +245,10 @@ function Shell({locale}: {locale: Locale}) {
 
   const navigation = (
     <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth, maxWidth: '100%', overflowX: 'hidden'}}>
-      <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
+      <Toolbar sx={{display: 'block', py: 2}}>
+        <Typography variant="h6">{t('app.name')}</Typography>
+        {activeRoute?.path === '/workspace' && workspaceCompetition && workspaceCompetition.id === workspaceId && <Typography variant="body2" sx={{overflowWrap: 'anywhere'}}>{workspaceCompetition.title}</Typography>}
+      </Toolbar>
       <List>
         {(activeRoute?.path === '/workspace' ? [{path: `/workspace/${workspaceId}${workspaceQuery}`, label: 'workspace.overview', readOnly: true}, ...['crews', 'disciplines', 'start-lists', 'results'].map((section, index) => ({path: `/workspace/${workspaceId}/${section}${workspaceQuery}`, label: ['navigation.crews', 'navigation.disciplines', 'navigation.startLists', 'navigation.results'][index], readOnly: true})), ...workspaceDisciplines.filter(d => principal.role === 'FULL_ACCESS' && workspaceLoadedId === workspaceId && workspaceCompetitionStatus === 'STARTED' && d.status === 'STARTED').map(d => ({path: disciplinePath(d), label: d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT'), readOnly: true, literal: true})), {path: '/competitions', label: 'competition.back', readOnly: true}] : routes).filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
           <ListItem key={route.path} disablePadding>
