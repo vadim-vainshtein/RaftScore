@@ -82,6 +82,8 @@
     "categorySeats": "Категории и названия мест",
     "editCategory": "Изменить категорию",
     "rosterVariant": "Вариант состава {{number}}",
+    "searchHistoryHint": "Поиск по соревнованиям для просмотра или копирования заявки.",
+    "selectCrew": "Выберите экипаж в категории",
     "openApplication": "Открыть заявку",
     "copyApplication": "Создать заявку на основе",
     "chooseCategoryFirst": "Выберите категорию, чтобы создать экипаж.",

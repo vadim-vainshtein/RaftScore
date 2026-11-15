@@ -170,3 +170,94 @@ test('copies a found crew into the only compatible category of a started competi
   expect(await screen.findByLabelText(/Crew name/)).toHaveValue('Found')
   expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
 })
+
+test('category picker lists only category crews and opens one directly for saving', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/private') ? Promise.resolve([detail, {...detail, id: 5, categoryId: 3, crewName: 'Other'}]) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
+  expect(screen.queryByRole('option', {name: /Other/})).not.toBeInTheDocument()
+  fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
+  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({version: 3})))
+})
+
+test('category changes invalidate a pending picker selection', async () => {
+  let resolveDetail!: (value: typeof detail) => void
+  const pending = new Promise<typeof detail>(resolve => { resolveDetail = resolve })
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? pending : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
+  fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
+  fireEvent.mouseDown(screen.getByLabelText('Category'))
+  fireEvent.click(screen.getByRole('option', {name: 'All'}))
+  await act(async () => { resolveDetail(detail); await pending })
+  expect(screen.queryByLabelText(/Crew name/)).not.toBeInTheDocument()
+})
+
+test('workspace picker opens the selected crew', async () => {
+  window.location.hash = '#/competitions/1/crews?category=2'
+  render(<Crews fixedCompetition="1"/>)
+  const picker = await screen.findByLabelText('Select crew in category')
+  await waitFor(() => expect(picker).not.toHaveAttribute('aria-disabled', 'true'))
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1/entries/private'))
+  fireEvent.mouseDown(picker)
+  fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
+  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
+  window.location.hash = ''
+})
+
+test('clearing a pending picker selection prevents its detail from opening', async () => {
+  let resolveDetail!: (value: typeof detail) => void
+  const pending = new Promise<typeof detail>(resolve => { resolveDetail = resolve })
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? pending : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  const picker = screen.getByLabelText('Select crew in category')
+  fireEvent.mouseDown(picker)
+  fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
+  expect(picker).toHaveTextContent('River')
+  fireEvent.mouseDown(picker)
+  fireEvent.click(screen.getByRole('option', {name: '—'}))
+  await act(async () => { resolveDetail(detail); await pending })
+  expect(screen.queryByLabelText(/Crew name/)).not.toBeInTheDocument()
+})
+
+test('keeps an edited draft when category or crew change is declined', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  try {
+    const previous = vi.mocked(apiRequest).getMockImplementation()!
+    vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/private') ? Promise.resolve([detail, {...detail, id: 5, crewName: 'Rapid'}]) : previous(path))
+    render(<Crews/>)
+    fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+    fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+    fireEvent.mouseDown(await screen.findByLabelText('Category'))
+    fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+    fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
+    fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
+    fireEvent.change(await screen.findByLabelText(/Crew name/), {target: {value: 'Edited'}})
+    fireEvent.mouseDown(screen.getByLabelText('Category'))
+    fireEvent.click(screen.getByRole('option', {name: 'All'}))
+    expect(screen.getByLabelText(/Crew name/)).toHaveValue('Edited')
+    expect(screen.getByRole('combobox', {name: 'Category'})).toHaveTextContent('R1')
+    fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
+    fireEvent.click(screen.getByRole('option', {name: /Rapid/}))
+    expect(screen.getByLabelText(/Crew name/)).toHaveValue('Edited')
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(apiRequest).not.toHaveBeenCalledWith('/api/competitions/1/entries/5')
+  } finally { confirm.mockRestore() }
+})
