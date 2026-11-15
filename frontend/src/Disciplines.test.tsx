@@ -6,7 +6,7 @@ import './i18n'
 vi.mock('./api/client', async original => ({...(await original<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
 const slalom = {id: 3, name: 'Slalom', type: 'SLALOM', status: 'STARTED', displayOrder: 1, categoryIds: [2], gateCount: 4, attemptCount: 2, qualificationDisciplineId: null, pointsTableId: null, version: 5, resultsEntered: false}
 const load = (items: object[] = [slalom]) => vi.mocked(apiRequest).mockImplementation(async path => {
-  if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
+  if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race', state: 'CREATED'}], totalPages: 1}
   if (path.endsWith('/points-tables')) return [{id: 8, name: 'Standard'}]
   if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 9, displayName: 'R6'}]
   return items
@@ -87,4 +87,18 @@ test('starts a discipline with its current version and hides scoring until start
   expect(screen.queryByRole('link', {name: 'Result entry'})).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', {name: 'Start discipline'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/status', 'PUT', {status: 'STARTED', version: 5}))
+})
+
+test('confirms removal and sends the current discipline version', async () => {
+  load([{...slalom, status: 'CREATED'}]); vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<Disciplines readOnly={false}/>); await selectCompetition()
+  fireEvent.click(await screen.findByRole('button', {name: 'Delete'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'DELETE', {version: 5}))
+})
+
+test('hides deletion after the competition starts', async () => {
+  load([{...slalom, status: 'CREATED'}])
+  render(<Disciplines readOnly={false} competitionStatus="STARTED"/>); await selectCompetition()
+  expect(await screen.findByText(/Slalom/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument()
 })

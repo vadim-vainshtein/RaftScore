@@ -206,7 +206,7 @@ test('refreshes readiness after saving a discipline', async () => {
     throw new Error(path)
   })
   vi.mocked(csrfRequest).mockImplementation(async () => {added = true; return {}})
-  render(<CompetitionWorkspace path="/workspace/1/disciplines" readOnly={false}/>)
+  render(<CompetitionWorkspace path="/workspace/1/disciplines?editDisciplines=1" readOnly={false}/>)
   expect(await screen.findByText('Categories: 0 · Disciplines: 0')).toBeInTheDocument()
   fireEvent.click(await screen.findByRole('button', {name: 'Create discipline'}))
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
@@ -277,4 +277,48 @@ test('discarding a draft when clearing category leaves no unsaved rows at comple
   fireEvent.click(screen.getByRole('button', {name: 'Complete competition'}))
   expect(screen.getByRole('dialog')).not.toHaveTextContent('Unsaved rows')
   expect(screen.queryByRole('button', {name: 'Discard and complete'})).not.toBeInTheDocument()
+})
+
+test('discipline edit link opens composition editing while overview keeps competition settings', async () => {
+  window.location.hash = '#/workspace/1/disciplines?category=2'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'CREATED'}
+    if (path.endsWith('/points-tables') || path.endsWith('/entries/private') || path.endsWith('/categories') || path.endsWith('/disciplines')) return []
+    throw new Error(path)
+  })
+  const view = render(<CompetitionWorkspace path="/workspace/1/disciplines?category=2" readOnly={false}/>)
+  const edit = await screen.findByRole('link', {name: 'Edit'})
+  expect(edit).toHaveAttribute('href', '#/workspace/1/disciplines?category=2&editDisciplines=1')
+  expect(screen.queryByRole('button', {name: 'Create discipline'})).not.toBeInTheDocument()
+  view.rerender(<CompetitionWorkspace path="/workspace/1/disciplines?category=2&editDisciplines=1" readOnly={false}/>)
+  expect(await screen.findByRole('button', {name: 'Create discipline'})).toBeInTheDocument()
+  view.rerender(<CompetitionWorkspace path="/workspace/1" readOnly={false}/>)
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?view=1&category=2')
+})
+
+test('refreshes the competition version after deleting its tiebreak before starting', async () => {
+  window.location.hash = '#/workspace/1/disciplines?editDisciplines=1'
+  let deleted = false
+  const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', status: 'CREATED', displayOrder: 0, categoryIds: [], pointsTableId: null, version: 0, resultsEntered: false}
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: deleted ? 1 : 0}
+    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private')) return []
+    if (path.endsWith('/disciplines')) return deleted ? [] : [discipline]
+    throw new Error(path)
+  })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  let finishDelete: () => void = () => {}
+  vi.mocked(csrfRequest).mockImplementation(async (path, method) => {
+    if (method === 'DELETE') {await new Promise<void>(resolve => {finishDelete = resolve}); deleted = true; return undefined}
+    if (path.endsWith('/status')) return {id: 1, title: 'Race', status: 'STARTED', version: 2}
+    throw new Error(path)
+  })
+  render(<CompetitionWorkspace path="/workspace/1/disciplines?editDisciplines=1" readOnly={false}/>)
+  fireEvent.click(await screen.findByRole('button', {name: 'Delete'}))
+  expect(screen.getByRole('button', {name: 'Start competition'})).toBeDisabled()
+  finishDelete()
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('button', {name: 'Start competition'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', {name: 'Start competition'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/status', 'PUT', {status: 'STARTED', version: 1}))
 })

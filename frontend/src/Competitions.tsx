@@ -1,10 +1,11 @@
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, csrfRequest} from './api/client'
 import {apiErrorKey} from './api/errors'
 import CompetitionWizard from './CompetitionWizard'
+import TimeZoneField from './TimeZoneField'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
@@ -29,13 +30,15 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
   const [search, setSearch] = useState(''), [sort, setSort] = useState('ASC'), [page, setPage] = useState(0)
   const [result, setResult] = useState<Page | null>(null), [revision, setRevision] = useState(0)
   const [details, setDetails] = useState<Details | null>(null), [draft, setDraft] = useState<Draft | null>(null)
+  const originalDraft = useRef<string | null>(null)
+  const editCompetition = (item: Details) => {originalDraft.current = JSON.stringify(item); setDraft(item)}
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [creating, setCreating] = useState(false)
   useEffect(() => { let active = true
     const query = new URLSearchParams({search, sort, page: String(page), size: '20'})
     apiRequest<Page>(`/api/competitions?${query}`).then(value => {if (!Array.isArray(value.content)) throw new Error('Invalid competition page'); if (active) {setResult(value); setError('')}}).catch(e => {if (active) {setResult(null); setError(apiErrorKey(e))}})
     return () => {active = false}
   }, [search, sort, page, revision, t])
-  useEffect(() => {const params = new URLSearchParams(window.location.hash.split('?')[1] ?? ''); const id = params.get('edit') ?? params.get('view'); if (id && /^\d+$/.test(id)) apiRequest<Details>(`/api/competitions/${id}`).then(item => {if (params.has('edit') && !readOnly && item.status !== 'COMPLETED') setDraft(item); else setDetails(item)}).catch(e => setError(apiErrorKey(e)))}, [readOnly])
+  useEffect(() => {const params = new URLSearchParams(window.location.hash.split('?')[1] ?? ''); const id = params.get('edit') ?? params.get('view'); if (id && /^\d+$/.test(id)) apiRequest<Details>(`/api/competitions/${id}`).then(item => {if (params.has('edit') && !readOnly && item.status !== 'COMPLETED') editCompetition(item); else setDetails(item)}).catch(e => setError(apiErrorKey(e)))}, [readOnly])
   const save = async (event: FormEvent) => {event.preventDefault(); if (!draft || busy) return
     setBusy(true); setError('')
     try {const {id, ...body} = draft; delete (body as Draft & {status?: string}).status; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); setDetails(saved); setRevision(v => v + 1)}
@@ -48,11 +51,12 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
       <TextField required type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={draft.startDate} onChange={e => setDraft({...draft, startDate: e.target.value})}/>
       <TextField type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}, htmlInput: {min: draft.startDate}}} value={draft.endDate} onChange={e => setDraft({...draft, endDate: e.target.value})}/>
       <TextField required label={t('competition.location')} value={draft.location} onChange={e => setDraft({...draft, location: e.target.value})}/>
-      <TextField required label={t('competition.timeZone')} value={draft.timeZone} onChange={e => setDraft({...draft, timeZone: e.target.value})}/>
+      <TimeZoneField value={draft.timeZone} date={draft.startDate} onChange={timeZone => setDraft({...draft, timeZone})}/>
       <TextField label={t('competition.description')} multiline value={draft.description ?? ''} onChange={e => setDraft({...draft, description: e.target.value})}/>
       <FormControlLabel label={t('competition.admission')} control={<Checkbox checked={draft.admissionConfirmationRequired} onChange={e => setDraft({...draft, admissionConfirmationRequired: e.target.checked})}/>}/>
       <Typography>{t('crew.representativeSettings')}</Typography>
       {(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => <TextField key={field} select label={t(`crew.${field}`)} value={(draft.representativeFields ?? defaultFields)[field]} onChange={e => setDraft({...draft, representativeFields: {...(draft.representativeFields ?? defaultFields), [field]: e.target.value as Policy}})}>{(['HIDDEN', 'OPTIONAL', 'REQUIRED'] as const).map(policy => <MenuItem key={policy} value={policy}>{t(`crew.policy.${policy}`)}</MenuItem>)}</TextField>)}
+      {draft.id && <Button component="a" href={`#/workspace/${draft.id}/disciplines?${new URLSearchParams({...Object.fromEntries(contextParams), editDisciplines: '1'})}`} onClick={event => {if (busy || (JSON.stringify(draft) !== originalDraft.current && !window.confirm(t('competition.discardChanges')))) event.preventDefault()}}>{t('navigation.disciplines')}</Button>}
       <Box><Button type="submit" disabled={busy}>{t('competition.save')}</Button><Button disabled={busy} onClick={() => setDraft(null)}>{t('competition.cancel')}</Button></Box>
     </Box> : details ? <Box sx={{display: 'grid', gap: 1}}>
       <Typography variant="h5">{details.title}</Typography><Typography>{displayDate(details.startDate)} – {displayDate(details.endDate)} · {details.location} · {details.timeZone}</Typography>
@@ -60,7 +64,7 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
       <Typography>{t('competition.admission')}: {t(details.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}</Typography>
       {!readOnly && details.status !== 'COMPLETED' && <CompetitionCategorySeats competitionId={details.id}/>}
       <Typography>{t(`competition.states.${details.status}`)}</Typography>
-      <Box><Button component="a" href={`#/workspace/${details.id}${workspaceQuery}`}>{t('competition.workspace')}</Button>{!readOnly && details.status === 'STARTED' && <Button component="a" href={`#/workspace/${details.id}?${completionParams}`}>{t('competition.complete')}</Button>}{!readOnly && details.status === 'CREATED' && <Button disabled={busy} onClick={async () => {setBusy(true); try {setDetails(await csrfRequest<Details>(`/api/competitions/${details.id}/status`, 'PUT', {status: 'STARTED', version: details.version})); setRevision(v => v + 1)} catch(e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('competition.start')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => setDraft(details)}>{t('competition.edit')}</Button>}<Button onClick={() => setDetails(null)}>{t('competition.back')}</Button></Box>
+      <Box><Button component="a" href={`#/workspace/${details.id}${workspaceQuery}`}>{t('competition.workspace')}</Button>{!readOnly && details.status === 'STARTED' && <Button component="a" href={`#/workspace/${details.id}?${completionParams}`}>{t('competition.complete')}</Button>}{!readOnly && details.status === 'CREATED' && <Button disabled={busy} onClick={async () => {setBusy(true); try {setDetails(await csrfRequest<Details>(`/api/competitions/${details.id}/status`, 'PUT', {status: 'STARTED', version: details.version})); setRevision(v => v + 1)} catch(e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('competition.start')}</Button>}{!readOnly && details.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => editCompetition(details)}>{t('competition.edit')}</Button>}<Button onClick={() => setDetails(null)}>{t('competition.back')}</Button></Box>
     </Box> : <>
       <Box className="competition-toolbar"><TextField label={t('competition.search')} value={search} onChange={e => {setSearch(e.target.value); setPage(0)}}/><TextField select label={t('competition.sort')} value={sort} onChange={e => {setSort(e.target.value); setPage(0)}}><MenuItem value="ASC">{t('competition.ascending')}</MenuItem><MenuItem value="DESC">{t('competition.descending')}</MenuItem></TextField>{!readOnly && <Button variant="contained" onClick={() => setCreating(true)}>{draftKey && localStorage.getItem(draftKey) ? t('wizard.continueDraft') : t('competition.create')}</Button>}</Box>
       {result && <><Typography color="text.secondary" variant="body2">{t('competition.total', {count: result.totalElements})}</Typography><Box className="competition-list">{result.content.map(item => <Box component="article" className="competition-card" key={item.id}>

@@ -94,3 +94,19 @@ test('routes completion from settings through the workspace dialog', async () =>
   expect(screen.getByRole('link', {name: 'Competition workspace'})).toHaveAttribute('href', '#/workspace/1?discipline=3&category=2')
   expect(csrfRequest).not.toHaveBeenCalled()
 })
+
+test('confirms discarding changed competition settings before opening discipline editing', async () => {
+  const details = {id: 1, version: 7, title: 'Race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : {content: [], page: 0, totalPages: 0, totalElements: 0})
+  window.location.hash = '#/competitions?edit=1'
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  render(<Competitions readOnly={false}/>)
+  fireEvent.change(await screen.findByLabelText(/Title/), {target: {value: 'Changed'}})
+  const link = screen.getByRole('link', {name: 'Disciplines'})
+  expect(link).toHaveAttribute('href', '#/workspace/1/disciplines?editDisciplines=1')
+  expect(fireEvent.click(link)).toBe(false)
+  expect(screen.getByLabelText(/Title/)).toHaveValue('Changed')
+  expect(confirm).toHaveBeenCalledWith('Discard unsaved competition changes?')
+  expect(fireEvent.click(link)).toBe(true)
+  confirm.mockRestore()
+})
