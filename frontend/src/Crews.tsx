@@ -9,7 +9,7 @@ import {supportedLocale} from './i18n/supported-locales'
 
 type Policy = 'HIDDEN' | 'OPTIONAL' | 'REQUIRED'
 type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
-type Competition = {id: number, title: string, admissionConfirmationRequired: boolean, representativeFields?: Record<Field, Policy>}
+type Competition = {id: number, title: string, status?: string, admissionConfirmationRequired: boolean, representativeFields?: Record<Field, Policy>}
 type SearchResult = {id: number, competitionId: number, categoryId: number, crewName: string, regionOrClub: string, startDate: string, competitionTitle: string, categoryName: string, startNumber: number, rosterVariant?: number | null, roster?: Member[]}
 type Category = {id: number, displayName: string, crewSize: number, version: number, seatLabels?: string[]}
 type Requirement = {id: number, name: string, valueType: 'YES_NO' | 'TEXT' | 'DATE' | 'NUMBER', required: boolean}
@@ -23,8 +23,9 @@ const empty = (category: Category): Draft => ({categoryId: category.id, crewName
 
 export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompetition, onReadinessChange}: {readOnly?: boolean, canEdit?: boolean, fixedCompetition?: string, onReadinessChange?: () => void}) {
   const {t, i18n} = useTranslation()
-  const editable = !readOnly && canEdit
+
   const [competitions, setCompetitions] = useState<Competition[]>([]), [competition, setCompetition] = useState<Competition | null>(null)
+  const editable = !readOnly && canEdit && competition?.status !== 'COMPLETED'
   const [categories, setCategories] = useState<Category[]>([]), [requirements, setRequirements] = useState<Requirement[]>([]), [crews, setCrews] = useState<Summary[]>([])
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const searchGeneration = useRef(0)
@@ -95,9 +96,14 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const people = Array.from(new Map([...crews.flatMap(c => c.roster), ...(draft?.roster ?? [])].filter(m => m.participantId).map(m => [m.participantId, m])).values())
   const visible = crews.filter(c => (!category || String(c.categoryId) === category) && (admission === 'all' || String(c.admissionDecision) === admission))
   const policies = competition?.representativeFields ?? {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}
+  const searchTarget = (item: SearchResult) => {
+    const compatible = categories.filter(c => c.crewSize === item.roster?.length)
+    return category ? categories.find(c => String(c.id) === category) : compatible.length === 1 ? compatible[0] : undefined
+  }
   const selectSearch = async (item: SearchResult) => {
-    const target = categories.find(c => String(c.id) === category)
+    const target = searchTarget(item)
     if (!target || !item.roster || target.crewSize !== item.roster.length) return
+    setCategory(String(target.id))
     const generation = selection.current, editGeneration = ++editSelection.current
     try {
       const result = await apiRequest<Crew>(`/api/competitions/${item.competitionId}/entries/${item.id}`)
@@ -114,18 +120,21 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('crew.competition')} value={competition?.id ?? ''} onChange={e => void changeCompetition(e.target.value)}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
+    {competition && <TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {editSelection.current++; setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {!readOnly && competition?.status === 'COMPLETED' && <Typography>{t('crew.completedTarget')}</Typography>}
     {<>
       <TextField label={t('crew.search')} value={search} onChange={e => {searchGeneration.current++; setSearchResults([]); setSearch(e.target.value)}}/>
       {search.trim() && searchResults.map(item => {
-        const target = categories.find(c => String(c.id) === category)
+        const target = searchTarget(item)
+        const compatible = categories.filter(c => c.crewSize === item.roster?.length)
         return <Box key={item.id}>
           <Typography>{item.startNumber} — {item.crewName} — {item.competitionTitle} — {item.categoryName} — {formatDate(new Date(`${item.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC')} — {item.regionOrClub}{readOnly && item.rosterVariant != null && ` — ${t('crew.rosterVariant', {number: item.rosterVariant})}`}{!readOnly && item.roster && ` — ${item.roster.map(m => `${m.surname} ${m.givenName} ${m.patronymic ?? ''}`).join(', ')}`}</Typography>
           {editable && item.roster && <><Button disabled={busy || !competition || !target || target.crewSize !== item.roster.length} onClick={() => void selectSearch(item)}>{t(item.competitionId === competition?.id && item.categoryId === target?.id ? 'crew.openApplication' : 'crew.copyApplication')}</Button>
-          {(!competition || !target) ? <Typography>{t('crew.chooseTarget')}</Typography> : target.crewSize !== item.roster.length ? <Typography>{t('crew.sizeMismatch')}</Typography> : null}</>}
+          {!competition ? <Typography>{t('crew.chooseTarget')}</Typography> : !target && compatible.length === 0 ? <Typography>{t('crew.sizeMismatch')}</Typography> : !target ? <Typography>{t('crew.chooseCompatible', {categories: compatible.map(c => c.displayName).join(', ')})}</Typography> : target.crewSize !== item.roster.length ? <Typography>{t('crew.sizeMismatch')}</Typography> : <Typography>{t('crew.targetCategory', {category: target.displayName})}</Typography>}</>}
         </Box>
       })}
     </>}
-    {competition && <><TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {editSelection.current++; setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
+    {competition && <>
 
       {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}
       {editable && <Button disabled={busy || !category} onClick={() => { editSelection.current++; const c = categories.find(c => String(c.id) === category); if (c) setDraft(empty(c)) }}>{t('crew.create')}</Button>}

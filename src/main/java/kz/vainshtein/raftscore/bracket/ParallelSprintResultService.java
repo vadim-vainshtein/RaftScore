@@ -39,7 +39,8 @@ public class ParallelSprintResultService {
         if (first == null || second == null) throw new IllegalArgumentException("both results are required");
         var heat = heats.findById(heatId).orElseThrow();
         // All result writers must acquire this lock before changing source results.
-        disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
+        var discipline = disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
+        discipline.requireStarted();
         entityManager.refresh(heat);
         if (heat.getVersion() != expectedVersion) {
             if (expectedVersion < Long.MAX_VALUE && heat.getVersion() == expectedVersion + 1

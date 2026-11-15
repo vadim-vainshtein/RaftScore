@@ -62,6 +62,7 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
         var other = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Other").scoringGroupLabel("Other").crewSize(1).build());
         var discipline = disciplines.save(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        discipline.transitionTo(DisciplineStatus.STARTED);
         discipline.replaceCategories(List.of(category, other));
         disciplines.flush();
         var a = crew(category, 1, true);
@@ -87,6 +88,7 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
         var discipline = disciplines.save(Discipline.builder().competition(competition).name("Parallel").type(DisciplineType.PARALLEL_SPRINT).build());
+        discipline.transitionTo(DisciplineStatus.STARTED);
         discipline.replaceCategories(List.of(category));
         disciplines.flush();
         var a = crew(category, 1, true);
@@ -110,6 +112,7 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
         var other = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Other").scoringGroupLabel("Other").crewSize(1).build());
         var discipline = disciplines.save(Discipline.builder().competition(competition).name("Slalom").type(DisciplineType.SLALOM).build());
+        discipline.transitionTo(DisciplineStatus.STARTED);
         discipline.replaceCategories(List.of(category, other));
         disciplines.flush();
         var config = configurations.saveAndFlush(new kz.vainshtein.raftscore.slalom.entities.SlalomConfiguration(discipline, 1));
@@ -131,6 +134,12 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT crew_entry_id FROM attempt_results WHERE discipline_id = ?", Long.class, discipline.getId())).isEqualTo(otherCrew.getId());
         assertThat(jdbc.queryForObject("SELECT attempt_result_id FROM slalom_gate_penalties WHERE configuration_id = ?", Long.class, config.getId())).isEqualTo(otherAttempt.getId());
         assertThat(jdbc.queryForObject("SELECT crew_entry_id FROM calculated_discipline_results WHERE discipline_id = ?", Long.class, discipline.getId())).isEqualTo(otherCrew.getId());
+        discipline.transitionTo(DisciplineStatus.COMPLETED);
+        disciplines.flush();
+        assertThatThrownBy(() -> service.clearResults(competition.getId(), discipline.getId(), other.getId()))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM attempt_results WHERE id = ?", Long.class, otherAttempt.getId())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM slalom_gate_penalties WHERE attempt_result_id = ?", Long.class, otherAttempt.getId())).isEqualTo(1L);
     }
     @Test
     void rejectsFractionalNumbersAndUnauthorizedWrites() throws Exception {

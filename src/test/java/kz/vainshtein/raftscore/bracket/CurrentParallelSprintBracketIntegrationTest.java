@@ -61,13 +61,40 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
         var body = "{\"version\":" + opening.getVersion() + ",\"first\":{\"status\":\"FINISHED\",\"timeCentiseconds\":100},\"second\":{\"status\":\"FINISHED\",\"timeCentiseconds\":120}}";
         mvc.perform(put(url + "s/" + bracket.getId() + "/heats/" + opening.getId() + "/result").with(admin).with(csrf()).contentType("application/json").content(body)).andExpect(status().isOk());
         em.flush(); em.clear();
+        var completed = disciplines.findById(parallel.getId()).orElseThrow();
+        completed.transitionTo(DisciplineStatus.COMPLETED);
+        disciplines.flush();
+        mvc.perform(put(url + "s/" + bracket.getId() + "/heats/" + opening.getId() + "/result").with(admin).with(csrf()).contentType("application/json").content(body)).andExpect(status().isConflict());
         mvc.perform(get(url).with(reader)).andExpect(status().isOk()).andExpect(jsonPath("$.heats[0].winnerSlot").value(1)).andExpect(jsonPath("$.heats[2].first.id").value(winnerId));
         mvc.perform(get(url.replace("/competitions/" + competition.getId(), "/competitions/999999")).with(reader)).andExpect(status().isNotFound());
         mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isConflict());
     }
 
+    @Test
+    void seedRequiresStartedDiscipline() throws Exception {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        competitions.flush();
+        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var parallel = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Parallel").type(DisciplineType.PARALLEL_SPRINT).build());
+        parallel.replaceCategories(List.of(category));
+        disciplines.flush();
+        var mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        var url = "/api/competitions/" + competition.getId() + "/disciplines/" + parallel.getId() + "/categories/" + category.getId() + "/bracket";
+        var admin = user("admin").roles("FULL_ACCESS");
+        mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isConflict());
+        parallel.transitionTo(DisciplineStatus.STARTED);
+        disciplines.flush();
+        mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isBadRequest());
+        parallel.transitionTo(DisciplineStatus.COMPLETED);
+        disciplines.flush();
+        mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isConflict());
+        org.assertj.core.api.Assertions.assertThat(brackets.findByDisciplineIdAndCategoryId(parallel.getId(), category.getId())).isEmpty();
+    }
+
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var discipline = disciplines.saveAndFlush(Discipline.builder().competition(competition).name(type.name()).type(type).build());
+        discipline.transitionTo(DisciplineStatus.STARTED);
         discipline.replaceCategories(List.of(category));
         return disciplines.saveAndFlush(discipline);
     }

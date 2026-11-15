@@ -27,6 +27,7 @@ public class ParallelSprintSeedingService {
     @Transactional
     public ParallelSprintBracket seed(long disciplineId, long categoryId, Long qualificationId) {
         var discipline = disciplines.findForStartListUpdate(disciplineId).orElseThrow();
+        discipline.requireStarted();
         var category = categories.findById(categoryId).orElseThrow();
         if (discipline.getType() != DisciplineType.PARALLEL_SPRINT ||
                 !discipline.getCompetition().getId().equals(category.getCompetition().getId()) ||

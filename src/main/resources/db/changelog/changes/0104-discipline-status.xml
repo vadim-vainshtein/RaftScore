@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+  <changeSet id="0104-discipline-status" author="raftscore">
+    <addColumn tableName="disciplines"><column name="status" type="varchar(16)" defaultValue="CREATED"><constraints nullable="false"/></column></addColumn>
+    <sql>UPDATE disciplines SET status = CASE WHEN c.status = 'COMPLETED' THEN 'COMPLETED' ELSE 'STARTED' END FROM competitions c WHERE c.id = disciplines.competition_id AND (c.status = 'COMPLETED' OR EXISTS (SELECT 1 FROM attempt_results a WHERE a.discipline_id = disciplines.id) OR EXISTS (SELECT 1 FROM parallel_sprint_brackets b JOIN parallel_sprint_heats h ON h.bracket_id = b.id WHERE b.discipline_id = disciplines.id AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL)))</sql>
+    <dropDefaultValue tableName="disciplines" columnName="status"/>
+    <sql>ALTER TABLE disciplines ADD CONSTRAINT disciplines_status_check CHECK (status IN ('CREATED', 'STARTED', 'COMPLETED'))</sql>
+  </changeSet>
+</databaseChangeLog>

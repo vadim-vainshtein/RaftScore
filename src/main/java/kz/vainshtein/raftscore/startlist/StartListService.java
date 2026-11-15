@@ -105,7 +105,7 @@ public class StartListService {
     /** Clears source results and their derived data under the same lock as replacements and result entry. */
     @Transactional
     public void clearResults(long competitionId, long disciplineId, long categoryId) {
-        selection(competitionId, disciplineId, categoryId, true);
+        selection(competitionId, disciplineId, categoryId, true).requireStarted();
         jdbc.update("DELETE FROM slalom_gate_penalties WHERE attempt_result_id IN (SELECT a.id FROM attempt_results a JOIN crew_entries c ON c.id = a.crew_entry_id WHERE a.discipline_id = ? AND c.competition_category_id = ?)", disciplineId, categoryId);
         jdbc.update("DELETE FROM attempt_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);
         jdbc.update("DELETE FROM calculated_discipline_results WHERE discipline_id = ? AND crew_entry_id IN (SELECT id FROM crew_entries WHERE competition_category_id = ?)", disciplineId, categoryId);

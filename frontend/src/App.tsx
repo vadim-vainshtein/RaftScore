@@ -191,6 +191,23 @@ function Shell({locale}: {locale: Locale}) {
   }, [restricted])
 
   const activeRoute = routes.find(route => visiblePath === route.path || visiblePath.startsWith(`${route.path}/`) || visiblePath.startsWith(`${route.path}?`))
+  const workspaceId = /^\/workspace\/(\d+)/.exec(visiblePath)?.[1]
+  const [workspaceLoadedId, setWorkspaceLoadedId] = useState<string | undefined>()
+  const [workspaceCompetitionStatus, setWorkspaceCompetitionStatus] = useState('')
+  const [workspaceDisciplines, setWorkspaceDisciplines] = useState<{id: number, name: string, type: string, status: string, categoryIds: number[]}[]>([])
+  const [workspaceRevision, setWorkspaceRevision] = useState(0)
+  const [navigationRevision, setNavigationRevision] = useState(0)
+  useEffect(() => {const update = () => setWorkspaceRevision(v => v + 1); window.addEventListener('discipline-status-change', update); window.addEventListener('workspace-filter-change', update); return () => {window.removeEventListener('discipline-status-change', update); window.removeEventListener('workspace-filter-change', update)}}, [])
+  useEffect(() => {
+    if (!workspaceId || !principal) return
+    let active = true
+    Promise.all([
+      apiRequest<{status: string}>(`/api/competitions/${workspaceId}`),
+      apiRequest<{id: number, name: string, type: string, status: string, categoryIds: number[]}[]>(`/api/competitions/${workspaceId}/disciplines`),
+    ]).then(([competition, items]) => {if (active) {setWorkspaceLoadedId(workspaceId); setWorkspaceCompetitionStatus(competition.status); setWorkspaceDisciplines(items)}})
+      .catch(() => {if (active) {setWorkspaceCompetitionStatus(''); setWorkspaceDisciplines([])}})
+    return () => {active = false}
+  }, [workspaceId, visiblePath, principal, workspaceRevision])
   const title = visiblePath === '/' ? t('navigation.competitions') : activeRoute ? t(activeRoute.label) : t('placeholder.notFound')
 
   if (checking) return <Typography>{auth('loading')}</Typography>
@@ -205,29 +222,53 @@ function Shell({locale}: {locale: Locale}) {
     </Box>
   </Box>
 
+  const isSelected = (routePath: string) => {
+    const [route, routeQuery = ''] = routePath.split('?')
+    const [current, currentQuery = ''] = (window.location.hash.slice(1) || visiblePath).split('?')
+    if (current !== route && !(visiblePath === '/' && route === '/competitions')) return false
+    const discipline = new URLSearchParams(routeQuery).get('discipline')
+    return !discipline || discipline === new URLSearchParams(currentQuery).get('discipline')
+  }
+
+  const liveHash = window.location.hash.slice(1)
+  const liveWorkspaceId = /^\/workspace\/(\d+)(?:\/|\?|$)/.exec(liveHash)?.[1]
+  const liveParams = new URLSearchParams(liveWorkspaceId === workspaceId ? liveHash.split('?')[1] ?? '' : '')
+  const workspaceParams = new URLSearchParams()
+  for (const key of ['discipline', 'category']) {
+    const value = liveParams.get(key)
+    if (value && /^\d+$/.test(value)) workspaceParams.set(key, value)
+  }
+  const workspaceQuery = workspaceParams.size ? `?${workspaceParams}` : ''
+  const disciplinePath = (discipline: {id: number, type: string, categoryIds: number[]}) => {
+    const params = new URLSearchParams({discipline: String(discipline.id)})
+    const category = workspaceParams.get('category')
+    if (category && discipline.categoryIds?.includes(Number(category))) params.set('category', category)
+    return `/workspace/${workspaceId}/${discipline.type === 'PARALLEL_SPRINT' ? 'parallel-sprint' : 'result-grid'}?${params}`
+  }
+
   const navigation = (
     <Box component="nav" aria-label={t('app.navigation')} sx={{width: drawerWidth, maxWidth: '100%', overflowX: 'hidden'}}>
       <Toolbar><Typography variant="h6">{t('app.name')}</Typography></Toolbar>
       <List>
-        {routes.filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
+        {(activeRoute?.path === '/workspace' ? [{path: `/workspace/${workspaceId}${workspaceQuery}`, label: 'workspace.preparation', readOnly: true}, ...['crews', 'disciplines', 'start-lists', 'results'].map((section, index) => ({path: `/workspace/${workspaceId}/${section}${workspaceQuery}`, label: ['navigation.crews', 'navigation.disciplines', 'navigation.startLists', 'navigation.results'][index], readOnly: true})), ...workspaceDisciplines.filter(d => principal.role === 'FULL_ACCESS' && workspaceLoadedId === workspaceId && workspaceCompetitionStatus === 'STARTED' && d.status === 'STARTED').map(d => ({path: disciplinePath(d), label: d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT'), readOnly: true, literal: true})), {path: '/competitions', label: 'competition.back', readOnly: true}] : routes).filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
           <ListItem key={route.path} disablePadding>
           <ListItemButton
             component="a"
             href={`#${route.path}`}
-            selected={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions')}
+            selected={isSelected(route.path)}
             sx={{mx: 1, borderRadius: 2, color: '#d7e8e6', '&.Mui-selected': {backgroundColor: '#28565a', color: '#fff', '& .MuiListItemText-primary': {fontWeight: 'bold'}}, '&.Mui-selected:hover': {backgroundColor: '#306469'}}}
-            aria-current={activeRoute?.path === route.path || (visiblePath === '/' && route.path === '/competitions') ? 'page' : undefined}
+            aria-current={isSelected(route.path) ? 'page' : undefined}
             onClick={event => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
               event.preventDefault()
               if (!window.dispatchEvent(new Event('category-navigation', {cancelable: true}))) return
               historyIndex.current++
               window.history.pushState({raftIndex: historyIndex.current}, '', `#${route.path}`)
-              pathRef.current = route.path; setPath(route.path)
+              pathRef.current = route.path; setPath(route.path); setNavigationRevision(value => value + 1)
               setMenuOpen(false)
             }}
           >
-            <ListItemText primary={t(route.label)}/>
+            <ListItemText primary={'literal' in route && route.literal ? route.label : t(route.label as 'navigation.crews')}/>
           </ListItemButton>
           </ListItem>
         ))}
@@ -260,7 +301,7 @@ function Shell({locale}: {locale: Locale}) {
         <Toolbar sx={{py: 1}}/>
         {activeRoute?.path !== '/workspace' && <Typography component="h1" variant="h4">{title}</Typography>}
         {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
-        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={visiblePath} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={`${visiblePath}:${navigationRevision}`} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/disciplines' ? <Disciplines readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/parallel-sprint' ? <ParallelSprint key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

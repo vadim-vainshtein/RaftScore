@@ -44,7 +44,7 @@ class DisciplineConfigurationController {
                          @JsonDeserialize(using = StrictLong.class) Long qualificationDisciplineId,
                          @PositiveOrZero @JsonDeserialize(using = StrictLong.class) Long version) { }
     record View(long id, String name, DisciplineType type, int displayOrder, List<Long> categoryIds,
-                Integer gateCount, Integer attemptCount, Long qualificationDisciplineId, Long pointsTableId, long version, boolean resultsEntered) { }
+                Integer gateCount, Integer attemptCount, Long qualificationDisciplineId, Long pointsTableId, long version, boolean resultsEntered, DisciplineStatus status) { }
 
     @GetMapping
     @Transactional(readOnly = true)
@@ -95,6 +95,21 @@ class DisciplineConfigurationController {
         return view(discipline);
     }
 
+    record StatusRequest(@NotNull DisciplineStatus status, @NotNull @PositiveOrZero Long version) { }
+
+    @PutMapping("/{disciplineId}/status")
+    @Transactional
+    View transition(@PathVariable Long competitionId, @PathVariable Long disciplineId, @Valid @RequestBody StatusRequest request) {
+        lifecycle.requireEditable(competitionId);
+        var discipline = disciplines.findForStartListUpdate(disciplineId)
+                .filter(d -> d.getCompetition().getId().equals(competitionId)).orElseThrow(DisciplineConfigurationController::notFound);
+        if (discipline.getVersion() != request.version()) throw new OptimisticLockingFailureException("Stale discipline version");
+        try { discipline.transitionTo(request.status()); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
+        disciplines.flush();
+        return view(discipline);
+    }
+
     private void apply(Discipline discipline, Long competitionId, Configuration request, boolean existing) {
         var selected = request.categoryIds().stream().distinct().map(id -> categories.findByIdAndCompetitionId(id, competitionId)
                 .orElseThrow(DisciplineConfigurationController::notFound)).toList();
@@ -139,7 +154,7 @@ class DisciplineConfigurationController {
         var config = slalom.findByDisciplineId(d.getId()).orElse(null);
         return new View(d.getId(), d.getName(), d.getType(), d.getDisplayOrder(), d.getCategories().stream().map(CompetitionCategory::getId).sorted().toList(),
                 config == null ? null : config.getGateCount(), config == null ? null : config.getAttemptCount(),
-                d.getQualificationDiscipline() == null ? null : d.getQualificationDiscipline().getId(), d.getPointsTable() == null ? null : d.getPointsTable().getId(), d.getVersion(), Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from attempt_results where discipline_id = ? union all select 1 from parallel_sprint_brackets b join parallel_sprint_heats h on h.bracket_id = b.id where b.discipline_id = ? and (h.status_1 is not null or h.status_2 is not null))", Boolean.class, d.getId(), d.getId())));
+                d.getQualificationDiscipline() == null ? null : d.getQualificationDiscipline().getId(), d.getPointsTable() == null ? null : d.getPointsTable().getId(), d.getVersion(), Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from attempt_results where discipline_id = ? union all select 1 from parallel_sprint_brackets b join parallel_sprint_heats h on h.bracket_id = b.id where b.discipline_id = ? and (h.status_1 is not null or h.status_2 is not null))", Boolean.class, d.getId(), d.getId())), d.getStatus());
     }
     static class StrictLong extends ValueDeserializer<Long> {
         @Override public Long deserialize(JsonParser parser, DeserializationContext context) {

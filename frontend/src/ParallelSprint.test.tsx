@@ -10,7 +10,7 @@ beforeEach(() => {
   window.location.hash = '#/parallel-sprint?competition=1&discipline=3&category=2'
   vi.mocked(apiRequest).mockImplementation(async p => {
     if (p === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
-    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (p === `${base}/bracket`) return {id: 8, heats: [heat]}
     throw new Error(p)
@@ -62,7 +62,7 @@ test('rejects a timed discipline in a direct parallel link without requesting a 
   window.location.hash = '#/workspace/1/parallel-sprint?discipline=8&category=2'
   vi.mocked(apiRequest).mockImplementation(async p => {
     if (p === '/api/competitions/1') return {id: 1, title: 'Race'}
-    if (p.endsWith('/disciplines')) return [{id: 8, name: 'Timed', type: 'SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/disciplines')) return [{id: 8, name: 'Timed', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     throw new Error(p)
   })
@@ -75,7 +75,7 @@ test('selects an available round after changing bracket', async () => {
   window.location.hash = '#/workspace/1/parallel-sprint?discipline=3&category=2'
   vi.mocked(apiRequest).mockImplementation(async p => {
     if (p === '/api/competitions/1') return {id: 1, title: 'Race'}
-    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2, 4]}]
+    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2, 4]}]
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 4, displayName: 'R6'}]
     if (p.includes('/categories/2/bracket')) return {id: 8, heats: [heat, {...heat, id: 9, round: 2}]}
     if (p.includes('/categories/4/bracket')) return {id: 9, heats: [{...heat, id: 10, round: 1}]}
@@ -92,7 +92,7 @@ test('selects an available round after changing bracket', async () => {
 test('keeps a heat draft when filter changes are declined and warns before reload', async () => {
   vi.mocked(apiRequest).mockImplementation(async p => {
     if (p === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}, {id: 9, title: 'Other'}], totalPages: 1}
-    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2, 4]}, {id: 5, name: 'Another', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2, 4]}, {id: 5, name: 'Another', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 4, displayName: 'R6'}]
     if (p === `${base}/bracket`) return {id: 8, heats: [heat]}
     throw new Error(p)
@@ -115,4 +115,18 @@ test('keeps a heat draft when filter changes are declined and warns before reloa
   expect(window.dispatchEvent(unload)).toBe(false)
   window.dispatchEvent(new Event('result-completed'))
   expect(window.dispatchEvent(new Event('beforeunload', {cancelable: true}))).toBe(true)
+})
+
+test.each(['CREATED', 'STARTED', 'COMPLETED'])('offers seeding only when discipline is started (%s)', async status => {
+  vi.mocked(apiRequest).mockImplementation(async p => {
+    if (p === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
+    if (p.endsWith('/disciplines')) return [{id: 3, name: 'Parallel', type: 'PARALLEL_SPRINT', status, categoryIds: [2]}]
+    if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (p === `${base}/bracket`) return {id: null, heats: []}
+    throw new Error(p)
+  })
+  render(<ParallelSprint readOnly={false}/>)
+  await screen.findByText('No bracket has been seeded.')
+  if (status === 'STARTED') expect(screen.getByRole('button', {name: 'Seed bracket'})).toBeEnabled()
+  else expect(screen.queryByRole('button', {name: 'Seed bracket'})).not.toBeInTheDocument()
 })

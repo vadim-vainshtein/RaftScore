@@ -39,9 +39,10 @@ async function seed(api: APIRequestContext, title: string, crewCount: number, ty
   await write(api, 'put', `${competition}/status`, { status: 'STARTED', version })
   const [[category], disciplines] = await Promise.all([
     read<{ id: number }[]>(api, `${competition}/categories`),
-    read<{ id: number }[]>(api, `${competition}/disciplines`),
+    read<{ id: number, version: number }[]>(api, `${competition}/disciplines`),
   ])
   const [discipline, parallelDiscipline] = disciplines
+  for (const item of disciplines) await write(api, 'put', `${competition}/disciplines/${item.id}/status`, {status: 'STARTED', version: item.version})
   const crews: Crew[] = []
   for (let n = 1; n <= crewCount; n++) {
     const name = `Wave ${n}`
@@ -387,13 +388,12 @@ test.describe('parallel sprint on a phone', () => {
       await write(page.request, 'put', attemptPath(base, crew), {durationCentiseconds: 7000 + index, penaltyCentiseconds: 0, status: 'FINISHED', gates: []})
     }
     await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
-    const workspace = page.getByRole('main')
-    await workspace.getByRole('link', {name: 'Parallel sprint', exact: true}).click()
+    await page.getByRole('button', {name: 'Open navigation'}).click()
+    await page.getByRole('navigation', {name: 'Main navigation'}).getByRole('link', {name: 'Head to head', exact: true}).click()
     await expect(page).toHaveURL(/\/parallel-sprint\?/)
     await expect(page).not.toHaveURL(new RegExp(`[?&]discipline=${disciplineId}(?:&|$)`))
     await expect(page).toHaveURL(new RegExp(`[?&]category=${categoryId}(?:&|$)`))
-    await page.getByRole('combobox', {name: 'Discipline', exact: true}).click()
-    await page.getByRole('option', {name: 'Head to head', exact: true}).click()
+    await expect(page.getByRole('combobox', {name: 'Discipline', exact: true})).toHaveText('Head to head')
     await expect(page.getByRole('combobox', {name: 'Category', exact: true})).toHaveText('R1 / Open')
     const seeded = page.waitForResponse(response => response.url().endsWith(`${parallelBase}/bracket`) && response.request().method() === 'POST')
     await page.getByRole('button', {name: 'Seed bracket'}).click()
@@ -440,11 +440,10 @@ test.describe('parallel sprint on a phone', () => {
     const [firstRoundBox, secondRoundBox] = await Promise.all([roundOne.boundingBox(), roundTwo.boundingBox()])
     expect(secondRoundBox!.x).toBeGreaterThan(firstRoundBox!.x)
     expect(secondRoundBox!.y).toBe(firstRoundBox!.y)
-    await workspace.getByRole('link', {name: 'Result entry', exact: true}).click()
+    await page.getByRole('navigation', {name: 'Main navigation'}).getByRole('link', {name: 'Sprint', exact: true}).click()
     await expect(page).toHaveURL(/\/result-grid\?/)
     await expect(page).not.toHaveURL(new RegExp(`[?&]discipline=${parallelDisciplineId}(?:&|$)`))
-    await page.getByRole('combobox', {name: 'Discipline', exact: true}).click()
-    await page.getByRole('option', {name: 'Sprint', exact: true}).click()
+    await expect(page.getByRole('combobox', {name: 'Discipline', exact: true})).toHaveText('Sprint')
     await expect(page.getByRole('combobox', {name: 'Category', exact: true})).toHaveText('R1 / Open')
   })
 })

@@ -52,6 +52,7 @@ class AttemptResultController {
                 .filter(d -> d.getCompetition().getId().equals(competitionId)
                         && d.getCategories().stream().anyMatch(c -> c.getId().equals(categoryId)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        discipline.requireStarted();
         var crew = crews.findByIdAndCompetitionCategoryCompetitionId(crewId, competitionId)
                 .filter(c -> c.getCompetitionCategory().getId().equals(categoryId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));

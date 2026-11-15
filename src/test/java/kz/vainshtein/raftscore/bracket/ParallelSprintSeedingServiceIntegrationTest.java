@@ -208,6 +208,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
     }
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var d = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());
+        d.transitionTo(DisciplineStatus.STARTED);
         d.replaceCategories(List.of(category));
         disciplines.flush();
         return d;
