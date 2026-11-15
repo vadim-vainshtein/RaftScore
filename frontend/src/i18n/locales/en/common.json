@@ -384,7 +384,7 @@
     "downloadNamed": "Download backup from {{date}} ({{id}})"
   },
   "workspace": {
-    "preparation": "Preparation",
+    "overview": "Overview",
     "readiness": "Categories: {{categories}} · Disciplines: {{disciplines}}",
     "input": "Result entry",
     "protocol": "Protocol",

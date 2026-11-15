@@ -213,7 +213,7 @@ for (const width of [1440, 360, 390]) {
       await page.goto(`/?lang=en#/result-grid?competition=${competitionId}&discipline=${disciplineId}&category=${categoryId}`)
       await expect(page).toHaveURL(new RegExp(`/workspace/${competitionId}/results\\?`))
       await expect(category).toHaveText('R1 / Open')
-      await navigate(page, 'Preparation', touch)
+      await navigate(page, 'Overview', touch)
       await navigate(page, 'Crews', touch)
       await expect(workspace.getByText('Admitted', {exact: true}).first()).toBeVisible()
       await expect(workspace.getByText(/Alpha Racer/).first()).toBeVisible()

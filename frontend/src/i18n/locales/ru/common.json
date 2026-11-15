@@ -388,7 +388,7 @@
     "downloadNamed": "Скачать копию от {{date}} ({{id}})"
   },
   "workspace": {
-    "preparation": "Подготовка",
+    "overview": "Обзор",
     "readiness": "Категорий: {{categories}} · Дисциплин: {{disciplines}}",
     "input": "Ввод результатов",
     "protocol": "Протокол",

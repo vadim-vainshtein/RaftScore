@@ -378,3 +378,41 @@ test('workspace sidebar follows the current category and filters discipline link
   fireEvent.click(within(nav).getByRole('link', {name: 'Start lists'}))
   expect(window.location.hash).toBe('#/workspace/1/start-lists?category=2')
 })
+
+
+test('global navigation omits standalone disciplines and parallel sprint', async () => {
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  expect(within(nav).queryByRole('link', {name: 'Disciplines'})).not.toBeInTheDocument()
+  expect(within(nav).queryByRole('link', {name: 'Parallel sprint'})).not.toBeInTheDocument()
+})
+
+test('legacy parallel sprint links open the competition workspace', async () => {
+  window.history.replaceState(null, '', '/#/parallel-sprint?competition=1&discipline=3')
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'STARTED'}
+    if (path.endsWith('/disciplines') || path.endsWith('/categories') || path.endsWith('/entries/private')) return []
+    return {content: [], totalPages: 0}
+  })
+  render(<App/>)
+  expect(await screen.findByRole('heading', {name: 'Race'})).toBeInTheDocument()
+  expect(screen.getByRole('navigation', {name: 'Main navigation'})).toHaveTextContent('Disciplines')
+})
+
+
+test('created workspace navigation opens overview and hides generic scoring', async () => {
+  window.history.replaceState(null, '', '/#/workspace/1/disciplines')
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED'}
+    if (path.endsWith('/disciplines') || path.endsWith('/categories') || path.endsWith('/entries/private') || path.endsWith('/points-tables')) return []
+    return {content: [], totalPages: 0}
+  })
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  expect(within(nav).queryByRole('link', {name: 'Parallel sprint'})).not.toBeInTheDocument()
+  fireEvent.click(within(nav).getByRole('link', {name: 'Overview'}))
+  expect(window.location.hash).toBe('#/workspace/1')
+  expect(await screen.findByText('Categories: 0 · Disciplines: 0')).toBeInTheDocument()
+})
