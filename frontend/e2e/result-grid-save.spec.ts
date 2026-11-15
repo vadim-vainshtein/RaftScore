@@ -299,6 +299,20 @@ async function verifyMissingSlalomGate(page: Page, touch: boolean) {
   const gate = (number: number) => page.getByLabel(`Gate ${number} ${crew.name}`, { exact: true })
   const gatePage = page.getByLabel('Gate page (20 per page)', { exact: true })
   const saveButton = page.getByRole('button', {name: 'Save', exact: true})
+  if (!touch) {
+    const table = page.locator('table.result-grid')
+    await expect.poll(() => table.evaluate(el => {
+      const scroller = el.parentElement!
+      return scroller.scrollWidth - scroller.clientWidth
+    })).toBeGreaterThan(200)
+    await expect.poll(() => table.evaluate(el => {
+      const scroller = el.parentElement!
+      scroller.scrollLeft = 240
+      const [crew, attempt, time] = Array.from(el.querySelectorAll('thead th')).slice(0, 3).map(cell => cell.getBoundingClientRect())
+      scroller.scrollLeft = 0
+      return Math.max(Math.abs(attempt.left - crew.right), Math.abs(time.left - attempt.right))
+    })).toBeLessThanOrEqual(2)
+  }
   await input.fill('90.00')
   for (let n = 1; n <= 20; n++) await gate(n).selectOption(n === 2 ? '5' : '0')
   await gatePage.fill('2')

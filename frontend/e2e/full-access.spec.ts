@@ -23,11 +23,19 @@ async function saveTime(page: Page, crew: string, value: string, normalized: str
     const row = input.locator('xpath=ancestor::*[self::tr or self::article or @role="row"][1]')
     const save = row.getByRole('button', {name: 'Save', exact: true})
     const fieldBox = await input.boundingBox(), saveBox = await save.boundingBox()
+    const fieldCell = await input.locator('xpath=ancestor::td[1]').boundingBox()
     expect(fieldBox).not.toBeNull()
     expect(saveBox).not.toBeNull()
     expect(fieldBox!.height).toBeGreaterThanOrEqual(44)
     expect(saveBox!.height).toBeGreaterThanOrEqual(44)
     expect(fieldBox!.x + fieldBox!.width).toBeLessThanOrEqual(saveBox!.x)
+    expect(fieldBox!.x + fieldBox!.width).toBeLessThanOrEqual(fieldCell!.x + fieldCell!.width)
+    expect(await input.evaluate((field, time) => {
+      const style = getComputedStyle(field)
+      const canvas = document.createElement('canvas').getContext('2d')!
+      canvas.font = style.font
+      return field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - canvas.measureText(time).width
+    }, normalized)).toBeGreaterThanOrEqual(0)
     expect(Math.abs(fieldBox!.y - saveBox!.y)).toBeLessThan(24)
     expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
     await save.tap()
@@ -202,6 +210,7 @@ for (const width of [1440, 360, 390]) {
       await page.goto(`/?lang=en#/result-grid?competition=${competitionId}&discipline=${disciplineId}&category=${categoryId}`)
       await expect(page).toHaveURL(new RegExp(`/workspace/${competitionId}/results\\?`))
       await expect(category).toHaveText('R1 / Open')
+      await workspace.getByRole('link', {name: 'Preparation', exact: true}).click()
       await workspace.getByRole('link', {name: 'Crews', exact: true}).click()
       await expect(workspace.getByText('Admitted', {exact: true}).first()).toBeVisible()
       await expect(workspace.getByText(/Alpha Racer/).first()).toBeVisible()
