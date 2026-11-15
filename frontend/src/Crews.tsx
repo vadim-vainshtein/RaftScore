@@ -39,6 +39,10 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
     window.dispatchEvent(new Event('workspace-filter-change'))
   }, [fixedCompetition, category])
   const selection = useRef(0), editSelection = useRef(0)
+  const initialDraft = useRef<Draft | null>(null)
+  const startDraft = (value: Draft) => { initialDraft.current = value; setDraft(value) }
+  const canDiscard = () => !draft || JSON.stringify(draft) === JSON.stringify(initialDraft.current) || window.confirm(t('resultGrid.discard'))
+  const [pendingCrew, setPendingCrew] = useState<number | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0)
   const base = competition ? `/api/competitions/${competition.id}/entries` : ''
   const fail = (e: unknown) => setError(apiErrorKey(e))
@@ -70,12 +74,21 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
     return () => {active = false; clearTimeout(timer)}
   }, [search, readOnly])
   const changeCompetition = async (id: string) => {
+    if (!canDiscard()) return
     editSelection.current++; const generation = ++selection.current
-    setCompetition(null); setDraft(null); setCategories([]); setCrews([]); setCategory(''); setAdmission('all'); setError('')
+    setCompetition(null); setDraft(null); setPendingCrew(null); setCategories([]); setCrews([]); setCategory(''); setAdmission('all'); setError('')
     if (!id) { setCompetition(null); return }
     try { const result = await apiRequest<Competition>(`/api/competitions/${id}`); if (selection.current === generation) setCompetition(result) } catch (e) { if (selection.current === generation) fail(e) }
   }
-  const edit = (item: Crew) => setDraft({categoryId: item.categoryId, crewName: item.crewName, regionOrClub: item.regionOrClub, representative: item.representative, representativeIndex: item.representativePosition == null ? undefined : item.representativePosition - 1, contacts: item.representativeContacts ?? {}, startNumber: String(item.startNumber), roster: item.roster.map(m => ({...m, patronymic: m.patronymic ?? ''})), answers: Object.fromEntries(item.requirementAnswers.map(a => [a.requirementId, String(a.value)])), editing: item})
+  const edit = (item: Crew) => startDraft({categoryId: item.categoryId, crewName: item.crewName, regionOrClub: item.regionOrClub, representative: item.representative, representativeIndex: item.representativePosition == null ? undefined : item.representativePosition - 1, contacts: item.representativeContacts ?? {}, startNumber: String(item.startNumber), roster: item.roster.map(m => ({...m, patronymic: m.patronymic ?? ''})), answers: Object.fromEntries(item.requirementAnswers.map(a => [a.requirementId, String(a.value)])), editing: item})
+  const openCrew = (id: number) => {
+    if (!canDiscard()) return
+    const generation = selection.current, editGeneration = ++editSelection.current
+    setDraft(null); setPendingCrew(id); setError('')
+    void apiRequest<Crew>(`${base}/${id}`).then(item => {
+      if (selection.current === generation && editSelection.current === editGeneration) { setPendingCrew(null); edit(item) }
+    }).catch(e => { if (selection.current === generation && editSelection.current === editGeneration) { setPendingCrew(null); fail(e) } })
+  }
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!draft || busy || hasConflict) return
     setBusy(true); setError('')
@@ -102,15 +115,16 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   }
   const selectSearch = async (item: SearchResult) => {
     const target = searchTarget(item)
-    if (!target || !item.roster || target.crewSize !== item.roster.length) return
+    if (!target || !item.roster || target.crewSize !== item.roster.length || !canDiscard()) return
     setCategory(String(target.id))
     const generation = selection.current, editGeneration = ++editSelection.current
+    setPendingCrew(null)
     try {
       const result = await apiRequest<Crew>(`/api/competitions/${item.competitionId}/entries/${item.id}`)
       if (generation !== selection.current || editGeneration !== editSelection.current) return
       if (item.competitionId === competition?.id && item.categoryId === target.id) { edit(result); return }
       const contacts = Object.fromEntries(Object.entries(result.representativeContacts ?? {}).filter(([key]) => policies[key as Field] !== 'HIDDEN'))
-      setDraft({...empty(target), crewName: result.crewName, regionOrClub: result.regionOrClub ?? '',
+      startDraft({...empty(target), crewName: result.crewName, regionOrClub: result.regionOrClub ?? '',
         representative: policies.representative === 'HIDDEN' ? '' : result.representative,
         representativeIndex: policies.representative === 'HIDDEN' || result.representativePosition == null ? undefined : result.representativePosition - 1,
         contacts, roster: result.roster.map(person => ({...person, patronymic: person.patronymic ?? ''}))})
@@ -120,10 +134,37 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('crew.competition')} value={competition?.id ?? ''} onChange={e => void changeCompetition(e.target.value)}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-    {competition && <TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {editSelection.current++; setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {competition && <TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null); setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {competition && editable && <TextField select label={t('crew.selectCrew')} disabled={busy || !category} value={pendingCrew !== null && crews.some(c => c.id === pendingCrew && String(c.categoryId) === category) ? String(pendingCrew) : draft?.editing && String(draft.categoryId) === category ? String(draft.editing.id) : ''} onChange={e => { if (e.target.value) openCrew(Number(e.target.value)); else { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null) } }}><MenuItem value="">—</MenuItem>{crews.filter(c => String(c.categoryId) === category).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.startNumber} — {c.crewName} — {c.regionOrClub}</MenuItem>)}</TextField>}
     {!readOnly && competition?.status === 'COMPLETED' && <Typography>{t('crew.completedTarget')}</Typography>}
+    {competition && <>
+
+      {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}
+      {editable && <Button disabled={busy || !category} onClick={() => { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); const c = categories.find(c => String(c.id) === category); if (c) startDraft(empty(c)) }}>{t('crew.create')}</Button>}
+      {editable && !category && <Typography>{t('crew.chooseCategoryFirst')}</Typography>}
+      {editable && draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2}}>
+        {(['crewName', 'regionOrClub', 'startNumber'] as const).map(key => <TextField key={key} required={key !== 'regionOrClub'} label={t(`crew.${key}`)} type={key === 'startNumber' ? 'number' : 'text'} value={draft[key]} onChange={e => setDraft({...draft, [key]: e.target.value})}/>)}
+        {draft.roster.map((m, i) => <Box key={i} component="fieldset"><legend>{categories.find(category => category.id === draft.categoryId)?.seatLabels?.[i]?.trim() || t('crew.member', {number: i + 1})}</legend><TextField select label={t('crew.existingParticipant')} value={m.participantId ?? ''} onChange={e => { const selected = people.find(person => String(person.participantId) === String(e.target.value)); const roster = [...draft.roster]; roster[i] = selected ? {...selected} : member(); setDraft({...draft, roster}) }}><MenuItem value="">{t('crew.newParticipant')}</MenuItem>{people.map(person => <MenuItem key={person.participantId} value={person.participantId}>{person.surname} {person.givenName} {person.patronymic}</MenuItem>)}</TextField>{conflict(m) && <Typography role="status">{t('crew.participantConflict', {name: conflict(m)?.crewName})}</Typography>}{(['surname', 'givenName', 'patronymic'] as const).map(key => <TextField key={key} required={key !== 'patronymic'} label={t(`crew.${key}`)} value={m[key]} onChange={e => {const roster = [...draft.roster]; roster[i] = {...m, participantId: undefined, [key]: e.target.value}; setDraft({...draft, roster})}}/>)}</Box>)}
+        {requirements.map(r => <TextField key={r.id} select={r.valueType === 'YES_NO'} label={r.name} required={r.required} type={r.valueType === 'DATE' ? 'date' : r.valueType === 'NUMBER' ? 'number' : 'text'} slotProps={r.valueType === 'DATE' ? {inputLabel: {shrink: true}} : r.valueType === 'NUMBER' ? {htmlInput: {step: 'any'}} : undefined} value={draft.answers[r.id] ?? ''} onChange={e => setDraft({...draft, answers: {...draft.answers, [r.id]: e.target.value}})}>{r.valueType === 'YES_NO' && [<MenuItem key="empty" value="">—</MenuItem>, <MenuItem key="yes" value="true">{t('crew.yes')}</MenuItem>, <MenuItem key="no" value="false">{t('crew.no')}</MenuItem>]}</TextField>)}
+        {policies.representative !== 'HIDDEN' && <><TextField select label={t('crew.representativeChoice')} value={draft.representativeIndex ?? ''} onChange={e => setDraft({...draft, representativeIndex: e.target.value === '' ? undefined : Number(e.target.value)})}><MenuItem value="">{t('crew.newRepresentative')}</MenuItem>{draft.roster.map((m, i) => <MenuItem key={i} value={i}>{i + 1}. {m.surname} {m.givenName} {m.patronymic}</MenuItem>)}</TextField>{draft.representativeIndex === undefined && <TextField required={policies.representative === 'REQUIRED'} label={t('crew.representative')} value={draft.representative} onChange={e => setDraft({...draft, representative: e.target.value})}/>}</>}
+        {(['phone', 'whatsapp', 'telegram', 'email'] as const).filter(key => policies[key] !== 'HIDDEN').map(key => <TextField key={key} required={policies[key] === 'REQUIRED'} label={t(`crew.${key}`)} value={draft.contacts[key] ?? ''} onChange={e => setDraft({...draft, contacts: {...draft.contacts, [key]: e.target.value}})}/>)}
+        <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null) }}>{t('crew.cancel')}</Button></Box>
+      </Box>}
+      {visible.map(c => <Box key={c.id}>
+        <Typography>{c.startNumber} — {c.crewName} — {c.regionOrClub} — {categories.find(category => category.id === c.categoryId)?.displayName}</Typography>
+        {!readOnly && <>
+          <Typography>{c.roster.map(m => [m.surname, m.givenName, m.patronymic].filter(Boolean).join(' ')).join(', ')}</Typography>
+          {competition.admissionConfirmationRequired && <Typography component="span">{t(c.admissionDecision === null ? 'crew.pending' : c.admissionDecision ? 'crew.admitted' : 'crew.rejected')}</Typography>}
+        </>}
+        {editable && <>
+          <Button disabled={busy} onClick={() => openCrew(c.id)}>{t('crew.edit')}</Button>
+          {competition.admissionConfirmationRequired && <><Button disabled={busy} onClick={() => void decide(c, true)}>{t('crew.admit')}</Button><Button disabled={busy} onClick={() => void decide(c, false)}>{t('crew.reject')}</Button></>}
+        </>}
+      </Box>)}
+
+      </>}
     {<>
-      <TextField label={t('crew.search')} value={search} onChange={e => {searchGeneration.current++; setSearchResults([]); setSearch(e.target.value)}}/>
+      <TextField label={t('crew.search')} helperText={t('crew.searchHistoryHint')} value={search} onChange={e => {searchGeneration.current++; setSearchResults([]); setSearch(e.target.value)}}/>
       {search.trim() && searchResults.map(item => {
         const target = searchTarget(item)
         const compatible = categories.filter(c => c.crewSize === item.roster?.length)
@@ -134,31 +175,5 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
         </Box>
       })}
     </>}
-    {competition && <>
-
-      {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}
-      {editable && <Button disabled={busy || !category} onClick={() => { editSelection.current++; const c = categories.find(c => String(c.id) === category); if (c) setDraft(empty(c)) }}>{t('crew.create')}</Button>}
-      {editable && !category && <Typography>{t('crew.chooseCategoryFirst')}</Typography>}
-      {editable && draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2}}>
-        {(['crewName', 'regionOrClub', 'startNumber'] as const).map(key => <TextField key={key} required={key !== 'regionOrClub'} label={t(`crew.${key}`)} type={key === 'startNumber' ? 'number' : 'text'} value={draft[key]} onChange={e => setDraft({...draft, [key]: e.target.value})}/>)}
-        {draft.roster.map((m, i) => <Box key={i} component="fieldset"><legend>{categories.find(category => category.id === draft.categoryId)?.seatLabels?.[i]?.trim() || t('crew.member', {number: i + 1})}</legend><TextField select label={t('crew.existingParticipant')} value={m.participantId ?? ''} onChange={e => { const selected = people.find(person => String(person.participantId) === String(e.target.value)); const roster = [...draft.roster]; roster[i] = selected ? {...selected} : member(); setDraft({...draft, roster}) }}><MenuItem value="">{t('crew.newParticipant')}</MenuItem>{people.map(person => <MenuItem key={person.participantId} value={person.participantId}>{person.surname} {person.givenName} {person.patronymic}</MenuItem>)}</TextField>{conflict(m) && <Typography role="status">{t('crew.participantConflict', {name: conflict(m)?.crewName})}</Typography>}{(['surname', 'givenName', 'patronymic'] as const).map(key => <TextField key={key} required={key !== 'patronymic'} label={t(`crew.${key}`)} value={m[key]} onChange={e => {const roster = [...draft.roster]; roster[i] = {...m, participantId: undefined, [key]: e.target.value}; setDraft({...draft, roster})}}/>)}</Box>)}
-        {requirements.map(r => <TextField key={r.id} select={r.valueType === 'YES_NO'} label={r.name} required={r.required} type={r.valueType === 'DATE' ? 'date' : r.valueType === 'NUMBER' ? 'number' : 'text'} slotProps={r.valueType === 'DATE' ? {inputLabel: {shrink: true}} : r.valueType === 'NUMBER' ? {htmlInput: {step: 'any'}} : undefined} value={draft.answers[r.id] ?? ''} onChange={e => setDraft({...draft, answers: {...draft.answers, [r.id]: e.target.value}})}>{r.valueType === 'YES_NO' && [<MenuItem key="empty" value="">—</MenuItem>, <MenuItem key="yes" value="true">{t('crew.yes')}</MenuItem>, <MenuItem key="no" value="false">{t('crew.no')}</MenuItem>]}</TextField>)}
-        {policies.representative !== 'HIDDEN' && <><TextField select label={t('crew.representativeChoice')} value={draft.representativeIndex ?? ''} onChange={e => setDraft({...draft, representativeIndex: e.target.value === '' ? undefined : Number(e.target.value)})}><MenuItem value="">{t('crew.newRepresentative')}</MenuItem>{draft.roster.map((m, i) => <MenuItem key={i} value={i}>{i + 1}. {m.surname} {m.givenName} {m.patronymic}</MenuItem>)}</TextField>{draft.representativeIndex === undefined && <TextField required={policies.representative === 'REQUIRED'} label={t('crew.representative')} value={draft.representative} onChange={e => setDraft({...draft, representative: e.target.value})}/>}</>}
-        {(['phone', 'whatsapp', 'telegram', 'email'] as const).filter(key => policies[key] !== 'HIDDEN').map(key => <TextField key={key} required={policies[key] === 'REQUIRED'} label={t(`crew.${key}`)} value={draft.contacts[key] ?? ''} onChange={e => setDraft({...draft, contacts: {...draft.contacts, [key]: e.target.value}})}/>)}
-        <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { editSelection.current++; setDraft(null) }}>{t('crew.cancel')}</Button></Box>
-      </Box>}
-      {visible.map(c => <Box key={c.id}>
-        <Typography>{c.startNumber} — {c.crewName} — {c.regionOrClub} — {categories.find(category => category.id === c.categoryId)?.displayName}</Typography>
-        {!readOnly && <>
-          <Typography>{c.roster.map(m => [m.surname, m.givenName, m.patronymic].filter(Boolean).join(' ')).join(', ')}</Typography>
-          {competition.admissionConfirmationRequired && <Typography component="span">{t(c.admissionDecision === null ? 'crew.pending' : c.admissionDecision ? 'crew.admitted' : 'crew.rejected')}</Typography>}
-        </>}
-        {editable && <>
-          <Button disabled={busy} onClick={() => {const generation = selection.current, editGeneration = ++editSelection.current; void apiRequest<Crew>(`${base}/${c.id}`).then(item => {if (selection.current === generation && editSelection.current === editGeneration) edit(item)}).catch(e => {if (selection.current === generation && editSelection.current === editGeneration) fail(e)})}}>{t('crew.edit')}</Button>
-          {competition.admissionConfirmationRequired && <><Button disabled={busy} onClick={() => void decide(c, true)}>{t('crew.admit')}</Button><Button disabled={busy} onClick={() => void decide(c, false)}>{t('crew.reject')}</Button></>}
-        </>}
-      </Box>)}
-
-      </>}
   </Box>
 }
