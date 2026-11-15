@@ -44,22 +44,12 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   if (error || !id) return <Typography role="alert">{t('competition.error')}</Typography>
   if (!competition) return null
   if (competition.status === 'COMPLETED' && path.includes('/result-grid')) {window.location.replace(`#/workspace/${id}/results${path.includes('?') ? '?' + path.split('?')[1] : ''}`); return null}
-  const preserveQuery = (event: React.MouseEvent<HTMLAnchorElement>) => {event.currentTarget.hash = event.currentTarget.hash.split('?')[0] + (window.location.hash.includes('?') ? '?' + window.location.hash.split('?')[1] : '')}
-  const queryForInput = (target: 'result-grid' | 'parallel-sprint', raw: string) => {
-    const params = new URLSearchParams(raw.startsWith('?') ? raw.slice(1) : raw)
-    const selected = disciplineTypes?.find(d => String(d.id) === params.get('discipline'))
-    if (!selected || (target === 'parallel-sprint' ? selected.type !== 'PARALLEL_SPRINT' : !['SPRINT', 'SLALOM', 'LONG_RACE'].includes(selected.type))) params.delete('discipline')
-    return params.size ? '?' + params : ''
-  }
-  const preserveInputQuery = (target: 'result-grid' | 'parallel-sprint') => (event: React.MouseEvent<HTMLAnchorElement>) => {
-    event.currentTarget.hash = event.currentTarget.hash.split('?')[0] + queryForInput(target, window.location.hash.split('?')[1] ?? '')
-  }
   const section = /^\/workspace\/\d+\/([^?]+)/.exec(path)?.[1]
   const settingsParams = new URLSearchParams({view: id})
   const workspaceParams = new URLSearchParams(query)
   for (const key of ['discipline', 'category']) {const value = workspaceParams.get(key); if (value) settingsParams.set(key, value)}
   const body = section === 'crews' ? <Crews fixedCompetition={id} readOnly={readOnly} canEdit={!readOnly && competition.status !== 'COMPLETED'} onReadinessChange={() => setCrewRevision(value => value + 1)}/>
-    : section === 'disciplines' ? <Disciplines fixedCompetition={id} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
+    : section === 'disciplines' ? <Disciplines fixedCompetition={id} scoringAllowed={competition.status === 'STARTED'} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
     : section === 'results' ? <Results fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'}/>
     : section === 'start-lists' ? <StartLists fixedCompetition={id} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setStartRevision(value => value + 1)}/>
     : section === 'result-grid' && !readOnly && competition.status === 'STARTED' ? <ResultGrid fixedCompetition={id}/>
@@ -78,7 +68,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
       const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
       params.delete('complete')
       const currentQuery = params.size ? '?' + params : ''
-      setNextRoute(`/workspace/${id}/${status === 'STARTED' ? 'result-grid' : 'results'}${currentQuery}`)
+      setNextRoute(`/workspace/${id}/${status === 'STARTED' ? 'disciplines' : 'results'}${currentQuery}`)
     } catch {
       setCompletionError(true)
     } finally {
@@ -92,11 +82,6 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   }
   return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     <Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
-    <Box className="workspace-navigation" sx={{pointerEvents: completing ? 'none' : undefined}}>
-      <Box className="workspace-stage"><Button component="a" href={`#/workspace/${id}${query}`} aria-current={!section ? 'page' : ['crews', 'disciplines', 'start-lists'].includes(section) ? 'location' : undefined}>{t('workspace.preparation')}</Button>{(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="workspace-stage-links"><Button variant="outlined" component="a" href={`#/workspace/${id}/crews${query}`} aria-current={section === 'crews' ? 'page' : undefined}>{t('navigation.crews')}</Button><Button variant="outlined" component="a" href={`#/workspace/${id}/disciplines${query}`} aria-current={section === 'disciplines' ? 'page' : undefined}>{t('navigation.disciplines')}</Button><Button variant="outlined" component="a" href={`#/workspace/${id}/start-lists${query}`} aria-current={section === 'start-lists' ? 'page' : undefined} onClick={preserveQuery}>{t('navigation.startLists')}</Button></Box>}</Box>
-      {competition.status === 'STARTED' && !readOnly && <Box className="workspace-stage"><Button component="a" aria-current={section === 'result-grid' ? 'page' : undefined} href={`#/workspace/${id}/result-grid${queryForInput('result-grid', query)}`} onClick={preserveInputQuery('result-grid')}>{t('workspace.input')}</Button></Box>}
-      <Box className="workspace-stage"><Button component="a" aria-current={section === 'results' ? 'page' : undefined} href={`#/workspace/${id}/results${query}`} onClick={preserveQuery}>{t('workspace.protocol')}</Button><Box className="workspace-stage-links"><Button variant="outlined" component="a" href={`#/workspace/${id}/parallel-sprint${queryForInput('parallel-sprint', query)}`} onClick={preserveInputQuery('parallel-sprint')} aria-current={section === 'parallel-sprint' ? 'page' : undefined}>{t('navigation.parallelSprint')}</Button></Box></Box>
-    </Box>
     {(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>}
     <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}

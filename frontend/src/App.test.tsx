@@ -336,3 +336,45 @@ test('successful restore rechecks the session and returns to sign-in after expir
   expect(restored).toBe(true)
   expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path === '/api/auth/principal')).toHaveLength(2)
 })
+
+test('selects only the current discipline in workspace navigation', async () => {
+  desktop = true
+  window.history.replaceState(null, '', '/#/workspace/1/result-grid?discipline=3')
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'STARTED'}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint A', type: 'SPRINT', status: 'STARTED', categoryIds: []}, {id: 4, name: 'Sprint B', type: 'SPRINT', status: 'STARTED', categoryIds: []}]
+    if (path.endsWith('/categories') || path.endsWith('/entries/private')) return []
+    return {content: [], totalPages: 0}
+  })
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  expect(await within(nav).findByRole('link', {name: 'Sprint A'})).toHaveAttribute('aria-current', 'page')
+  const other = within(nav).getByRole('link', {name: 'Sprint B'})
+  expect(other).not.toHaveAttribute('aria-current')
+  fireEvent.click(other)
+  await waitFor(() => expect(screen.getByRole('combobox', {name: 'Discipline'})).toHaveTextContent('Sprint B'))
+  expect(within(nav).getByRole('link', {name: 'Sprint B'})).toHaveAttribute('aria-current', 'page')
+})
+
+test('workspace sidebar follows the current category and filters discipline links for compatibility', async () => {
+  desktop = true
+  window.history.replaceState(null, '', '/#/workspace/1/crews')
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/auth/principal') return {username: 'admin', role: 'FULL_ACCESS'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'STARTED', admissionConfirmationRequired: false}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint A', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}, {id: 4, name: 'Sprint B', type: 'SPRINT', status: 'STARTED', categoryIds: [9]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4', crewSize: 4}, {id: 9, displayName: 'R6', crewSize: 6}]
+    if (path.endsWith('/entries/private') || path.endsWith('/requirements') || path.endsWith('/start-list')) return []
+    return {content: [], totalPages: 0}
+  })
+  render(<App/>)
+  const nav = await screen.findByRole('navigation', {name: 'Main navigation'})
+  fireEvent.mouseDown(await screen.findByRole('combobox', {name: 'Category'}))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
+  await waitFor(() => expect(within(nav).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/workspace/1/start-lists?category=2'))
+  expect(await within(nav).findByRole('link', {name: 'Sprint A'})).toHaveAttribute('href', '#/workspace/1/result-grid?discipline=3&category=2')
+  expect(within(nav).getByRole('link', {name: 'Sprint B'})).toHaveAttribute('href', '#/workspace/1/result-grid?discipline=4')
+  fireEvent.click(within(nav).getByRole('link', {name: 'Start lists'}))
+  expect(window.location.hash).toBe('#/workspace/1/start-lists?category=2')
+})

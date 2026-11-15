@@ -82,7 +82,10 @@
     "rosterVariant": "Roster variant {{number}}",
     "openApplication": "Open entry",
     "copyApplication": "Create entry from this",
-    "chooseCategoryFirst": "Choose a category to create a crew."
+    "chooseCategoryFirst": "Choose a category to create a crew.",
+    "completedTarget": "This competition is completed. Choose another competition to add an entry.",
+    "chooseCompatible": "Choose a category above: {{categories}}.",
+    "targetCategory": "Target category: {{category}}."
   },
   "discipline": {
     "competition": "Competition",
@@ -110,7 +113,15 @@
     "noPoints": "None",
     "resultsEntered": "Results entered",
     "noResults": "No results",
-    "confirmPoints": "Changing the points table will recalculate existing results. Continue?"
+    "confirmPoints": "Changing the points table will recalculate existing results. Continue?",
+    "start": "Start discipline",
+    "complete": "Complete discipline",
+    "entryClosed": "Result entry is available only while the discipline is started.",
+    "states": {
+      "CREATED": "Preparation",
+      "STARTED": "Started",
+      "COMPLETED": "Completed"
+    }
   },
   "competition": {
     "title": "Title",

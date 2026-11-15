@@ -43,6 +43,7 @@ class AttemptRecalculationIntegrationTest extends PostgreSqlIntegrationTest {
         try {
             var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
             var discipline = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Slalom").type(DisciplineType.SLALOM).build());
+            discipline.transitionTo(DisciplineStatus.STARTED);
             discipline.replaceCategories(List.of(category));
             disciplines.saveAndFlush(discipline);
             configurations.saveAndFlush(new SlalomConfiguration(discipline, 1));

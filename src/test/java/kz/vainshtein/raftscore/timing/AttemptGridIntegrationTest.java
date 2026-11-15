@@ -54,6 +54,11 @@ class AttemptGridIntegrationTest extends PostgreSqlIntegrationTest {
             var url = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline.getId() + "/categories/" + category.getId() + "/crews/" + crew.getId() + "/attempts/1";
             var auth = user("admin").roles("FULL_ACCESS");
             var create = "{\"durationCentiseconds\":100,\"penaltyCentiseconds\":0,\"status\":\"FINISHED\",\"gates\":[{\"number\":1,\"penaltySeconds\":0}]}";
+            var statusUrl = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline.getId() + "/status";
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(create)).andExpect(status().isConflict());
+            var start = "{\"status\":\"STARTED\",\"version\":" + disciplines.findById(discipline.getId()).orElseThrow().getVersion() + "}";
+            mvc.perform(put(statusUrl).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType("application/json").content(start)).andExpect(status().isForbidden());
+            mvc.perform(put(statusUrl).with(auth).with(csrf()).contentType("application/json").content(start)).andExpect(status().isOk());
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(create)).andExpect(status().isOk());
             var attempt = attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(discipline.getId(), crew.getId(), 1).orElseThrow();
             var version = attempt.getVersion();
@@ -74,6 +79,10 @@ class AttemptGridIntegrationTest extends PostgreSqlIntegrationTest {
             mvc.perform(get(grid).with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
             var invalid = update.replace("\"version\":" + version, "\"version\":" + (version + 1)).replace("\"durationCentiseconds\":100", "\"durationCentiseconds\":90").replace("[{\"number\":1,\"penaltySeconds\":5}]", "[]");
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(invalid)).andExpect(status().isBadRequest());
+            var currentDiscipline = disciplines.findById(discipline.getId()).orElseThrow();
+            var complete = "{\"status\":\"COMPLETED\",\"version\":" + currentDiscipline.getVersion() + "}";
+            mvc.perform(put(statusUrl).with(auth).with(csrf()).contentType("application/json").content(complete)).andExpect(status().isOk());
+            mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(update)).andExpect(status().isConflict());
             var unchanged = attempts.findById(attempt.getId()).orElseThrow();
             assertThat(unchanged.getVersion()).isEqualTo(version + 1);
             assertThat(unchanged.getDurationCentiseconds()).isEqualTo(100);

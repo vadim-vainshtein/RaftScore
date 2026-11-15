@@ -149,3 +149,24 @@ test('clearing or changing search hides old hits and ignores delayed responses',
   await act(async () => {resolveDelayed([{id: 91, crewName: 'Late hit', startNumber: 2, startDate: '2025-01-01'}]); await Promise.resolve()})
   expect(screen.queryByText(/Late hit|Old hit/)).not.toBeInTheDocument()
 })
+
+test('copies a found crew into the only compatible category of a started competition', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => {
+    if (path === '/api/competitions/1') return Promise.resolve({id: 1, title: 'Race', status: 'STARTED', admissionConfirmationRequired: false})
+    if (path.includes('/crew-search?')) return Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'Found', startNumber: 1, startDate: '2025-01-01', competitionTitle: 'Old race', categoryName: 'R1', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}])
+    if (path === '/api/competitions/9/entries/90') return Promise.resolve({...detail, id: 90, crewName: 'Found', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]})
+    return previous(path)
+  })
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  await screen.findByLabelText('Category')
+  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'Found'}})
+  const copy = await screen.findByRole('button', {name: 'Create entry from this'})
+  expect(copy).toBeEnabled()
+  expect(screen.getByText('Target category: R1.')).toBeInTheDocument()
+  fireEvent.click(copy)
+  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('Found')
+  expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
+})

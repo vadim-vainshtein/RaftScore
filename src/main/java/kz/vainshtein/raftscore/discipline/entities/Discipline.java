@@ -37,6 +37,22 @@ public class Discipline extends VersionedEntity {
     @Column(nullable = false, columnDefinition = "TEXT")
     private DisciplineType type;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private DisciplineStatus status = DisciplineStatus.CREATED;
+
+    public void transitionTo(DisciplineStatus next) {
+        if (!((status == DisciplineStatus.CREATED && next == DisciplineStatus.STARTED)
+                || (status == DisciplineStatus.STARTED && next == DisciplineStatus.COMPLETED)))
+            throw new IllegalStateException("Invalid discipline status transition");
+        status = next;
+    }
+
+    public void requireStarted() {
+        if (status != DisciplineStatus.STARTED)
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "Discipline is not started");
+    }
+
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 

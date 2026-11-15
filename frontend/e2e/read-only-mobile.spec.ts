@@ -28,6 +28,7 @@ async function seed(baseURL: string) {
     const categories = await (await api.get(`/api/competitions/${competition.id}/categories`)).json()
     const disciplines = await (await api.get(`/api/competitions/${competition.id}/disciplines`)).json()
     const category = categories[0], sprint = disciplines.find((d: {name: string}) => d.name === 'Спринт')
+    await write(api, 'put', `/api/competitions/${competition.id}/disciplines/${sprint.id}/status`, {status: 'STARTED', version: sprint.version})
     const crewResponse = await write(api, 'post', `/api/competitions/${competition.id}/entries`, {categoryId: category.id, crewName: 'Волна', regionOrClub: 'Клуб', representative: 'Тренер', startNumber: 1, roster: [{surname: 'Иванов', givenName: 'Иван'}]})
     const crew = await crewResponse.json()
     const base = `/api/competitions/${competition.id}/disciplines/${sprint.id}/categories/${category.id}`

@@ -8,12 +8,13 @@ vi.mock('./api/client', async original => ({...(await original<typeof import('./
 const base = '/api/competitions/1/disciplines/3/categories/2/start-list'
 let locked = false
 let startEmpty = false
+let disciplineStatus = 'STARTED'
 beforeEach(() => {
-  window.location.hash = '#/start-lists?competition=1&discipline=3'; locked = false; startEmpty = false
+  window.location.hash = '#/start-lists?competition=1&discipline=3'; locked = false; startEmpty = false; disciplineStatus = 'STARTED'
   vi.mocked(csrfRequest).mockReset().mockResolvedValue({id: 7, locked: false, slots: []})
   vi.mocked(apiRequest).mockImplementation(async path => {
-    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race', timeZone: 'Asia/Almaty'}], totalPages: 1}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', categoryIds: [2]}]
+    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race', timeZone: 'Asia/Almaty', state: 'STARTED'}], totalPages: 1}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', status: disciplineStatus, categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/private')) return [{id: 4, categoryId: 2, crewName: 'A', startNumber: 1, eligible: true}, {id: 5, categoryId: 2, crewName: 'B', startNumber: 2, eligible: true}]
     if (path === base && startEmpty) return {id: null, locked: false, slots: []}
@@ -79,4 +80,12 @@ test('holds selection during mutation and immediately uses the returned list', a
   await waitFor(() => expect(screen.getByText('Generate start list')).toBeEnabled())
   fireEvent.click(screen.getByText('Generate start list'))
   expect(confirm).toHaveBeenCalledTimes(1)
+})
+
+test('does not offer result clearing for a completed discipline', async () => {
+  locked = true; disciplineStatus = 'COMPLETED'
+  render(<StartLists readOnly={false}/>); await selectCategory()
+  expect(screen.getByText('Locked: results have been entered.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Clear results'})).not.toBeInTheDocument()
+  expect(screen.getByRole('button', {name: 'Generate start list'})).toBeDisabled()
 })

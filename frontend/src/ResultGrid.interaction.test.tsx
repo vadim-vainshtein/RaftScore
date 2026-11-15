@@ -10,7 +10,7 @@ test('saves a versioned row with Ctrl+S and advances focus', async () => {
   const result = {crewId: 4, attemptNumber: 1, version: 7, durationCentiseconds: 100, startInstant: null, finishInstant: null, penaltyCentiseconds: 0, status: 'FINISHED', gates: []}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}, {crewId: 5, crewName: 'B', startNumber: 2, position: 2}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [result], standings: [{crewId: 4, place: 1, totalCentiseconds: 100, status: 'FINISHED'}]}
@@ -31,7 +31,7 @@ test('slalom requires explicit gate scores and clears DNS values', async () => {
   window.location.hash = '#/result-grid?competition=1&discipline=3'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Slalom', type: 'SLALOM', categoryIds: [2], gateCount: 2, attemptCount: 1}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Slalom', type: 'SLALOM', status: 'STARTED', categoryIds: [2], gateCount: 2, attemptCount: 1}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
@@ -55,7 +55,7 @@ test('retains a failed draft and preserves select arrow keys', async () => {
   window.location.hash = '#/result-grid?competition=1&discipline=3'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Slalom', type: 'SLALOM', categoryIds: [2], gateCount: 2, attemptCount: 1}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Slalom', type: 'SLALOM', status: 'STARTED', categoryIds: [2], gateCount: 2, attemptCount: 1}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: [{crewId: 4, place: 2, totalCentiseconds: 7425, status: 'FINISHED'}]}
@@ -83,7 +83,7 @@ test('resets gate page when changing discipline', async () => {
   window.location.hash = '#/result-grid?competition=1&discipline=3'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Long slalom', type: 'SLALOM', categoryIds: [2], gateCount: 25, attemptCount: 1}, {id: 4, name: 'Short slalom', type: 'SLALOM', categoryIds: [2], gateCount: 2, attemptCount: 1}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Long slalom', type: 'SLALOM', status: 'STARTED', categoryIds: [2], gateCount: 25, attemptCount: 1}, {id: 4, name: 'Short slalom', type: 'SLALOM', status: 'STARTED', categoryIds: [2], gateCount: 2, attemptCount: 1}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
@@ -110,11 +110,29 @@ test('rejects a parallel discipline in a direct timed grid link', async () => {
   window.location.hash = '#/workspace/1/result-grid?discipline=8&category=2'
   vi.mocked(apiRequest).mockImplementation(async p => {
     if (p === '/api/competitions/1') return {id: 1, title: 'Race'}
-    if (p.endsWith('/disciplines')) return [{id: 8, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (p.endsWith('/disciplines')) return [{id: 8, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     throw new Error(p)
   })
   render(<ResultGrid fixedCompetition="1"/>)
   await waitFor(() => expect(window.location.hash).toBe('#/workspace/1/result-grid?category=2'))
   expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('/attempt-grid') || p.endsWith('/start-list'))).toBe(false)
+})
+
+test.each(['CREATED', 'COMPLETED'])('disables all result controls when discipline is %s', async status => {
+  window.location.hash = '#/result-grid?competition=1&discipline=3&category=2'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Slalom', type: 'SLALOM', status, categoryIds: [2], gateCount: 1, attemptCount: 1}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
+    if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
+    throw new Error(path)
+  })
+  render(<ResultGrid/>)
+  expect(await screen.findByLabelText('Time A')).toBeDisabled()
+  expect(screen.getByLabelText('Status A')).toBeDisabled()
+  expect(screen.getByLabelText('Gate 1 A')).toBeDisabled()
+  fireEvent.keyDown(screen.getByLabelText('Time A'), {key: 's', ctrlKey: true})
+  expect(csrfRequest).not.toHaveBeenCalled()
 })

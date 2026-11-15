@@ -9,7 +9,7 @@ test('completion preserves a refused dirty draft and blocks while a save is pend
   window.location.hash = '#/workspace/1/result-grid?discipline=3'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
@@ -42,7 +42,7 @@ test('keeps the draft visible and disables edits while completion is pending or 
   window.location.hash = '#/workspace/1/result-grid?discipline=3'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}]}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
@@ -73,7 +73,7 @@ test('guards edited sprint heats and pending saves before completing', async () 
   const heat = {id: 9, version: 0, round: 1, number: 1, first: {id: 4, name: 'A', startNumber: 1}, second: {id: 5, name: 'B', startNumber: 2}, firstStatus: 'FINISHED', secondStatus: 'FINISHED', firstTimeCentiseconds: 100, secondTimeCentiseconds: 200, winnerSlot: 1, winnerOverridden: false}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'PARALLEL_SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/bracket')) return {id: 8, heats: [{...heat, ...(saved ? {version: 1, firstTimeCentiseconds: 300} : {})}]}
     throw new Error(path)
@@ -135,7 +135,7 @@ test('completion while protocol is open updates status and removes write actions
   window.location.hash = '#/workspace/1/results?discipline=3&category=2'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {slots: []}
     return []
@@ -149,24 +149,6 @@ test('completion while protocol is open updates status and removes write actions
   expect(screen.queryByRole('button', {name: 'Recalculate'})).not.toBeInTheDocument()
   await waitFor(() => expect(screen.queryByRole('button', {name: 'Complete competition'})).not.toBeInTheDocument())
   expect(window.location.hash).toBe('#/workspace/1/results?discipline=3&category=2')
-})
-
-test.each([['result-grid', 'parallel-sprint', 'SPRINT', 'Parallel sprint'], ['parallel-sprint', 'result-grid', 'PARALLEL_SPRINT', 'Result entry']])('filters incompatible discipline on %s to %s navigation', async (source, destination, type, label) => {
-  window.location.hash = `#/workspace/1/${source}?discipline=3&category=2`
-  vi.mocked(apiRequest).mockImplementation(async path => {
-    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Event', type, categoryIds: [2]}]
-    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
-    if (path.endsWith('/start-list')) return {slots: []}
-    if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}
-    if (path.endsWith('/bracket')) return {id: null, heats: []}
-    return []
-  })
-  render(<CompetitionWorkspace path={`/workspace/1/${source}?discipline=3&category=2`} readOnly={false}/>)
-  const link = await screen.findByRole('link', {name: label})
-  await waitFor(() => expect(link).toHaveAttribute('href', `#/workspace/1/${destination}?category=2`))
-  fireEvent.click(link, {ctrlKey: true})
-  expect((link as HTMLAnchorElement).hash).toBe(`#/workspace/1/${destination}?category=2`)
 })
 
 test.each([false, true])('completed workspace keeps admin roster access separate from writes (readOnly=%s)', async readOnly => {
@@ -216,7 +198,7 @@ test('refreshes readiness after a crew admission', async () => {
 test('refreshes readiness after saving a discipline', async () => {
   window.location.hash = '#/workspace/1/disciplines'
   let added = false
-  const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', displayOrder: 0, categoryIds: [], pointsTableId: null, resultsEntered: false}
+  const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', displayOrder: 0, categoryIds: [], pointsTableId: null, resultsEntered: false}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0}
     if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private')) return []
@@ -238,7 +220,7 @@ test('refreshes readiness after generating a start list', async () => {
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, timeZone: 'UTC'}
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1'}]
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/entries/private')) return [{id: 4, categoryId: 2, crewName: 'River', startNumber: 7, eligible: true}]
     if (path.endsWith('/start-list')) return {id: generated ? 1 : null, slots: generated ? [slot] : [], locked: false}
     throw new Error(path)
@@ -279,7 +261,7 @@ test('discarding a draft when clearing category leaves no unsaved rows at comple
   window.location.hash = '#/workspace/1/result-grid?discipline=3&category=2'
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 0, status: 'STARTED'}
-    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/start-list')) return {id: null, slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1}], locked: false}
     if (path.endsWith('/attempt-grid')) return {attempts: [], standings: []}

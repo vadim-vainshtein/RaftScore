@@ -4,7 +4,7 @@ import Disciplines from './Disciplines'
 import {apiRequest, csrfRequest} from './api/client'
 import './i18n'
 vi.mock('./api/client', async original => ({...(await original<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
-const slalom = {id: 3, name: 'Slalom', type: 'SLALOM', displayOrder: 1, categoryIds: [2], gateCount: 4, attemptCount: 2, qualificationDisciplineId: null, pointsTableId: null, version: 5, resultsEntered: false}
+const slalom = {id: 3, name: 'Slalom', type: 'SLALOM', status: 'STARTED', displayOrder: 1, categoryIds: [2], gateCount: 4, attemptCount: 2, qualificationDisciplineId: null, pointsTableId: null, version: 5, resultsEntered: false}
 const load = (items: object[] = [slalom]) => vi.mocked(apiRequest).mockImplementation(async path => {
   if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}], totalPages: 1}
   if (path.endsWith('/points-tables')) return [{id: 8, name: 'Standard'}]
@@ -21,7 +21,7 @@ test('edits persisted slalom settings with the current version', async () => {
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/configuration', 'PUT', expect.objectContaining({gateCount: 6, version: 5, categoryIds: [2]})))
 })
 test('read-only users see attempt counts without write controls', async () => {
-  load([slalom, {...slalom, id: 4, name: 'Sprint', type: 'SPRINT', attemptCount: null}, {...slalom, id: 5, name: 'Long race', type: 'LONG_RACE', attemptCount: null}])
+  load([slalom, {...slalom, id: 4, name: 'Sprint', type: 'SPRINT', status: 'STARTED', attemptCount: null}, {...slalom, id: 5, name: 'Long race', type: 'LONG_RACE', status: 'STARTED', attemptCount: null}])
   render(<Disciplines readOnly/>); await selectCompetition()
   expect(await screen.findByText(/Slalom.*Attempts: 2/)).toBeInTheDocument()
   expect(screen.getByText(/Sprint.*Attempts: 1/)).toBeInTheDocument()
@@ -43,8 +43,8 @@ test('requires confirmation before changing points after results exist', async (
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'PUT', expect.objectContaining({pointsTableId: 8, version: 5})))
 })
 test('clears a qualification selection when categories make it incompatible', async () => {
-  const sprint = {...slalom, id: 4, name: 'Qualifier', type: 'SPRINT', attemptCount: null}
-  const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', gateCount: null, attemptCount: null, qualificationDisciplineId: 4}
+  const sprint = {...slalom, id: 4, name: 'Qualifier', type: 'SPRINT', status: 'STARTED', attemptCount: null}
+  const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', gateCount: null, attemptCount: null, qualificationDisciplineId: 4}
   load([sprint, parallel]); render(<Disciplines readOnly={false}/>); await selectCompetition()
   const label = await screen.findByText(/Parallel —/)
   expect(label).not.toHaveTextContent('Parallel sprint')
@@ -59,9 +59,9 @@ test('clears a qualification selection when categories make it incompatible', as
 
 test('contextual discipline links retain only compatible categories', async () => {
   window.location.hash = '#/workspace/1/disciplines?category=2'
-  const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', categoryIds: [9]}
+  const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [9]}
   load([slalom, parallel])
-  render(<Disciplines fixedCompetition="1" readOnly={false}/>)
+  render(<Disciplines fixedCompetition="1" readOnly={false} scoringAllowed/>)
   const timedRow = (await screen.findByText(/Slalom —/)).parentElement!
   expect(within(timedRow).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/workspace/1/start-lists?discipline=3&category=2')
   expect(within(timedRow).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/workspace/1/results?discipline=3&category=2')
@@ -72,10 +72,19 @@ test('contextual discipline links retain only compatible categories', async () =
 })
 
 test('global discipline links retain their established routes', async () => {
-  render(<Disciplines readOnly={false}/>)
+  render(<Disciplines readOnly={false} scoringAllowed/>)
   await selectCompetition()
   const row = (await screen.findByText(/Slalom —/)).parentElement!
   expect(within(row).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/start-lists?competition=1&discipline=3')
   expect(within(row).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/results?competition=1&discipline=3')
   expect(within(row).getByRole('link', {name: 'Result entry'})).toHaveAttribute('href', '#/result-grid?competition=1&discipline=3')
+})
+
+test('starts a discipline with its current version and hides scoring until started', async () => {
+  load([{...slalom, status: 'CREATED'}])
+  render(<Disciplines readOnly={false}/>); await selectCompetition()
+  expect(await screen.findByText(/Preparation/)).toBeInTheDocument()
+  expect(screen.queryByRole('link', {name: 'Result entry'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Start discipline'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/status', 'PUT', {status: 'STARTED', version: 5}))
 })

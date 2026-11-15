@@ -6,7 +6,7 @@ import {apiErrorKey} from './api/errors'
 import {parseTime} from './result-time'
 
 type Competition = {id: number, title: string}
-type Discipline = {id: number, name: string, type: string, categoryIds: number[], gateCount: number | null, attemptCount: number | null}
+type Discipline = {id: number, name: string, type: string, status: string, categoryIds: number[], gateCount: number | null, attemptCount: number | null}
 type Category = {id: number, displayName: string}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number}
 type Result = {crewId: number, attemptNumber: number, version: number, durationCentiseconds: number | null, startInstant: string | null, finishInstant: string | null, penaltyCentiseconds: number, status: string, gates: {number: number, penaltySeconds: number}[]}
@@ -133,7 +133,7 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
     setConflicts(old => {const next = {...old}; delete next[id]; return next})
   }
   const save = async (id: number, index: number) => {
-    const row = rows[id]; if (!row || !row.dirty || busy || conflicts[id]) return
+    const row = rows[id]; if (selected?.status !== 'STARTED' || !row || !row.dirty || busy || conflicts[id]) return
     const duration = row.status === 'DNS' || row.status === 'DNF' ? null : row.duration.trim() ? parseTime(row.duration) : null
     const penalty = row.status === 'DNS' || selected?.type === 'SLALOM' ? 0 : parseTime(row.penalty)
     let firstMissing: number | undefined
@@ -175,6 +175,7 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
     <Box className="filter-panel">{!fixedCompetition && <TextField select label={t('startList.competition')} value={competition} disabled={busy || !!fixedCompetition} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setCompetition(e.target.value); setGate(1); setDiscipline(''); setCategory(''); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
     {competition && <TextField select label={t('startList.discipline')} value={discipline} disabled={busy} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setDiscipline(e.target.value); setGate(1); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{disciplines.filter(d => ['SPRINT', 'SLALOM', 'LONG_RACE'].includes(d.type)).map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}
     {discipline && <TextField select label={t('startList.category')} value={category} disabled={busy} onChange={e => {if (canLeave()) {setConflicts({}); setStale(false); setSavedNotice(null); setMissingGate(null); setCategory(e.target.value); setGate(1); setSlots([]); setResults([]); setRows({})}}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {selected && selected.status !== 'STARTED' && <Typography role="status">{t('discipline.entryClosed')}</Typography>}
     {category && selected?.type === 'SLALOM' && <><TextField type="number" label={t('resultGrid.attempt')} disabled={busy} value={attempt} slotProps={{htmlInput: {min: 1, max: selected.attemptCount ?? 1}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= (selected.attemptCount ?? 1) && canLeave()) {setConflicts({}); setMissingGate(null); currentAttempt.current = n; setAttempt(n); setRows(Object.fromEntries(slots.map(s => {const r = results.find(x => x.crewId === s.crewId && x.attemptNumber === n); return [s.crewId, r ? fromResult(r) : empty()]})))}}}/><TextField type="number" label={t('resultGrid.gatePage')} value={gate} slotProps={{htmlInput: {min: 1, max: Math.max(1, Math.ceil((selected.gateCount ?? 1) / 20))}}} onChange={e => {const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= Math.ceil((selected.gateCount ?? 1) / 20)) setGate(n)}}/></>}
     </Box>{category && <Typography className="result-grid-hint" color="text.secondary" variant="body2">{t('resultGrid.statusHelp')}</Typography>}
     {error && <Typography role="alert">{t(error === 'invalid' ? 'resultGrid.invalid' : error === 'saveFailed' ? 'resultGrid.saveFailed' : error as 'apiError.network')}</Typography>}
@@ -213,21 +214,21 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
           <td>{slot.position}. {slot.startNumber} — {slot.crewName}{row.dirty ? ' *' : ''}</td>
           <td data-label={t('resultGrid.attempt')}>{attempt}</td>
           <td data-label={t('resultGrid.time')}><input aria-label={`${t('resultGrid.time')} ${slot.crewName}`} data-row={index} data-col="0"
-            value={row.duration} disabled={busy || row.status === 'DNS' || row.status === 'DNF'}
+            value={row.duration} disabled={selected?.status !== 'STARTED' || busy || row.status === 'DNS' || row.status === 'DNF'}
             onChange={e => change(slot.crewId, {duration: e.target.value})}/></td>
           <td data-label={t('resultGrid.penalty')}>{selected?.type === 'SLALOM'
             ? <span aria-label={`${t('resultGrid.penalty')} ${slot.crewName}`}>{Object.values(row.gates).reduce((sum, value) => sum + value, 0)} s</span>
             : <input aria-label={`${t('resultGrid.penalty')} ${slot.crewName}`} data-row={index} data-col="1"
-              value={row.penalty} disabled={busy || row.status === 'DNS'}
+              value={row.penalty} disabled={selected?.status !== 'STARTED' || busy || row.status === 'DNS'}
               onChange={e => change(slot.crewId, {penalty: e.target.value})}/>}</td>
           <td data-label={t('resultGrid.status')}><select aria-label={`${t('resultGrid.status')} ${slot.crewName}`} data-row={index} data-col="2"
-            value={row.status} disabled={busy} onChange={e => change(slot.crewId, {status: e.target.value})}>
+            value={row.status} disabled={selected?.status !== 'STARTED' || busy} onChange={e => change(slot.crewId, {status: e.target.value})}>
             {(['FINISHED','DNS','DNF','DSQ_ATTEMPT','DSQ_DISCIPLINE','DSQ_COMPETITION'] as const).map(status =>
               <option key={status} value={status}>{t(`resultGrid.statuses.${status}`)}</option>)}
           </select></td>
           {selected?.type === 'SLALOM' && gateNumbers.map((number, i) => <td key={number} data-label={`${t('resultGrid.gate')} ${number}`}>
             <select aria-label={`${t('resultGrid.gate')} ${number} ${slot.crewName}`} data-row={index} data-col={3 + i} data-crew={slot.crewId} data-gate={number} aria-invalid={missingGate?.id === slot.crewId && missingGate.number === number}
-              value={row.gates[number] ?? ''} disabled={busy || row.status === 'DNS'} onChange={e => {
+              value={row.gates[number] ?? ''} disabled={selected?.status !== 'STARTED' || busy || row.status === 'DNS'} onChange={e => {
                 const gates = {...row.gates}
                 if (e.target.value === '') delete gates[number]
                 else gates[number] = Number(e.target.value)
@@ -239,7 +240,7 @@ export default function ResultGrid({fixedCompetition}: {fixedCompetition?: strin
           <td data-label={t('resultGrid.total')}>{total}</td>
           <td data-label={t('resultGrid.best')}>{formatTime(standing?.totalCentiseconds ?? null) || '—'}</td>
           <td data-label={t('resultGrid.place')}>{standing?.place ?? '—'}</td>
-          <td><Button disabled={!row.dirty || busy || !!conflicts[slot.crewId]} onClick={() => void save(slot.crewId, index)}>{t('resultGrid.save')}</Button></td>
+          <td><Button disabled={selected?.status !== 'STARTED' || !row.dirty || busy || !!conflicts[slot.crewId]} onClick={() => void save(slot.crewId, index)}>{t('resultGrid.save')}</Button></td>
         </tr>
       })}</tbody>
     </Box></Box>}

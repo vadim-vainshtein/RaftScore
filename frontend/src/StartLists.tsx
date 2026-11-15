@@ -7,8 +7,8 @@ import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 import {wallTimeToInstant} from './i18n/wall-time'
 
-type Competition = {id: number, title: string, timeZone: string}
-type Discipline = {id: number, name: string, type: string, categoryIds: number[]}
+type Competition = {id: number, title: string, timeZone: string, status?: string, state?: string}
+type Discipline = {id: number, name: string, type: string, status: string, categoryIds: number[]}
 type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number, plannedTime: string | null}
@@ -78,7 +78,10 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     if (to < 0 || to >= order.length || from === to) return
     const next = [...order]; const [item] = next.splice(from, 1); next.splice(to, 0, item); setOrder(next)
   }
-  const zone = competitions.find(c => String(c.id) === competition)?.timeZone
+  const selectedCompetition = competitions.find(c => String(c.id) === competition)
+  const selectedDiscipline = disciplines.find(d => String(d.id) === discipline)
+  const canClear = !readOnly && (selectedCompetition?.status ?? selectedCompetition?.state) === 'STARTED' && selectedDiscipline?.status === 'STARTED'
+  const zone = selectedCompetition?.timeZone
   const firstInstant = first && zone ? wallTimeToInstant(first, zone) : null
   const validInterval = /^\d+$/.test(interval) && Number.isSafeInteger(Number(interval))
   const generate = async () => {
@@ -102,7 +105,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     } finally {setBusy(false)}
   }
   const clear = async () => {
-    if (busy || !window.confirm(t('startList.confirmClear'))) return
+    if (!canClear || busy || !window.confirm(t('startList.confirmClear'))) return
     setBusy(true); setError('')
     try {
       await csrfRequest(`${base}/source-results`, 'DELETE')
@@ -139,7 +142,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
           <td>{slot.plannedTime ? formatDate(new Date(slot.plannedTime), locale, zone ?? 'UTC', {dateStyle: 'medium', timeStyle: 'medium'}) : '—'}</td></tr>)}</tbody>
       </Box>}
       {!readOnly && <>
-        {list.locked && <Button disabled={busy} onClick={() => void clear()}>{t('startList.clear')}</Button>}
+        {list.locked && canClear && <Button disabled={busy} onClick={() => void clear()}>{t('startList.clear')}</Button>}
         <TextField select label={t('startList.mode')} value={mode} disabled={busy || list.locked} onChange={e => setMode(e.target.value)}>
       <MenuItem value="random">{t('startList.random')}</MenuItem>
       <MenuItem value="manual">{t('startList.manual')}</MenuItem>

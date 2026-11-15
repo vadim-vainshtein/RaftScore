@@ -106,8 +106,8 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
                 .andExpect(status().isCreated()).andReturn();
         Number otherId = JsonPath.read(other.getResponse().getContentAsString(), "$.id");
-        var disciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order) values (?, 'Slalom', 'SLALOM', 0) returning id", Long.class, id.longValue());
-        var otherDisciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order) values (?, 'Other', 'SLALOM', 0) returning id", Long.class, otherId.longValue());
+        var disciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Slalom', 'SLALOM', 0, 'CREATED') returning id", Long.class, id.longValue());
+        var otherDisciplineId = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Other', 'SLALOM', 0, 'CREATED') returning id", Long.class, otherId.longValue());
         var url = "/api/competitions/" + id + "/tiebreak";
         mvc.perform(get(url).with(user("reader").roles("READ_ONLY"))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value(0));

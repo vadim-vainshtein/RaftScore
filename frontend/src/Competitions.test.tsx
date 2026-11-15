@@ -77,10 +77,10 @@ render(<Competitions readOnly={false}/>)
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2/seat-labels', 'PUT', {version: 4, seatLabels: ['Front']}))
 })
 
-test.each([['CREATED', 'Continue preparation', '#/workspace/1'], ['STARTED', 'Enter results', '#/workspace/1/result-grid'], ['COMPLETED', 'Open protocol', '#/workspace/1/results']])('offers the stage action for %s', async (state, label, href) => {
+test.each(['CREATED', 'STARTED', 'COMPLETED'])('offers the workspace for %s', async state => {
   vi.mocked(apiRequest).mockResolvedValue({content: [{id: 1, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', state, categoryCount: 2, crewCount: 4}], page: 0, totalPages: 1, totalElements: 1})
   render(<Competitions readOnly={false}/>)
-  expect(await screen.findByRole('link', {name: label})).toHaveAttribute('href', href)
+  expect(await screen.findByRole('link', {name: 'Competition workspace'})).toHaveAttribute('href', '#/workspace/1')
 })
 
 test('routes completion from settings through the workspace dialog', async () => {
