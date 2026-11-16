@@ -149,6 +149,36 @@ class CompetitionCategoryControllerIntegrationTest extends PostgreSqlIntegration
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void deletesOnlyUnusedCurrentCategoriesWithAccess() throws Exception {
+        var category = categories.saveAndFlush(kz.vainshtein.raftscore.competition.entities.CompetitionCategory.builder()
+                .competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var url = "/api/competitions/" + competition.getId() + "/categories/" + category.getId();
+        var admin = user("admin").roles("FULL_ACCESS");
+        try {
+            mvc.perform(delete(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
+                    .andExpect(status().isForbidden());
+            mvc.perform(delete(url).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":1}"))
+                    .andExpect(status().isConflict());
+            mvc.perform(delete("/api/competitions/999999/categories/" + category.getId()).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
+                    .andExpect(status().isNotFound());
+            jdbc.update("insert into crew_entries (competition_category_id, crew_name, region_or_club, representative, start_number) values (?, 'Crew', 'Club', 'Rep', 1)", category.getId());
+            mvc.perform(delete(url).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("competition_category.in_use"));
+            assertThat(categories.existsById(category.getId())).isTrue();
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            mvc.perform(delete(url).with(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"version\":0}"))
+                    .andExpect(status().isNoContent());
+            assertThat(categories.existsById(category.getId())).isFalse();
+        } finally {
+            jdbc.update("delete from crew_entries where competition_category_id = ?", category.getId());
+            jdbc.update("delete from competition_categories where id = ?", category.getId());
+            competitions.deleteById(competition.getId());
+            templates.deleteById(template.getId());
+        }
+    }
+
+    @Test
     void documentsResponses() throws Exception {
         mvc.perform(get("/v3/api-docs").with(user("reader").roles("READ_ONLY")))
                 .andExpect(status().isOk())

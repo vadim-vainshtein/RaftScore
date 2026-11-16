@@ -138,3 +138,50 @@ test('does not redirect after saving if the user navigated away', async () => {
   await waitFor(() => expect(screen.queryByLabelText(/Title/)).not.toBeInTheDocument())
   expect(window.location.hash).toBe('#/competitions')
 })
+
+
+test('adds and removes categories without losing competition draft', async () => {
+  const details = {id: 1, version: 0, title: 'Race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  const category = {id: 2, displayName: 'R4 / Open', crewSize: 4, version: 0, seatLabels: []}
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? [] : path.startsWith('/api/category-templates') ? {content: [{id: 3, displayName: 'R4 / Open', archived: false}], totalPages: 1} : {content: [], totalPages: 0})
+  vi.mocked(csrfRequest).mockResolvedValue(category)
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  window.location.hash = '#/competitions?edit=1&fromWorkspace=1'
+  render(<Competitions readOnly={false}/> )
+  fireEvent.change(await screen.findByLabelText(/Title/), {target: {value: 'Draft title'}})
+  fireEvent.mouseDown(await screen.findByLabelText('Category template'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4 / Open'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Add category'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories', 'POST', {templateId: 3}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Remove category R4 / Open'}))
+  expect(window.confirm).toHaveBeenCalledWith('Remove category R4 / Open? This change will be saved immediately.')
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories/2', 'DELETE', {version: 0}))
+  expect(screen.getByLabelText(/Title/)).toHaveValue('Draft title')
+  vi.mocked(window.confirm).mockRestore()
+})
+
+
+test('canceling competition settings keeps an immediately saved category', async () => {
+  const details = {id: 1, version: 0, title: 'Race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  const category = {id: 2, displayName: 'R4 / Open', crewSize: 4, version: 0, seatLabels: []}
+  let savedCategories: typeof category[] = []
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? savedCategories : path.startsWith('/api/category-templates') ? {content: [{id: 3, displayName: category.displayName, archived: false}], totalPages: 1} : {content: [], totalPages: 0})
+  vi.mocked(csrfRequest).mockImplementation(async (path, method) => {if (path.endsWith('/categories') && method === 'POST') {savedCategories = [category]; return category} throw new Error('Unexpected request')})
+  window.location.hash = '#/competitions?edit=1'
+  const view = render(<Competitions readOnly={false}/>)
+  expect(await screen.findByText('Category list changes are saved immediately.')).toBeInTheDocument()
+  fireEvent.change(await screen.findByLabelText(/Title/), {target: {value: 'Unsaved title'}})
+  fireEvent.mouseDown(await screen.findByLabelText('Category template'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4 / Open'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Add category'}))
+  await screen.findByRole('button', {name: 'Remove category R4 / Open'})
+  expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/categories', 'POST', {templateId: 3})
+  fireEvent.click(screen.getByRole('button', {name: 'Cancel'}))
+  expect(screen.queryByLabelText(/Title/)).not.toBeInTheDocument()
+  expect(csrfRequest).not.toHaveBeenCalledWith('/api/competitions/1', 'PUT', expect.anything())
+  view.unmount()
+  window.location.hash = '#/competitions?edit=1'
+  render(<Competitions readOnly={false}/>)
+  expect(await screen.findByRole('button', {name: 'Remove category R4 / Open'})).toBeInTheDocument()
+  expect(screen.getByLabelText(/Title/)).toHaveValue('Race')
+})

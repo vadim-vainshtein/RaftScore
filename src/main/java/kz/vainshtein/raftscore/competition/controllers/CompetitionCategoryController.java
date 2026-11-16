@@ -79,6 +79,23 @@ class CompetitionCategoryController {
                 .body(CategorySnapshot.from(category));
     }
 
+    record DeleteCategoryRequest(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807")
+                                 @Digits(integer = 19, fraction = 0) BigDecimal version) { }
+
+    @DeleteMapping("/{categoryId}")
+    @Transactional
+    ResponseEntity<Void> delete(@PathVariable Long competitionId, @PathVariable Long categoryId,
+                                @Valid @RequestBody DeleteCategoryRequest request) {
+        lifecycle.requireEditable(competitionId);
+        var category = categories.findByIdAndCompetitionId(categoryId, competitionId)
+                .orElseThrow(CategoryNotFound::new);
+        if (category.getVersion() != request.version().longValueExact())
+            throw new org.springframework.dao.OptimisticLockingFailureException("Stale category");
+        categories.delete(category);
+        categories.flush();
+        return ResponseEntity.noContent().build();
+    }
+
     record SeatEdit(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807")
                     @Digits(integer = 19, fraction = 0) BigDecimal version,
                     @NotNull java.util.List<String> seatLabels) { }
@@ -112,9 +129,11 @@ class CompetitionCategoryController {
     @ExceptionHandler(DataIntegrityViolationException.class)
     ResponseEntity<ApiError> integrityViolation(DataIntegrityViolationException exception) {
         for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation
-                    && "competition_categories_combination_uk".equals(violation.getConstraintName())) {
-                return ResponseEntity.status(409).body(ApiError.of("competition_category.duplicate"));
+            if (cause instanceof ConstraintViolationException violation) {
+                if ("competition_categories_combination_uk".equals(violation.getConstraintName()))
+                    return ResponseEntity.status(409).body(ApiError.of("competition_category.duplicate"));
+                if ("crew_entries_category_fk".equals(violation.getConstraintName()) || "discipline_categories_category_fk".equals(violation.getConstraintName()))
+                    return ResponseEntity.status(409).body(ApiError.of("competition_category.in_use"));
             }
         }
         throw exception;
