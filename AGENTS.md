@@ -4,6 +4,8 @@ For each new implementation task, create a separate worktree and branch before m
 and implement the task in that branch. Keep changes scoped to the task and
 preserve unrelated local work.
 
+At task intake, read the target branch instructions as well as the current worktree instructions. When the target differs, read them directly with `git show <target-branch>:AGENTS.md` before planning or editing.
+
 ## Development Review
 
 These requirements apply to the general development pipeline for this repository.
@@ -24,9 +26,7 @@ These requirements apply to the general development pipeline for this repository
   commits only reviewed task changes, pushes the task branch to GitHub, opens a PR
   to the repository's default branch, and merges it once required checks and branch
   protection allow. This workflow authorizes these actions for project tasks.
-- After merging, fast-forward local `master` to `origin/master`. Restart the local application
-  from the updated `master`, or start it if it is stopped. Verify that it responds
-  and post its URL in the chat for quick verification.
+- After merging, run `scripts/Complete-RaftScorePostMerge.ps1 -MergedCommit <merge-commit>` before the final response. It verifies the running JAR and HTTP endpoints on port 8081; report its verified commit and URL. The script can be rerun after failure. If blocked, report the exact failed stage and reason, and preserve the existing database.
 - Retain explicit authorization gates for deployment and other unrelated gated actions.
 
 ## Code Readability
