@@ -245,6 +245,8 @@
     "mode": "Order",
     "number": "Start number",
     "manual": "Manual",
+    "firstDate": "First start date",
+    "firstTime": "First start time",
     "first": "First start",
     "timePolicy": "Times use the competition time zone. If a clock time occurs twice, the earlier instant is used; nonexistent times are rejected."
   },

@@ -13,7 +13,7 @@ beforeEach(() => {
   window.location.hash = '#/start-lists?competition=1&discipline=3'; locked = false; startEmpty = false; disciplineStatus = 'STARTED'
   vi.mocked(csrfRequest).mockReset().mockResolvedValue({id: 7, locked: false, slots: []})
   vi.mocked(apiRequest).mockImplementation(async path => {
-    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race', timeZone: 'Asia/Almaty', state: 'STARTED'}], totalPages: 1}
+    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race', startDate: '2026-01-01', timeZone: 'Asia/Almaty', state: 'STARTED'}], totalPages: 1}
     if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', status: disciplineStatus, categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/private')) return [{id: 4, categoryId: 2, crewName: 'A', startNumber: 1, eligible: true}, {id: 5, categoryId: 2, crewName: 'B', startNumber: 2, eligible: true}]
@@ -39,7 +39,7 @@ test('manual ordering submits UTC timing after confirmation', async () => {
   render(<StartLists readOnly={false}/>); await selectCategory()
   fireEvent.mouseDown(screen.getByLabelText('Order')); fireEvent.click(await screen.findByRole('option', {name: 'Manual'}))
   fireEvent.click(screen.getByRole('button', {name: 'Move up: B'}))
-  fireEvent.change(screen.getByLabelText('First start (Asia/Almaty)'), {target: {value: '2026-01-01T10:00'}})
+  fireEvent.change(screen.getByLabelText(/First start time \(Asia\/Almaty\)/), {target: {value: '10:00'}})
   fireEvent.change(screen.getByLabelText('Interval (seconds)'), {target: {value: '60'}})
   fireEvent.click(screen.getByText('Generate start list'))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(base, 'PUT', {random: false, reverseOverall: false, crewIds: [5, 4], firstStart: '2026-01-01T05:00:00.000Z', intervalSeconds: 60}))
@@ -56,6 +56,7 @@ test('a concurrent results conflict locks the controls and refreshes the list', 
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(csrfRequest).mockImplementation(async () => {locked = true; throw new (await import('./api/client')).ApiError(409, {})})
   render(<StartLists readOnly={false}/>); await selectCategory()
+  fireEvent.change(screen.getByLabelText(/First start time/), {target: {value: '10:00'}})
   fireEvent.click(screen.getByText('Generate start list'))
   await waitFor(() => expect(screen.getByText('Locked: results have been entered.')).toBeInTheDocument())
   expect(screen.getByText('Generate start list')).toBeDisabled()
@@ -74,6 +75,7 @@ test('holds selection during mutation and immediately uses the returned list', a
   fireEvent.mouseDown(await screen.findByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   await screen.findByText('No start list yet.')
+  fireEvent.change(screen.getByLabelText(/First start time/), {target: {value: '10:00'}})
   fireEvent.click(screen.getByText('Generate start list'))
   expect(screen.getByLabelText('Competition')).toHaveAttribute('aria-disabled', 'true')
   resolve({id: 7, locked: false, slots: []})
@@ -88,4 +90,48 @@ test('does not offer result clearing for a completed discipline', async () => {
   expect(screen.getByText('Locked: results have been entered.')).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Clear results'})).not.toBeInTheDocument()
   expect(screen.getByRole('button', {name: 'Generate start list'})).toBeDisabled()
+})
+
+test('defaults date and interval, requires time, and submits editable timing', async () => {
+  startEmpty = true
+  render(<StartLists readOnly={false}/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
+  await screen.findByText('No start list yet.')
+  expect(screen.getByLabelText(/First start date/)).toHaveValue('2026-01-01')
+  expect(screen.getByLabelText(/First start time \(Asia\/Almaty\)/)).toHaveValue('')
+  expect(screen.getByLabelText('Interval (seconds)')).toHaveValue(120)
+  fireEvent.click(screen.getByText('Generate start list'))
+  expect(csrfRequest).not.toHaveBeenCalled()
+  expect(screen.getByRole('alert')).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText(/First start date/), {target: {value: '2026-01-02'}})
+  fireEvent.change(screen.getByLabelText(/First start time \(Asia\/Almaty\)/), {target: {value: '10:00'}})
+  fireEvent.click(screen.getByText('Generate start list'))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(base, 'PUT', expect.objectContaining({firstStart: '2026-01-02T05:00:00.000Z', intervalSeconds: 120})))
+})
+
+test('resets timing when selecting another category and preserves it after a failed request', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', status: 'STARTED', categoryIds: [2, 6]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 6, displayName: 'R6'}]
+    if (path.endsWith('/categories/6/start-list')) return {id: null, locked: false, slots: []}
+    return original(path)
+  })
+  startEmpty = true
+  vi.mocked(csrfRequest).mockRejectedValueOnce(new Error('offline'))
+  render(<StartLists readOnly={false}/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
+  await screen.findByText('No start list yet.')
+  fireEvent.change(screen.getByLabelText(/First start time/), {target: {value: '10:00'}})
+  fireEvent.click(screen.getByText('Generate start list'))
+  await screen.findByRole('alert')
+  expect(screen.getByLabelText(/First start time/)).toHaveValue('10:00')
+  fireEvent.mouseDown(screen.getByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R6'}))
+  await screen.findByText('No start list yet.')
+  expect(screen.getByLabelText(/First start time/)).toHaveValue('')
+  expect(screen.getByLabelText(/First start date/)).toHaveValue('2026-01-01')
+  expect(screen.getByLabelText('Interval (seconds)')).toHaveValue(120)
 })
