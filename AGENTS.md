@@ -4,7 +4,9 @@ For each new implementation task, create a separate worktree and branch before m
 and implement the task in that branch. Keep changes scoped to the task and
 preserve unrelated local work.
 
-At task intake, read the target branch instructions as well as the current worktree instructions. When the target differs, read them directly with `git show <target-branch>:AGENTS.md` before planning or editing.
+At intake, read the actual target branch instructions separately from the current worktree instructions using `git show <target-branch>:AGENTS.md` before planning or editing. Plan the entire sequence through review, PR, merge, and runtime verification before work begins.
+
+Under the standing user authorization in the global `AGENTS.md`, the coordinator completes an implementation task only after the PR is reported `MERGED` and `scripts/Complete-RaftScorePostMerge.ps1 -MergedCommit <SHA>` confirms that the running JAR comes from the latest fetched `origin/master` containing that merge and passes HTTP verification. Report the PR link, verified running SHA and URL. On a real blocker, report the exact failed stage and reason and the last verified runtime status.
 
 ## Development Review
 
@@ -24,9 +26,9 @@ These requirements apply to the general development pipeline for this repository
   independently gated operation requires their input.
 - After validation succeeds and the independent reviewer approves, the coordinator
   commits only reviewed task changes, pushes the task branch to GitHub, opens a PR
-  to the repository's default branch, and merges it once required checks and branch
-  protection allow. This workflow authorizes these actions for project tasks.
-- After merging, run `scripts/Complete-RaftScorePostMerge.ps1 -MergedCommit <merge-commit>` before the final response. It verifies the running JAR and HTTP endpoints on port 8081; report its verified commit and URL. The script can be rerun after failure. If blocked, report the exact failed stage and reason, and preserve the existing database.
+  to `master`, waits for required checks and branch protection, and merges it when
+  they allow, under the global standing user authorization.
+- After merging, run the post-merge script described above before the final response. The script can be rerun after failure; preserve the existing database.
 - Retain explicit authorization gates for deployment and other unrelated gated actions.
 
 ## Browser Visual Annotations
