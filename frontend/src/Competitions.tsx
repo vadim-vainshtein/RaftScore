@@ -21,9 +21,11 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
   const {t, i18n} = useTranslation()
   const draftKey = username ? `raftscore.wizard.${username}` : undefined
   const contextParams = new URLSearchParams()
-  const routeParams = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
+  const [sourceHash] = useState(() => window.location.hash)
+  const routeParams = new URLSearchParams(sourceHash.split('?')[1] ?? '')
   for (const key of ['discipline', 'category']) {const value = routeParams.get(key); if (value) contextParams.set(key, value)}
   const workspaceQuery = contextParams.size ? '?' + contextParams : ''
+  const returnToWorkspace = routeParams.get('fromWorkspace') === '1'
   const completionParams = new URLSearchParams(contextParams)
   completionParams.set('complete', '1')
   const displayDate = (value: string | null) => value ? formatDate(new Date(`${value}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC') : '—'
@@ -32,21 +34,22 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
   const [details, setDetails] = useState<Details | null>(null), [draft, setDraft] = useState<Draft | null>(null)
   const originalDraft = useRef<string | null>(null)
   const editCompetition = (item: Details) => {originalDraft.current = JSON.stringify(item); setDraft(item)}
+  const [loadingDetails, setLoadingDetails] = useState(() => /^\d+$/.test(routeParams.get('edit') ?? routeParams.get('view') ?? ''))
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [creating, setCreating] = useState(false)
   useEffect(() => { let active = true
     const query = new URLSearchParams({search, sort, page: String(page), size: '20'})
     apiRequest<Page>(`/api/competitions?${query}`).then(value => {if (!Array.isArray(value.content)) throw new Error('Invalid competition page'); if (active) {setResult(value); setError('')}}).catch(e => {if (active) {setResult(null); setError(apiErrorKey(e))}})
     return () => {active = false}
   }, [search, sort, page, revision, t])
-  useEffect(() => {const params = new URLSearchParams(window.location.hash.split('?')[1] ?? ''); const id = params.get('edit') ?? params.get('view'); if (id && /^\d+$/.test(id)) apiRequest<Details>(`/api/competitions/${id}`).then(item => {if (params.has('edit') && !readOnly && item.status !== 'COMPLETED') editCompetition(item); else setDetails(item)}).catch(e => setError(apiErrorKey(e)))}, [readOnly])
+  useEffect(() => {const params = new URLSearchParams(window.location.hash.split('?')[1] ?? ''); const id = params.get('edit') ?? params.get('view'); if (id && /^\d+$/.test(id)) apiRequest<Details>(`/api/competitions/${id}`).then(item => {if (params.has('edit') && !readOnly && item.status !== 'COMPLETED') editCompetition(item); else setDetails(item)}).catch(e => setError(apiErrorKey(e))).finally(() => setLoadingDetails(false))}, [readOnly])
   const save = async (event: FormEvent) => {event.preventDefault(); if (!draft || busy) return
     setBusy(true); setError('')
-    try {const {id, ...body} = draft; delete (body as Draft & {status?: string}).status; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); setDetails(saved); setRevision(v => v + 1)}
+    try {const {id, ...body} = draft; delete (body as Draft & {status?: string}).status; const saved = await csrfRequest<Details>(id ? `/api/competitions/${id}` : '/api/competitions', id ? 'PUT' : 'POST', {...body, endDate: body.endDate || null}); setDraft(null); if (returnToWorkspace && id && window.location.hash === sourceHash) window.location.hash = `/workspace/${id}${workspaceQuery}`; else setDetails(saved); setRevision(v => v + 1)}
     catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-    {creating ? <CompetitionWizard draftKey={draftKey} onCancel={() => {if (window.confirm(t('wizard.discardDraft'))) {if (draftKey) localStorage.removeItem(draftKey); setCreating(false)}}} onSaved={saved => {setCreating(false); window.location.hash = `/workspace/${saved.id}`; setRevision(v => v + 1)}}/> : draft ? <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
+    {loadingDetails ? null : creating ? <CompetitionWizard draftKey={draftKey} onCancel={() => {if (window.confirm(t('wizard.discardDraft'))) {if (draftKey) localStorage.removeItem(draftKey); setCreating(false)}}} onSaved={saved => {setCreating(false); window.location.hash = `/workspace/${saved.id}`; setRevision(v => v + 1)}}/> : draft ? <><Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
       <TextField required label={t('competition.title')} value={draft.title} onChange={e => setDraft({...draft, title: e.target.value})}/>
       <TextField required type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={draft.startDate} onChange={e => setDraft({...draft, startDate: e.target.value})}/>
       <TextField type="date" label={t('competition.endDate')} slotProps={{inputLabel: {shrink: true}, htmlInput: {min: draft.startDate}}} value={draft.endDate} onChange={e => setDraft({...draft, endDate: e.target.value})}/>
@@ -57,8 +60,8 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
       <Typography>{t('crew.representativeSettings')}</Typography>
       {(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => <TextField key={field} select label={t(`crew.${field}`)} value={(draft.representativeFields ?? defaultFields)[field]} onChange={e => setDraft({...draft, representativeFields: {...(draft.representativeFields ?? defaultFields), [field]: e.target.value as Policy}})}>{(['HIDDEN', 'OPTIONAL', 'REQUIRED'] as const).map(policy => <MenuItem key={policy} value={policy}>{t(`crew.policy.${policy}`)}</MenuItem>)}</TextField>)}
       {draft.id && <Button component="a" href={`#/workspace/${draft.id}/disciplines?${new URLSearchParams({...Object.fromEntries(contextParams), editDisciplines: '1'})}`} onClick={event => {if (busy || (JSON.stringify(draft) !== originalDraft.current && !window.confirm(t('competition.discardChanges')))) event.preventDefault()}}>{t('navigation.disciplines')}</Button>}
-      <Box><Button type="submit" disabled={busy}>{t('competition.save')}</Button><Button disabled={busy} onClick={() => setDraft(null)}>{t('competition.cancel')}</Button></Box>
-    </Box> : details ? <Box sx={{display: 'grid', gap: 1}}>
+      <Box><Button type="submit" disabled={busy}>{t('competition.save')}</Button><Button disabled={busy} onClick={() => {if (returnToWorkspace && draft.id) window.location.hash = `/workspace/${draft.id}${workspaceQuery}`; else setDraft(null)}}>{t('competition.cancel')}</Button></Box>
+    </Box>{returnToWorkspace && draft.id && <CompetitionCategorySeats competitionId={draft.id}/>}</> : details ? <Box sx={{display: 'grid', gap: 1}}>
       <Typography variant="h5">{details.title}</Typography><Typography>{displayDate(details.startDate)} – {displayDate(details.endDate)} · {details.location} · {details.timeZone}</Typography>
       {details.description && <Typography>{details.description}</Typography>}
       <Typography>{t('competition.admission')}: {t(details.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}</Typography>

@@ -128,7 +128,7 @@ test('carries only selected filters to settings', async () => {
     return []
   })
   render(<CompetitionWorkspace path="/workspace/1/start-lists?discipline=3&category=2&unused=ignored" readOnly={false}/>)
-  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?view=1&discipline=3&category=2')
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?edit=1&fromWorkspace=1&discipline=3&category=2')
 })
 
 test('completion while protocol is open updates status and removes write actions', async () => {
@@ -292,7 +292,7 @@ test('discipline edit link opens composition editing while overview keeps compet
   view.rerender(<CompetitionWorkspace path="/workspace/1/disciplines?category=2&editDisciplines=1" readOnly={false}/>)
   expect(await screen.findByRole('button', {name: 'Create discipline'})).toBeInTheDocument()
   view.rerender(<CompetitionWorkspace path="/workspace/1" readOnly={false}/>)
-  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?view=1&category=2')
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?edit=1&fromWorkspace=1&category=2')
 })
 
 test('refreshes the competition version after deleting its tiebreak before starting', async () => {
@@ -301,7 +301,7 @@ test('refreshes the competition version after deleting its tiebreak before start
   const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', status: 'CREATED', displayOrder: 0, categoryIds: [], pointsTableId: null, version: 0, resultsEntered: false}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: deleted ? 1 : 0}
-    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private')) return []
+    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private') || path === '/api/points-catalog') return []
     if (path.endsWith('/disciplines')) return deleted ? [] : [discipline]
     throw new Error(path)
   })
