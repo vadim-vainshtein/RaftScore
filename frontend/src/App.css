@@ -64,3 +64,5 @@
 }
 
 .start-list-table th { text-align: left; }
+
+.MuiInputBase-inputMultiline:focus-visible { outline: none !important; }

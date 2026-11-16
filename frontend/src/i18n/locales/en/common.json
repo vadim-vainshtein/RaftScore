@@ -189,6 +189,7 @@
       "DATE": "Date",
       "NUMBER": "Number"
     },
+    "noDisciplines": "No disciplines have been added yet",
     "addDiscipline": "Add discipline",
     "preset": "Russian points preset",
     "copyPoints": "Copy points from",

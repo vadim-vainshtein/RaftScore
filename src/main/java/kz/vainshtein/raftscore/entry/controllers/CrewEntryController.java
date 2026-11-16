@@ -220,7 +220,7 @@ class CrewEntryController {
         lifecycle.requireEditable(competitionId);
         validateRoster(request.roster(), category.getCrewSize());
         validateRepresentativePosition(request.representativePosition(), category.getCrewSize());
-        validateRepresentative(category.getCompetition(), request.representative(), request.representativeContacts());
+        validateRepresentative(category.getCompetition(), request.representative(), request.representativeContacts(), category.getCrewSize() == 1);
         var entry = entries.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName(request.crewName())
                 .regionOrClub(request.regionOrClub()).representative(request.representative()).startNumber(request.startNumber().intValueExact()).build());
         entry.setRepresentativeContacts(request.representativeContacts());
@@ -249,7 +249,7 @@ class CrewEntryController {
         var position = updatedRepresentativePosition(request, entry, roster);
         validateRepresentativePosition(position, entry.getCompetitionCategory().getCrewSize());
         var contacts = request.representativeContacts() == null ? entry.getRepresentativeContacts() : request.representativeContacts();
-        validateRepresentative(entry.getCompetitionCategory().getCompetition(), request.representative(), contacts);
+        validateRepresentative(entry.getCompetitionCategory().getCompetition(), request.representative(), contacts, entry.getCompetitionCategory().getCrewSize() == 1);
         entry.updateDetails(request.crewName(), request.regionOrClub(), request.representative(), request.startNumber().intValueExact());
         entry.setRepresentativeContacts(contacts);
         entry.setRepresentativePosition(position);
@@ -302,9 +302,10 @@ class CrewEntryController {
     ResponseEntity<ApiError> invalidAnswers() { return ResponseEntity.badRequest().body(ApiError.of("crew_entry.invalid_requirement_answers")); }
     private static class InvalidAnswers extends RuntimeException { }
 
-    private void validateRepresentative(kz.vainshtein.raftscore.competition.entities.Competition competition, String representative, java.util.Map<String, String> contacts) {
+    private void validateRepresentative(kz.vainshtein.raftscore.competition.entities.Competition competition, String representative, java.util.Map<String, String> contacts, boolean single) {
         var values = contacts == null ? java.util.Map.<String, String>of() : contacts;
         if (!java.util.Set.of("phone", "whatsapp", "telegram", "email").containsAll(values.keySet()) || values.values().stream().anyMatch(v -> v == null || v.indexOf(0) >= 0)) throw new InvalidRepresentative();
+        if (single) return;
         for (var field : competition.getRepresentativeFields().entrySet()) {
             var value = field.getKey().equals("representative") ? representative : values.get(field.getKey());
             if (field.getValue().equals("REQUIRED") && (value == null || value.isBlank())) throw new InvalidRepresentative();

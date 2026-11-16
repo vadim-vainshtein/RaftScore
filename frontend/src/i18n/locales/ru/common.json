@@ -68,7 +68,7 @@
     "whatsapp": "WhatsApp",
     "telegram": "Telegram",
     "email": "Электронная почта",
-    "representativeChoice": "Представитель из состава",
+    "representativeChoice": "Представитель",
     "newRepresentative": "Другой человек",
     "useSearch": "Использовать состав",
     "policy": {
@@ -142,7 +142,7 @@
     "save": "Сохранить",
     "cancel": "Отмена",
     "edit": "Изменить",
-    "back": "К списку",
+    "back": "К списку соревнований",
     "search": "Поиск по названию",
     "sort": "Порядок по дате начала",
     "ascending": "Сначала ранние",
@@ -193,6 +193,7 @@
       "DATE": "Дата",
       "NUMBER": "Число"
     },
+    "noDisciplines": "Дисциплины ещё не добавлены",
     "addDiscipline": "Добавить дисциплину",
     "preset": "Российская таблица очков",
     "copyPoints": "Копировать очки из",

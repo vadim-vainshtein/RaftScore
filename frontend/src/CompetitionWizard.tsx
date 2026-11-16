@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react'
-import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography} from '@mui/material'
+import {Box, Button, Checkbox, FormControlLabel, MenuItem, TextField, Typography, Tabs, Tab, IconButton} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, fieldErrorKey} from './api/errors'
@@ -28,6 +28,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
   const [stored] = useState(() => { try { return draftKey ? JSON.parse(localStorage.getItem(draftKey) ?? 'null') : null } catch { return null } })
   const [step, setStep] = useState<number>(stored?.step ?? 0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [competition, setCompetition] = useState<Competition>(stored?.competition ?? {title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
+  const [activeDiscipline, setActiveDiscipline] = useState(0)
   const [expandedPoints, setExpandedPoints] = useState<Record<number, boolean>>({})
   const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>(stored?.categories ?? [])
   const [requirements, setRequirements] = useState<Requirement[]>(stored?.requirements ?? []), [disciplines, setDisciplines] = useState<Discipline[]>(stored?.disciplines ?? [])
@@ -102,7 +103,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
     <Typography variant="h5">{t(("wizard.step" + step) as "wizard.step0")}
       </Typography>
       <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert" color="error">{t(error as 'apiError.network')}</Typography>}
-      {issues.length > 0 && <Box role="alert" sx={{color: 'error.main', border: 1, p: 1}}>{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button color="error" onClick={() => {setStep(issue.step); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
+      {issues.length > 0 && <Box role="alert" sx={{color: 'error.main', border: 1, p: 1}}>{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button color="error" onClick={() => {setStep(issue.step); const match = issue.field.match(/^disciplines\[(\d+)\]/); if (match) setActiveDiscipline(Number(match[1])); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
     {step === 0 && <>
       <TextField id="competition.title" label={t('competition.title')} value={competition.title} onChange={e => setCompetition({...competition, title: e.target.value})}/>
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>
@@ -138,8 +139,11 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       </Box>)}
       </>}
     {step === 3 && <>
-      <Button onClick={() => setDisciplines([...disciplines, freshDiscipline(disciplines.length)])}>{t('wizard.addDiscipline')}
-      </Button>{disciplines.map((d, i) => <Box key={i} sx={{display: 'grid', gap: 1, border: 1, p: 2}}>
+      <Box sx={{display: 'flex', alignItems: 'center'}}><Tabs value={disciplines.length ? activeDiscipline : false} onChange={(_, value: number) => setActiveDiscipline(value)} variant="scrollable" aria-label={t('wizard.step3')}>
+        {disciplines.map((d, i) => <Tab key={i} label={disciplineName(d)} id={`discipline-tab-${i}`} aria-controls={`discipline-panel-${i}`}/>)}</Tabs>
+        {disciplines.length > 0 && <IconButton aria-label={t('wizard.addDiscipline')} onClick={() => {setActiveDiscipline(disciplines.length); setDisciplines([...disciplines, freshDiscipline(disciplines.length)])}}>+</IconButton>}</Box>
+      {disciplines.length === 0 && <Box role="tabpanel" sx={{border: 1, p: 2}}><Typography>{t('wizard.noDisciplines')}</Typography><Button onClick={() => {setActiveDiscipline(0); setDisciplines([freshDiscipline(0)])}}>{t('wizard.addDiscipline')}</Button></Box>}
+      {disciplines.map((d, i) => <Box key={i} role="tabpanel" id={`discipline-panel-${i}`} aria-labelledby={`discipline-tab-${i}`} hidden={activeDiscipline !== i} sx={{'&:not([hidden])': {display: 'grid'}, gap: 1, border: 1, p: 2}}>
       <TextField id={`disciplines[${i}].name`} label={t('discipline.name')} value={d.name} onChange={e => updateDiscipline(i, {name: e.target.value})}/>
       <TextField select label={t('discipline.type')} value={d.type} onChange={e => {const type = e.target.value; updateDiscipline(i, {type, gateCount: type === 'SLALOM' ? 1 : null, attemptCount: type === 'SLALOM' ? 2 : null, qualificationDisciplineIndex: null})}}>{types.map(type => <MenuItem key={type} value={type}>{t(('discipline.types.' + type) as 'discipline.types.SPRINT')}
       </MenuItem>)}
@@ -165,7 +169,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       <Button onClick={() => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: [...d.pointsTable!.rows, {place: d.pointsTable!.rows.length + 1, points: 0}]}})}>{t('wizard.addRow')}
       </Button>
       </>}</>}
-      <Button onClick={() => {setDisciplines(disciplines.filter((_, n) => n !== i).map((x, n) => ({...x, displayOrder: n, qualificationDisciplineIndex: x.qualificationDisciplineIndex === i ? null : x.qualificationDisciplineIndex !== null && x.qualificationDisciplineIndex > i ? x.qualificationDisciplineIndex - 1 : x.qualificationDisciplineIndex}))); setTiebreak(tiebreak === i ? null : tiebreak !== null && tiebreak > i ? tiebreak - 1 : tiebreak)}}>{t('wizard.remove')}
+      <Button onClick={() => {setActiveDiscipline(Math.max(0, Math.min(i, disciplines.length - 2))); setExpandedPoints(Object.fromEntries(Object.entries(expandedPoints).filter(([key]) => Number(key) !== i).map(([key, value]) => [Number(key) > i ? Number(key) - 1 : Number(key), value]))); setDisciplines(disciplines.filter((_, n) => n !== i).map((x, n) => ({...x, displayOrder: n, qualificationDisciplineIndex: x.qualificationDisciplineIndex === i ? null : x.qualificationDisciplineIndex !== null && x.qualificationDisciplineIndex > i ? x.qualificationDisciplineIndex - 1 : x.qualificationDisciplineIndex}))); setTiebreak(tiebreak === i ? null : tiebreak !== null && tiebreak > i ? tiebreak - 1 : tiebreak)}}>{t('wizard.remove')}
       </Button>
       </Box>)}
       <TextField select label={t('wizard.tiebreak')} value={tiebreak ?? ''} onChange={e => {setTiebreakExplicit(true); setTiebreak(e.target.value === '' ? null : Number(e.target.value))}}>

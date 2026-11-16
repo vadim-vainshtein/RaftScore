@@ -25,6 +25,80 @@ test('submits the current roster, typed answers and version', async () => {
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({version: 3, roster: [{participantId: 9}], requirementAnswers: [{requirementId: 5, value: false}]})))
 })
 
+test('preserves an existing single participant representative on save', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4')
+    ? Promise.resolve({...detail, representative: 'Smith Sam', representativePosition: 1}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  await screen.findByLabelText(/Surname/)
+  fireEvent.change(screen.getByLabelText(/Region or club/), {target: {value: 'New club'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT',
+    expect.objectContaining({representative: 'Smith Sam', representativePosition: 1, regionOrClub: 'New club'})))
+})
+
+test('updates the linked representative name when a single participant is renamed', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4')
+    ? Promise.resolve({...detail, representative: 'Smith Sam', representativePosition: 1}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  fireEvent.change(await screen.findByLabelText(/Surname/), {target: {value: 'Jones'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT',
+    expect.objectContaining({crewName: 'Jones Sam', representative: 'Jones Sam', representativePosition: 1})))
+})
+
+test('uses the saved entry for the next number while the list refresh is pending', async () => {
+  let resolveRefresh!: (value: unknown) => void
+  let loads = 0
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => {
+    if (path.endsWith('/entries/private') && ++loads > 1) return new Promise(resolve => {resolveRefresh = resolve})
+    return previous(path)
+  })
+  vi.mocked(csrfRequest).mockResolvedValue({...detail, id: 5, startNumber: 1, crewName: 'Doe Jane', roster: [{participantId: 11, surname: 'Doe', givenName: 'Jane', patronymic: ''}]})
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Doe'}})
+  fireEvent.change(screen.getByLabelText(/Given name/), {target: {value: 'Jane'}})
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/}))
+  fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(loads).toBe(2))
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  expect(screen.getByLabelText(/Start number/)).toHaveValue(2)
+  await act(async () => resolveRefresh([detail, {...detail, id: 5, startNumber: 1}]))
+})
+
+test('saves a selected participant without a patronymic', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/private')
+    ? Promise.resolve([{...detail, categoryId: 3, roster: [{participantId: 9, surname: 'Smith', givenName: 'Sam', patronymic: null}]}]) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  fireEvent.mouseDown(screen.getByLabelText('Existing participant'))
+  fireEvent.click(screen.getByRole('option', {name: /Smith Sam/}))
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/}))
+  fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST',
+    expect.objectContaining({crewName: 'Smith Sam', roster: [{participantId: 9}]})))
+})
+
 test('selects participants by ID when names match', async () => {
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}]}
@@ -42,9 +116,7 @@ test('selects participants by ID when names match', async () => {
   fireEvent.mouseDown(screen.getByLabelText('Existing participant'))
   fireEvent.click(screen.getAllByRole('option', {name: /Smith Sam/})[1])
   expect(screen.getByRole('status')).toHaveTextContent('Rapid')
-  fireEvent.change(screen.getByLabelText(/Crew name/), {target: {value: 'New'}})
   fireEvent.change(screen.getByLabelText(/Region or club/), {target: {value: 'Club'}})
-  fireEvent.change(screen.getByLabelText(/Representative/, {selector: 'input'}), {target: {value: 'Coach'}})
   fireEvent.change(screen.getByLabelText(/Start number/), {target: {value: '8'}})
   expect(screen.getByRole('button', {name: 'Save'})).toBeDisabled()
   fireEvent.submit(screen.getByRole('button', {name: 'Save'}).closest('form')!)
@@ -85,7 +157,7 @@ test('ignores an edit response after a newer create intent', async () => {
   fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
   fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
   await act(async () => { resolveDetail(detail); await pending })
-  expect(screen.getByLabelText(/Crew name/)).toHaveValue('')
+  expect(screen.getByLabelText(/Surname/)).toHaveValue('')
 })
 
 test('localizes known API errors and never displays server details', async () => {
@@ -100,6 +172,8 @@ test('localizes known API errors and never displays server details', async () =>
 })
 
 test('uses the selected roster participant as representative', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/categories') ? Promise.resolve([{id: 2, displayName: 'R1', crewSize: 2}]) : path.endsWith('/entries/4') ? Promise.resolve({...detail, roster: [...detail.roster, {surname: 'Other', givenName: 'Person', patronymic: ''}]}) : previous(path))
   render(<Crews/>)
   fireEvent.mouseDown(await screen.findByLabelText('Competition'))
   fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
@@ -109,7 +183,7 @@ test('uses the selected roster participant as representative', async () => {
   await screen.findByLabelText('Representative from roster')
   fireEvent.mouseDown(screen.getByLabelText('Representative from roster'))
   fireEvent.click(screen.getByRole('option', {name: /1\. Smith Sam/}))
-  fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Jones'}})
+  fireEvent.change(screen.getAllByLabelText(/Surname/)[0], {target: {value: 'Jones'}})
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({representative: 'Jones Sam', representativePosition: 1})))
 })
@@ -124,9 +198,8 @@ test('prefills a new registration from another competition without carrying its 
   fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
   fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'River'}})
   fireEvent.click(await screen.findByRole('button', {name: 'Create entry from this'}))
-  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
-  expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
-  expect(screen.getByLabelText(/Start number/)).toHaveValue(null)
+  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Old')
+  expect(screen.getByLabelText(/Start number/)).toHaveValue(1)
 })
 
 test('clearing or changing search hides old hits and ignores delayed responses', async () => {
@@ -167,8 +240,7 @@ test('copies a found crew into the only compatible category of a started competi
   expect(copy).toBeEnabled()
   expect(screen.getByText('Target category: R1.')).toBeInTheDocument()
   fireEvent.click(copy)
-  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('Found')
-  expect(screen.getByLabelText(/Surname/)).toHaveValue('Old')
+  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Old')
 })
 
 test('category picker lists only category crews and opens one directly for saving', async () => {
@@ -182,7 +254,7 @@ test('category picker lists only category crews and opens one directly for savin
   fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
   expect(screen.queryByRole('option', {name: /Other/})).not.toBeInTheDocument()
   fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
-  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
+  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({version: 3})))
 })
@@ -213,7 +285,7 @@ test('workspace picker opens the selected crew', async () => {
   await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1/entries/private'))
   fireEvent.mouseDown(picker)
   fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
-  expect(await screen.findByLabelText(/Crew name/)).toHaveValue('River')
+  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
   window.location.hash = ''
 })
 
@@ -249,15 +321,30 @@ test('keeps an edited draft when category or crew change is declined', async () 
     fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
     fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
     fireEvent.click(await screen.findByRole('option', {name: /7 — River/}))
-    fireEvent.change(await screen.findByLabelText(/Crew name/), {target: {value: 'Edited'}})
+    fireEvent.change(await screen.findByLabelText(/Surname/), {target: {value: 'Edited'}})
     fireEvent.mouseDown(screen.getByLabelText('Category'))
     fireEvent.click(screen.getByRole('option', {name: 'All'}))
-    expect(screen.getByLabelText(/Crew name/)).toHaveValue('Edited')
+    expect(screen.getByLabelText(/Surname/)).toHaveValue('Edited')
     expect(screen.getByRole('combobox', {name: 'Category'})).toHaveTextContent('R1')
     fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
     fireEvent.click(screen.getByRole('option', {name: /Rapid/}))
-    expect(screen.getByLabelText(/Crew name/)).toHaveValue('Edited')
+    expect(screen.getByLabelText(/Surname/)).toHaveValue('Edited')
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(apiRequest).not.toHaveBeenCalledWith('/api/competitions/1/entries/5')
   } finally { confirm.mockRestore() }
+})
+
+
+test('single entry uses the member name and proposes the first free category number', async () => {
+  render(<Crews/>); fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  expect(screen.queryByLabelText(/Crew name/)).not.toBeInTheDocument()
+  expect(screen.queryByLabelText(/Representative/)).not.toBeInTheDocument()
+  expect(screen.getByLabelText(/Start number/)).toHaveValue(1)
+  fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Doe'}})
+  fireEvent.change(screen.getByLabelText(/Given name/), {target: {value: 'Jane'}})
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/})); fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.objectContaining({crewName: 'Doe Jane', startNumber: 1})))
 })
