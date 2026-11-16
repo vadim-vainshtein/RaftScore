@@ -97,11 +97,10 @@ async function prepareSprint(api: APIRequestContext, title: string) {
   return fixture
 }
 
-test('opens the shared completion dialog from settings and retains the protocol filters', async ({page}) => {
+test('opens the shared completion dialog from result entry and retains the protocol filters', async ({page}) => {
   const {competitionId, disciplineId, categoryId} = await prepareSprint(page.request, 'Complete from settings')
   await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
-  await page.getByRole('main').getByRole('link', {name: 'Edit', exact: true}).click()
-  await page.getByRole('link', {name: 'Complete competition', exact: true}).click()
+  await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Complete competition'})
   await expect(dialog).toBeVisible()
   await expect(page).not.toHaveURL(/complete=1/)

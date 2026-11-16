@@ -107,6 +107,34 @@ test('confirms discarding changed competition settings before opening discipline
   expect(fireEvent.click(link)).toBe(false)
   expect(screen.getByLabelText(/Title/)).toHaveValue('Changed')
   expect(confirm).toHaveBeenCalledWith('Discard unsaved competition changes?')
-  expect(fireEvent.click(link)).toBe(true)
+  link.addEventListener('click', event => event.preventDefault(), {once: true})
+  expect(fireEvent.click(link)).toBe(false)
+  expect(confirm).toHaveBeenCalledTimes(2)
   confirm.mockRestore()
+})
+test.each(['save', 'cancel'])('returns to the workspace after %s from direct editing', async action => {
+  const details = {id: 1, version: 7, title: 'Race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? [{id: 2, displayName: 'R1', crewSize: 1, version: 1, seatLabels: ['Bow']}] : {content: [], page: 0, totalPages: 0, totalElements: 0})
+  vi.mocked(csrfRequest).mockResolvedValue(details)
+  window.location.hash = '#/competitions?edit=1&fromWorkspace=1&discipline=3&category=2'
+  render(<Competitions readOnly={false}/>)
+  expect(await screen.findByLabelText(/Title/)).toHaveValue('Race')
+  expect(await screen.findByRole('button', {name: 'Edit category'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: action === 'save' ? 'Save' : 'Cancel'}))
+  await waitFor(() => expect(window.location.hash).toBe('#/workspace/1?discipline=3&category=2'))
+  if (action === 'save') expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1', 'PUT', expect.objectContaining({version: 7, title: 'Race'}))
+})
+test('does not redirect after saving if the user navigated away', async () => {
+  const details = {id: 1, version: 7, title: 'Race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/competitions/1' ? details : path.endsWith('/categories') ? [] : {content: [], page: 0, totalPages: 0, totalElements: 0})
+  let finishSave!: (value: unknown) => void
+  vi.mocked(csrfRequest).mockReturnValue(new Promise(resolve => {finishSave = resolve}))
+  window.location.hash = '#/competitions?edit=1&fromWorkspace=1'
+  render(<Competitions readOnly={false}/>)
+  await screen.findByLabelText(/Title/)
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  window.location.hash = '#/competitions'
+  finishSave(details)
+  await waitFor(() => expect(screen.queryByLabelText(/Title/)).not.toBeInTheDocument())
+  expect(window.location.hash).toBe('#/competitions')
 })

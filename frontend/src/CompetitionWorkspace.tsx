@@ -46,7 +46,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   if (!competition) return null
   if (competition.status === 'COMPLETED' && path.includes('/result-grid')) {window.location.replace(`#/workspace/${id}/results${path.includes('?') ? '?' + path.split('?')[1] : ''}`); return null}
   const section = /^\/workspace\/\d+\/([^?]+)/.exec(path)?.[1]
-  const settingsParams = new URLSearchParams({view: id})
+  const settingsParams = new URLSearchParams({edit: id, fromWorkspace: '1'})
   const workspaceParams = new URLSearchParams(query)
   for (const key of ['discipline', 'category']) {const value = workspaceParams.get(key); if (value) settingsParams.set(key, value)}
   const disciplineEditParams = new URLSearchParams(workspaceParams)
