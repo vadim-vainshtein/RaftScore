@@ -208,6 +208,40 @@ test('filters category history locally and copies an earlier registration', asyn
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.objectContaining({categoryId: 2})))
 })
 
+test('opens the current registration when selecting an equivalent historical roster', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  const old = {...detail, id: 90, competitionId: 9, categoryId: 20, competitionTitle: 'Old race', crewSize: 1, registeredAt: null}
+  vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([old])
+    : path === '/api/competitions/9/entries/90' ? Promise.resolve({...old, startNumber: 1, regionOrClub: 'Old club'}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.focus(screen.getByRole('combobox', {name: 'Select crew in category'}))
+  fireEvent.click(await screen.findByRole('option', {name: /River.*Old race/}))
+  expect(await screen.findByLabelText(/Region or club/)).toHaveValue('Club')
+  expect(screen.getByLabelText(/Start number/)).toHaveValue(7)
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({version: 3, roster: [{participantId: 9}]})))
+  expect(csrfRequest).not.toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.anything())
+})
+
+test('does not edit a target registration whose roster changed since the list loaded', async () => {
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  const old = {...detail, id: 90, competitionId: 9, categoryId: 20, competitionTitle: 'Old race', crewSize: 1}
+  vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([old])
+    : path === '/api/competitions/9/entries/90' ? Promise.resolve(old)
+    : path === '/api/competitions/1/entries/4' ? Promise.resolve({...detail, roster: [{...detail.roster[0], participantId: 10}]}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.focus(screen.getByRole('combobox', {name: 'Select crew in category'}))
+  fireEvent.click(await screen.findByRole('option', {name: /River.*Old race/}))
+  expect(await screen.findByLabelText(/Start number/)).toHaveValue(1)
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/})); fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.objectContaining({roster: [{participantId: 9}]})))
+})
+
 test('preserves a typed new crew name in the creation form', async () => {
   const previous = vi.mocked(apiRequest).getMockImplementation()!
   vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/categories') ? Promise.resolve([{id: 2, displayName: 'R1', crewSize: 2}]) : previous(path))

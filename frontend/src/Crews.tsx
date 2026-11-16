@@ -26,6 +26,11 @@ const nextNumber = (category: Category, crews: Summary[]) => {
   return String(number)
 }
 const empty = (category: Category, crews: Summary[]): Draft => ({categoryId: category.id, crewName: '', regionOrClub: '', representative: '', contacts: {}, startNumber: nextNumber(category, crews), roster: Array.from({length: category.crewSize}, member), answers: {}})
+const sameRoster = (left: Member[], right: Member[]) => {
+  const ids = new Set(left.map(person => person.participantId))
+  return left.length === right.length && ids.size === left.length && new Set(right.map(person => person.participantId)).size === right.length && !ids.has(undefined)
+    && right.every(person => person.participantId !== undefined && ids.has(person.participantId))
+}
 
 export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompetition, onReadinessChange}: {readOnly?: boolean, canEdit?: boolean, fixedCompetition?: string, onReadinessChange?: () => void}) {
   const {t, i18n} = useTranslation()
@@ -133,6 +138,15 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
       const result = await apiRequest<Crew>(`/api/competitions/${item.competitionId}/entries/${item.id}`)
       if (generation !== selection.current || editGeneration !== editSelection.current) return
       if (item.competitionId === competition?.id && item.categoryId === target.id) { edit(result); return }
+      const existing = crews.find(crew => crew.categoryId === target.id && sameRoster(crew.roster, result.roster))
+      if (existing) {
+        const current = await apiRequest<Crew>(`${base}/${existing.id}`)
+        if (generation !== selection.current || editGeneration !== editSelection.current) return
+        setCrews(items => items.map(crew => crew.id === current.id ? current : crew))
+        if (current.categoryId === target.id && sameRoster(current.roster, result.roster)) {
+          setSearch(current.crewName); edit(current); return
+        }
+      }
       const contacts = Object.fromEntries(Object.entries(result.representativeContacts ?? {}).filter(([key]) => policies[key as Field] !== 'HIDDEN'))
       startDraft({...empty(target, crews), crewName: result.crewName, regionOrClub: result.regionOrClub ?? '',
         representative: policies.representative === 'HIDDEN' ? '' : result.representative,
