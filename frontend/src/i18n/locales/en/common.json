@@ -402,6 +402,11 @@
     "startReadiness": "Crews in selected start list: {{count}}"
   },
   "pointsCatalog": {
+    "edit": "Edit",
+    "back": "Back",
+    "save": "Save",
+    "cancelEdit": "Cancel editing",
+    "saveChoice": "How would you like to save?",
     "select": "Points table",
     "none": "None",
     "unsaved": "Unsaved table",
