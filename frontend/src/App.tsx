@@ -4,6 +4,7 @@ import type {FormEvent} from 'react'
 import {apiRequest, ApiError} from './api/client'
 import {apiErrorKey, type ApiErrorKey} from './api/errors'
 import Categories from './Categories'
+import PointsCatalog from './PointsCatalog'
 import Crews from './Crews'
 import StartLists from './StartLists'
 import ResultGrid from './ResultGrid'
@@ -26,6 +27,7 @@ const routes = [
   {path: '/start-lists', label: 'navigation.startLists', readOnly: true},
   {path: '/results', label: 'navigation.results', readOnly: true},
   {path: '/result-grid', label: 'navigation.resultGrid', readOnly: false},
+  {path: '/points-tables', label: 'navigation.pointsTables', readOnly: false},
   {path: '/categories', label: 'navigation.categories', readOnly: false},
   {path: '/users', label: 'navigation.users', readOnly: false},
   {path: '/backups', label: 'navigation.backups', readOnly: false},
@@ -301,7 +303,7 @@ function Shell({locale}: {locale: Locale}) {
         <Toolbar sx={{py: 1}}/>
         {activeRoute?.path !== '/workspace' && <Typography component="h1" variant="h4">{title}</Typography>}
         {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
-        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={`${visiblePath}:${navigationRevision}`} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions key={visiblePath} readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={`${visiblePath}:${navigationRevision}`} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions key={visiblePath} readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/points-tables' && principal.role === 'FULL_ACCESS' ? <PointsCatalog/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

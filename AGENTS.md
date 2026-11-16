@@ -29,6 +29,13 @@ These requirements apply to the general development pipeline for this repository
 - After merging, run `scripts/Complete-RaftScorePostMerge.ps1 -MergedCommit <merge-commit>` before the final response. It verifies the running JAR and HTTP endpoints on port 8081; report its verified commit and URL. The script can be rerun after failure. If blocked, report the exact failed stage and reason, and preserve the existing database.
 - Retain explicit authorization gates for deployment and other unrelated gated actions.
 
+## Browser Visual Annotations
+
+When reviewing visual annotations from the browser, assess the task and give the
+session a meaningful name based on the requested change or affected scope when
+identifiable, such as `Rework competition editing`. Avoid generic names such as
+`Review comments 1 and 2`.
+
 ## Code Readability
 
 - Break nontrivial methods into short, well-named blocks or helpers so the

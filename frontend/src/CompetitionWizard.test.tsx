@@ -6,7 +6,7 @@ import './i18n'
 vi.mock('./api/client', async original => ({...(await original<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
 afterEach(cleanup)
 test.each([false, true])('submits all five steps with explicit tiebreak=%s', async explicit => {
-  vi.mocked(apiRequest).mockResolvedValue({content: [], totalPages: 0})
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/points-catalog' ? [{id: 1, name: 'Russian sprint', disciplineType: 'SPRINT', version: 0, preset: true, rows: Array.from({length: 20}, (_, n) => ({place: n + 1, points: 100 - 5 * n}))}] : {content: [], totalPages: 0})
   vi.mocked(csrfRequest).mockResolvedValue({id: 1})
   const saved = vi.fn()
   render(<CompetitionWizard onCancel={vi.fn()} onSaved={saved}/>)
@@ -28,7 +28,9 @@ test.each([false, true])('submits all five steps with explicit tiebreak=%s', asy
   fireEvent.click(screen.getByRole('button', {name: 'Add discipline'}))
   fireEvent.change(screen.getByLabelText('Name'), {target: {value: 'Sprint'}})
   fireEvent.click(screen.getByRole('checkbox', {name: 'R4 / Open'}))
-  fireEvent.click(screen.getByRole('button', {name: 'Russian points preset'}))
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/points-catalog'))
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Points table'}))
+  fireEvent.click(await screen.findByRole('option', {name: /Russian sprint/}))
   if (explicit) {
     fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Tiebreak discipline'}))
     fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', {name: 'Sprint'}))
@@ -194,4 +196,23 @@ test('discipline tabs keep separate drafts and show the empty state after remova
   fireEvent.click(within(screen.getByRole('tabpanel', {name: 'Second'})).getByRole('button', {name: 'Remove'}))
   expect(screen.getByText('No disciplines have been added yet')).toBeInTheDocument()
   localStorage.removeItem('tabs-test')
+})
+
+test('blocks continuing while a points table edit is unfinished', async () => {
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/points-catalog' ? [] : {content: [], totalPages: 0})
+  const key = 'wizard-points-edit-test'
+  localStorage.setItem(key, JSON.stringify({step: 3, disciplines: [{name: 'Sprint', type: 'SPRINT', displayOrder: 0, categoryIndexes: [], gateCount: null, attemptCount: null, qualificationDisciplineIndex: null, pointsTable: null}]}))
+  render(<CompetitionWizard draftKey={key} onCancel={vi.fn()} onSaved={vi.fn()}/>)
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Points table'}))
+  fireEvent.click(await screen.findByRole('option', {name: 'Create empty points table'}))
+  fireEvent.change(screen.getByLabelText('Points table name'), {target: {value: 'Unfinished'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Previous'}))
+  expect(screen.getByRole('alert')).toHaveTextContent('Save or cancel the points table edit before continuing')
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  expect(screen.getByRole('alert')).toHaveTextContent('Save or cancel the points table edit before continuing')
+  expect(screen.getByLabelText('Points table name')).toHaveValue('Unfinished')
+  fireEvent.click(within(screen.getByRole('tabpanel')).getByRole('button', {name: 'Cancel'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Next'}))
+  expect(screen.getByText('5 / 5')).toBeInTheDocument()
+  localStorage.removeItem(key)
 })

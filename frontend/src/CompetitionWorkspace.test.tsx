@@ -300,7 +300,7 @@ test('refreshes the competition version after deleting its tiebreak before start
   const discipline = {id: 3, name: 'Sprint', type: 'SPRINT', status: 'CREATED', displayOrder: 0, categoryIds: [], pointsTableId: null, version: 0, resultsEntered: false}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: deleted ? 1 : 0}
-    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private')) return []
+    if (path.endsWith('/categories') || path.endsWith('/points-tables') || path.endsWith('/entries/private') || path === '/api/points-catalog') return []
     if (path.endsWith('/disciplines')) return deleted ? [] : [discipline]
     throw new Error(path)
   })

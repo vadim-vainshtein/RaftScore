@@ -18,7 +18,8 @@
     "resultGrid": "Result entry",
     "results": "Results",
     "parallelSprint": "Parallel sprint",
-    "seatNames": "Seat names"
+    "seatNames": "Seat names",
+    "pointsTables": "Points tables"
   },
   "placeholder": {
     "unavailable": "This section is not available yet.",
@@ -396,5 +397,16 @@
     "protocol": "Protocol",
     "crewReadiness": "Entries: {{total}} · Eligible: {{admitted}}",
     "startReadiness": "Crews in selected start list: {{count}}"
+  },
+  "pointsCatalog": {
+    "select": "Points table",
+    "none": "None",
+    "unsaved": "Unsaved table",
+    "invalid": "Enter a name and valid, unique places and points",
+    "saveChanges": "Save changes",
+    "saveNew": "Create new table",
+    "create": "Create table",
+    "finishEditing": "Save or cancel the points table edit before continuing",
+    "snapshot": "saved snapshot"
   }
 }
