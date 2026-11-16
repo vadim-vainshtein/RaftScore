@@ -84,6 +84,7 @@
     "editCategory": "Изменить категорию",
     "rosterVariant": "Вариант состава {{number}}",
     "searchHistoryHint": "Поиск по соревнованиям для просмотра или копирования заявки.",
+    "registrationDateUnknown": "Дата регистрации неизвестна",
     "selectCrew": "Выберите экипаж в категории",
     "openApplication": "Открыть заявку",
     "copyApplication": "Создать заявку на основе",

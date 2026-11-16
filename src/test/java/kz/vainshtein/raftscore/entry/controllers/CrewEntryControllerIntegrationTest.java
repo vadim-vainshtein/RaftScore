@@ -32,6 +32,7 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired EntryRequirementRepository requirements;
     @Autowired kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
     @Autowired JdbcTemplate jdbc;
+    @Autowired jakarta.persistence.EntityManager entityManager;
     MockMvc mvc;
     Competition competition;
     Competition other;
@@ -44,6 +45,42 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         other = competitions.saveAndFlush(Competition.builder().title("Other").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
         category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         url = "/api/competitions/" + competition.getId() + "/entries";
+    }
+    @Test
+    void categoryHistoryOrdersRegistrationsAndKeepsPublicRosterPrivate() throws Exception {
+        var matching = categories.saveAndFlush(CompetitionCategory.builder().competition(other)
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var third = competitions.saveAndFlush(Competition.builder().title("Third").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
+        var incompatible = categories.saveAndFlush(CompetitionCategory.builder().competition(third)
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(2).build());
+        var different = categories.saveAndFlush(CompetitionCategory.builder().competition(other)
+                .classLabel("R4").scoringGroupLabel("Women").crewSize(4).build());
+        var first = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(category).crewName("Crew").representative("Coach").startNumber(1).build());
+        var second = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(matching).crewName("Crew").representative("Coach").startNumber(1).build());
+        entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(incompatible).crewName("Small").representative("Coach").startNumber(1).build());
+        entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(different).crewName("Other").representative("Coach").startNumber(1).build());
+        var legacy = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(matching).crewName("Legacy").representative("Coach").startNumber(2).build());
+        var newerLegacy = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(matching).crewName("Legacy newer").representative("Coach").startNumber(3).build());
+        jdbc.update("update crew_entries set registered_at = null where id in (?, ?)", legacy.getId(), newerLegacy.getId());
+        assertThat(first.getRegisteredAt()).isNotNull();
+        jdbc.update("update crew_entries set registered_at = ? where id = ?", java.sql.Timestamp.from(java.time.Instant.parse("2025-01-01T00:00:00Z")), first.getId());
+        jdbc.update("update crew_entries set registered_at = ? where id = ?", java.sql.Timestamp.from(java.time.Instant.parse("2026-01-01T00:00:00Z")), second.getId());
+        entityManager.clear();
+        mvc.perform(get("/api/crew-search/public").param("categoryId", category.getId().toString()).with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$[1].id").value(second.getId())).andExpect(jsonPath("$[1].competitionTitle").value("Other"))
+                .andExpect(jsonPath("$[1].registeredAt").value("2026-01-01T00:00:00Z"))
+                .andExpect(jsonPath("$[0].crewSize").value(2)).andExpect(jsonPath("$[0].roster").doesNotExist()).andExpect(jsonPath("$[2].id").value(first.getId()))
+                .andExpect(jsonPath("$[3].id").value(newerLegacy.getId())).andExpect(jsonPath("$[3].registeredAt").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$[4].id").value(legacy.getId())).andExpect(jsonPath("$[4].registeredAt").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(get("/api/crew-search").param("categoryId", category.getId().toString()).with(user("reader").roles("READ_ONLY")))
+                .andExpect(status().isForbidden());
     }
     @Test
     void completedCompetitionRejectsCrewMutationsAndPreservesMissingEntryContract() throws Exception {

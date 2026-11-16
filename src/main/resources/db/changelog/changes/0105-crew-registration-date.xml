@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0105-crew-registration-date" author="raftscore">
+        <!-- Existing registrations have no recorded timestamp, so their date remains unknown. -->
+        <addColumn tableName="crew_entries"><column name="registered_at" type="TIMESTAMP WITH TIME ZONE"/></addColumn>
+    </changeSet>
+</databaseChangeLog>
