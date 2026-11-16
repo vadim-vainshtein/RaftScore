@@ -160,7 +160,7 @@ try {
         }
         $temporaryManifest = Join-Path $runtime ('.staging-' + [guid]::NewGuid().ToString('N') + '.sha256')
         [IO.File]::WriteAllText($temporaryManifest, $hash, [Text.Encoding]::ASCII)
-        if (Test-Path -LiteralPath $manifest) { [IO.File]::Replace($temporaryManifest, $manifest, $null) } else { [IO.File]::Move($temporaryManifest, $manifest) }
+        if (Test-Path -LiteralPath $manifest) { [IO.File]::Replace($temporaryManifest, $manifest, [NullString]::Value) } else { [IO.File]::Move($temporaryManifest, $manifest) }
     }
     $hash = (Get-Content -LiteralPath $manifest -Raw).Trim()
     $stage = 'verify database and current process'
@@ -181,6 +181,12 @@ try {
             $env:RAFT_SCORE_DATABASE_USERNAME = 'raftscore'
             $env:RAFT_SCORE_DATABASE_PASSWORD = (& docker exec $container printenv POSTGRES_PASSWORD)
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($env:RAFT_SCORE_DATABASE_PASSWORD)) { throw 'Database password unavailable' }
+            $stage = 'record launch intent'
+            $token = [guid]::NewGuid().ToString('N')
+            $temporaryIntent = Join-Path $runtime ('.staging-' + $token + '.json')
+            $intent = @{ Jar = $jar; Hash = $hash; Token = $token } | ConvertTo-Json -Compress
+            [IO.File]::WriteAllText($temporaryIntent, $intent, [Text.Encoding]::UTF8)
+            if (Test-Path -LiteralPath $intentFile) { [IO.File]::Replace($temporaryIntent, $intentFile, [NullString]::Value) } else { [IO.File]::Move($temporaryIntent, $intentFile) }
             if ($current) {
                 $stage = 'stop previous application'
                 Set-Content -LiteralPath $jarFile -Value $current.Jar
@@ -190,11 +196,6 @@ try {
             }
             if (@(Get-Listener).Count -ne 0) { throw 'Port 8081 is occupied' }
             $stage = 'start application'
-            $token = [guid]::NewGuid().ToString('N')
-            $temporaryIntent = Join-Path $runtime ('.staging-' + $token + '.json')
-            $intent = @{ Jar = $jar; Hash = $hash; Token = $token } | ConvertTo-Json -Compress
-            [IO.File]::WriteAllText($temporaryIntent, $intent, [Text.Encoding]::UTF8)
-            if (Test-Path -LiteralPath $intentFile) { [IO.File]::Replace($temporaryIntent, $intentFile, $null) } else { [IO.File]::Move($temporaryIntent, $intentFile) }
             $p = Start-Process -FilePath $java -ArgumentList @('-Xms64m', '-Xmx256m', '-XX:+UseSerialGC', '-XX:TieredStopAtLevel=1', '-XX:ActiveProcessorCount=2', ('-Draftscore.launchToken=' + $token), '-jar', ('"' + $jar + '"'), '--server.address=127.0.0.1', '--server.port=8081') -WorkingDirectory $source -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
             Set-Content -LiteralPath $pidFile -Value $p.Id
         } finally { Remove-Item Env:RAFT_SCORE_DATABASE_PASSWORD -ErrorAction SilentlyContinue; Remove-Item Env:RAFT_SCORE_INITIAL_ADMINISTRATOR_PASSWORD -ErrorAction SilentlyContinue }
