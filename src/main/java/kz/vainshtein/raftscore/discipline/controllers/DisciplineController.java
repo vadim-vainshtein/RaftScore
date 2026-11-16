@@ -26,6 +26,7 @@ class DisciplineController {
     private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final DisciplineRepository disciplines;
     private final PlacementPointsTableRepository tables;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
 
     record UpdateRequest(
@@ -63,6 +64,26 @@ class DisciplineController {
         return new DisciplineResponse(discipline.getId(), competitionId, discipline.getDisplayOrder(),
                 table == null ? null : table.getId(), discipline.getVersion());
     }
+
+    record CatalogAssignment(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal catalogId,
+                             @NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version) { }
+
+    @PutMapping("/{disciplineId}/points-catalog")
+    @Transactional
+    DisciplineResponse assignCatalog(@PathVariable Long competitionId, @PathVariable Long disciplineId, @Valid @RequestBody CatalogAssignment request) {
+        lifecycle.requireEditable(competitionId);
+        var discipline = disciplines.findForStartListUpdate(disciplineId).filter(d -> d.getCompetition().getId().equals(competitionId)).orElseThrow(NotFound::new);
+        if (discipline.getVersion() != request.version().longValueExact()) throw new OptimisticLockingFailureException("Stale discipline version");
+        var entries = jdbc.query("SELECT c.name, r.place, r.points FROM points_catalog c LEFT JOIN points_catalog_rows r ON r.table_id = c.id WHERE c.id = ? ORDER BY r.place", (rs, n) -> new CatalogRow(rs.getString(1), (Integer) rs.getObject(2), (Integer) rs.getObject(3)), request.catalogId().longValueExact());
+        if (entries.isEmpty()) throw new NotFound();
+        var rows = entries.stream().filter(row -> row.place() != null).map(row -> new kz.vainshtein.raftscore.scoring.entities.PlacementPointsRow(row.place(), row.points())).toList();
+        var table = tables.save(new kz.vainshtein.raftscore.scoring.entities.PlacementPointsTable(discipline.getCompetition(), entries.getFirst().name(), kz.vainshtein.raftscore.scoring.entities.TiePointsPolicy.SHARED_PLACE_SAME_POINTS, rows));
+        discipline.setPointsTable(table);
+        disciplines.saveAndFlush(discipline);
+        recalculation.recalculateDisciplineLocked(discipline);
+        return new DisciplineResponse(discipline.getId(), competitionId, discipline.getDisplayOrder(), table.getId(), discipline.getVersion());
+    }
+    record CatalogRow(String name, Integer place, Integer points) { }
 
     @ExceptionHandler(NotFound.class)
     ResponseEntity<ApiError> notFound() { return ResponseEntity.status(404).body(ApiError.of("discipline_or_points_table.not_found")); }
