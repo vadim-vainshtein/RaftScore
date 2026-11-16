@@ -7,7 +7,7 @@ import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 import {wallTimeToInstant} from './i18n/wall-time'
 
-type Competition = {id: number, title: string, timeZone: string, status?: string, state?: string}
+type Competition = {id: number, title: string, timeZone: string, startDate: string, status?: string, state?: string}
 type Discipline = {id: number, name: string, type: string, status: string, categoryIds: number[]}
 type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
@@ -35,8 +35,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const [crews, setCrews] = useState<Crew[]>([])
   const [list, setList] = useState<StartList | null>(null)
   const [mode, setMode] = useState('random')
-  const [first, setFirst] = useState('')
-  const [interval, setInterval] = useState('')
+  const [timing, setTiming] = useState<{key: string, date: string, time: string, interval: string} | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -79,6 +78,11 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     const next = [...order]; const [item] = next.splice(from, 1); next.splice(to, 0, item); setOrder(next)
   }
   const selectedCompetition = competitions.find(c => String(c.id) === competition)
+  const timingKey = JSON.stringify([competition, discipline, category])
+  const draft = timing?.key === timingKey ? timing : {key: timingKey, date: selectedCompetition?.startDate ?? '', time: '', interval: '120'}
+  const setDraft = (changes: Partial<typeof draft>) => setTiming({...draft, ...changes})
+  const {date, time, interval} = draft
+  const first = date && time ? `${date}T${time}` : ''
   const selectedDiscipline = disciplines.find(d => String(d.id) === discipline)
   const canClear = !readOnly && (selectedCompetition?.status ?? selectedCompetition?.state) === 'STARTED' && selectedDiscipline?.status === 'STARTED'
   const zone = selectedCompetition?.timeZone
@@ -86,7 +90,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const validInterval = /^\d+$/.test(interval) && Number.isSafeInteger(Number(interval))
   const generate = async () => {
     if (!list || busy || list.locked) return
-    if (!zone || (!!first !== !!interval) || (first && (!firstInstant || !validInterval))) {setError('invalid'); return}
+    if (!zone || !firstInstant || !validInterval) {setError('invalid'); return}
     if (list.id && !window.confirm(t('startList.regenerate'))) return
     setBusy(true); setError('')
     try {
@@ -115,19 +119,19 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   }
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
-    {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
+    {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setTiming(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
       <MenuItem value="">—</MenuItem>
       {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
-    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setDiscipline(e.target.value); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setList(null)}}>
+    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setTiming(null); setDiscipline(e.target.value); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>
     }
-    {discipline && <TextField select disabled={busy} label={t('startList.category')} value={category} onChange={e => {setManualOrder(null); setCategory(e.target.value); setList(null)}}>
+    {discipline && <TextField select disabled={busy} label={t('startList.category')} value={category} onChange={e => {setManualOrder(null); setTiming(null); setCategory(e.target.value); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>
     }
     {error && <Typography role="alert">{t(error === 'invalid' ? 'startList.invalid' : error as 'apiError.network')}</Typography>}
-    {list && <>
+    {list && selectedCompetition && <>
       {list.locked && <Typography role="status">{t('startList.locked')}</Typography>}
       {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box component="table" className="start-list-table">
         <thead><tr><th>{t('startList.position')}</th>
@@ -164,9 +168,10 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
             </li>
           })}
         </Box>}
-        <TextField type="datetime-local" label={`${t('startList.first')} (${zone ?? ''})`} value={first} disabled={busy || list.locked} slotProps={{inputLabel: {shrink: true}}} onChange={e => setFirst(e.target.value)}/>
+        <TextField required type="date" label={t('startList.firstDate')} value={date} disabled={busy || list.locked} slotProps={{inputLabel: {shrink: true}}} onChange={e => setDraft({date: e.target.value})}/>
+        <TextField required type="time" label={`${t('startList.firstTime')} (${zone ?? ''})`} value={time} disabled={busy || list.locked} slotProps={{inputLabel: {shrink: true}}} onChange={e => setDraft({time: e.target.value})}/>
         <Typography variant="body2">{t('startList.timePolicy')}</Typography>
-        <TextField type="number" label={t('startList.interval')} value={interval} disabled={busy || list.locked} slotProps={{htmlInput: {min: 0, step: 1}}} onChange={e => setInterval(e.target.value)}/>
+        <TextField type="number" label={t('startList.interval')} value={interval} disabled={busy || list.locked} slotProps={{htmlInput: {min: 0, step: 1}}} onChange={e => setDraft({interval: e.target.value})}/>
         <Button disabled={busy || list.locked} onClick={() => void generate()}>{t('startList.generate')}</Button>
       </>}
     </>}

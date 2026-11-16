@@ -218,7 +218,7 @@ test('refreshes readiness after generating a start list', async () => {
   let generated = false
   const slot = {crewId: 4, crewName: 'River', startNumber: 7, position: 1, plannedTime: null}
   vi.mocked(apiRequest).mockImplementation(async path => {
-    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, timeZone: 'UTC'}
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, startDate: '2026-01-01', timeZone: 'UTC'}
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1'}]
     if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', status: 'STARTED', categoryIds: [2]}]
     if (path.endsWith('/entries/private')) return [{id: 4, categoryId: 2, crewName: 'River', startNumber: 7, eligible: true}]
@@ -228,6 +228,7 @@ test('refreshes readiness after generating a start list', async () => {
   vi.mocked(csrfRequest).mockImplementation(async () => {generated = true; return {id: 1, slots: [slot], locked: false}})
   render(<CompetitionWorkspace path="/workspace/1/start-lists?discipline=3&category=2" readOnly={false}/>)
   expect(await screen.findByText('Crews in selected start list: 0')).toBeInTheDocument()
+  fireEvent.change(await screen.findByLabelText(/First start time \(UTC\)/), {target: {value: '10:00'}})
   fireEvent.click(await screen.findByRole('button', {name: 'Generate start list'}))
   expect(await screen.findByText('Crews in selected start list: 1')).toBeInTheDocument()
 })

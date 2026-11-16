@@ -140,6 +140,7 @@ for (const width of [1440, 360, 390]) {
       await select(page, 'Discipline', 'Sprint')
       const category = page.getByRole('combobox', {name: 'Category', exact: true})
       if ((await category.textContent())?.trim() !== 'R1 / Open') await select(page, 'Category', 'R1 / Open')
+      await page.getByLabel(/First start time/).fill('10:00')
       await page.getByRole('button', {name: 'Generate start list'}).click()
       await expect(page.getByText('Alpha Racer', {exact: true})).toBeVisible()
       await expect(page.getByText('Bravo Racer', {exact: true})).toBeVisible()
