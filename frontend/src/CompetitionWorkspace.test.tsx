@@ -235,7 +235,7 @@ test('refreshes readiness after generating a start list', async () => {
 test('refreshes readiness after creating a crew', async () => {
   window.location.hash = '#/workspace/1/crews?category=2'
   let created = false
-  const crew = {id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7, roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}], admissionDecision: true, eligible: true, version: 0}
+  const crew = {id: 4, categoryId: 2, crewName: 'Smith Sam', regionOrClub: 'Club', startNumber: 7, roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}], admissionDecision: true, eligible: true, version: 0}
   vi.mocked(apiRequest).mockImplementation(async path => {
     if (path === '/api/competitions/1') return {id: 1, title: 'Race', status: 'CREATED', version: 0, admissionConfirmationRequired: false}
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
@@ -248,11 +248,9 @@ test('refreshes readiness after creating a crew', async () => {
   expect(await screen.findByText('Entries: 0 · Eligible: 0')).toBeInTheDocument()
   await waitFor(() => expect(screen.getByRole('combobox', {name: 'Category'})).toHaveTextContent('R1'))
   fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
-  fireEvent.change(await screen.findByLabelText(/Crew name/), {target: {value: 'River'}})
   fireEvent.change(screen.getByLabelText(/Start number/), {target: {value: '7'}})
   fireEvent.change(screen.getByLabelText(/Surname/), {target: {value: 'Smith'}})
   fireEvent.change(screen.getByLabelText(/Given name/), {target: {value: 'Sam'}})
-  fireEvent.change(screen.getByLabelText(/Representative/, {selector: 'input'}), {target: {value: 'Coach'}})
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   expect(await screen.findByText('Entries: 1 · Eligible: 1')).toBeInTheDocument()
 })

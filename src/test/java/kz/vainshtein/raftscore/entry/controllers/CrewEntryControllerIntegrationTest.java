@@ -106,6 +106,20 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         mvc.perform(get("/api/crew-search/public").param("name", "crew")).andExpect(status().isUnauthorized());
     }
     @Test
+    void singleEntryDoesNotRequireRepresentativeContacts() throws Exception {
+        competition.setRepresentativeFields(java.util.Map.of("representative", "REQUIRED", "phone", "REQUIRED", "whatsapp", "OPTIONAL", "telegram", "OPTIONAL", "email", "OPTIONAL"));
+        competitions.saveAndFlush(competition);
+        var single = categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
+                .classLabel("R1").scoringGroupLabel("Open").crewSize(1).build());
+        var body = "{\"categoryId\":" + single.getId() + ",\"crewName\":\"Doe Jane\",\"startNumber\":1,\"roster\":[{\"surname\":\"Doe\",\"givenName\":\"Jane\"}]}";
+        var response = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated()).andReturn().getResponse();
+        Number id = JsonPath.read(response.getContentAsString(), "$.id");
+        mvc.perform(put(url + "/" + id).with(user("admin").roles("FULL_ACCESS")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"crewName\":\"Doe Jane\",\"startNumber\":1,\"version\":0}"))
+                .andExpect(status().isOk());
+    }
+    @Test
     void searchMatchesCyrillicAndTreatsWildcardsLiterally() throws Exception {
         mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                 .content(createBody().replace("Crew", "Экипаж 100%"))).andExpect(status().isCreated());
