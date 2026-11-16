@@ -6,6 +6,7 @@ import {apiErrorKey, fieldErrorKey} from './api/errors'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 import TimeZoneField from './TimeZoneField'
+import PointsCatalog from './PointsCatalog'
 
 type FieldIssue = {step: number, field: string, label: string, message?: string}
 type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
@@ -17,7 +18,6 @@ type Requirement = {name: string, valueType: string, required: boolean, displayO
 type Row = {place: number, points: number}
 type Discipline = {name: string, type: string, displayOrder: number, categoryIndexes: number[], gateCount: number | null, attemptCount: number | null, qualificationDisciplineIndex: number | null, pointsTable: {name: string, tiePolicy: string, rows: Row[]} | null}
 const types = ['SPRINT', 'PARALLEL_SPRINT', 'SLALOM', 'LONG_RACE']
-const multipliers = [1, 2, 3, 4]
 const freshDiscipline = (order: number): Discipline => ({name: '', type: 'SPRINT', displayOrder: order, categoryIndexes: [], gateCount: null, attemptCount: null, qualificationDisciplineIndex: null, pointsTable: null})
 
 export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftKey?: string, onCancel: () => void, onSaved: (value: {id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}) => void}) {
@@ -29,7 +29,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
   const [step, setStep] = useState<number>(stored?.step ?? 0), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [competition, setCompetition] = useState<Competition>(stored?.competition ?? {title: '', startDate: '', endDate: '', location: '', timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', description: '', admissionConfirmationRequired: false, representativeFields: {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}})
   const [activeDiscipline, setActiveDiscipline] = useState(0)
-  const [expandedPoints, setExpandedPoints] = useState<Record<number, boolean>>({})
+  const [pointsEditing, setPointsEditing] = useState<Record<number, boolean>>({})
   const [templates, setTemplates] = useState<Template[]>([]), [categories, setCategories] = useState<Category[]>(stored?.categories ?? [])
   const [requirements, setRequirements] = useState<Requirement[]>(stored?.requirements ?? []), [disciplines, setDisciplines] = useState<Discipline[]>(stored?.disciplines ?? [])
   const [issues, setIssues] = useState<FieldIssue[]>([])
@@ -76,6 +76,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
   }
   const next = () => {
     setError('')
+    if (step === 3 && Object.values(pointsEditing).some(Boolean)) {setError('pointsCatalog.finishEditing'); return}
     const found = fieldIssues(step)
     setIssues(found)
     if (!found.length) setStep(step + 1)
@@ -93,17 +94,12 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       return targetStep < 0 || !document.getElementById(field) && !/^(competition\.(title|startDate|endDate|location|timeZone|description)|categories\[\d+\]\.(classLabel|scoringGroupLabel|crewSize)|requirements\[\d+\]\.name|disciplines\[\d+\]\.(name|gateCount|attemptCount|qualificationDisciplineIndex|displayOrder|pointsTable\.rows\[\d+\]\.(place|points)))$/.test(field) ? [] : [{step: targetStep, field, label: labels[name] ?? t('apiError.invalidField'), message: fieldErrorKey(item?.code)}]
     })
   }
-  const applyPreset = (index: number, discipline: Discipline) => {
-    const rows = Array.from({length: 20}, (_, n) => ({place: n + 1, points: (105 - 5 * (n + 1)) * multipliers[types.indexOf(discipline.type)]}))
-    updateDiscipline(index, {pointsTable: {name: t('wizard.preset'), tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows}})
-    setPresetSelected(true)
-  }
-  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories: categories.map(c => ({...c, seatLabels: c.seatLabels?.slice(0, c.crewSize)})), requirements, disciplines, tiebreakDisciplineIndex: tiebreak}); if (draftKey) localStorage.removeItem(draftKey); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
+  const save = async () => {setBusy(true); setError(''); try {const result = await csrfRequest<{id: number, version: number, title: string, startDate: string, endDate: string, location: string, timeZone: string, description: string | null, admissionConfirmationRequired: boolean}>('/api/competitions/setup', 'POST', {competition: {...competition, endDate: competition.endDate || null}, categories: categories.map(c => ({...c, seatLabels: c.seatLabels?.slice(0, c.crewSize)})), requirements, disciplines: disciplines.map(d => ({...d, pointsTable: d.pointsTable && {name: d.pointsTable.name, tiePolicy: d.pointsTable.tiePolicy, rows: d.pointsTable.rows}})), tiebreakDisciplineIndex: tiebreak}); if (draftKey) localStorage.removeItem(draftKey); onSaved(result)} catch (failure) {const found = serverIssues(failure); setIssues(found); if (!found.length) setError(apiErrorKey(failure))} finally {setBusy(false)}}
   return <Box sx={{display: 'grid', gap: 2, maxWidth: 850}}>
     <Typography variant="h5">{t(("wizard.step" + step) as "wizard.step0")}
       </Typography>
       <Typography>{step + 1} / 5</Typography>{error && <Typography role="alert" color="error">{t(error as 'apiError.network')}</Typography>}
-      {issues.length > 0 && <Box role="alert" sx={{color: 'error.main', border: 1, p: 1}}>{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button color="error" onClick={() => {setStep(issue.step); const match = issue.field.match(/^disciplines\[(\d+)\]/); if (match) setActiveDiscipline(Number(match[1])); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
+      {issues.length > 0 && <Box role="alert" sx={{color: 'error.main', border: 1, p: 1}}>{[...new Set(issues.map(issue => issue.step))].map(group => <Box key={group}><Typography>{t(('wizard.step' + group) as 'wizard.step0')}</Typography>{issues.filter(issue => issue.step === group).map((issue, index) => <Box key={index}><Button color="error" disabled={step === 3 && Object.values(pointsEditing).some(Boolean)} onClick={() => {setStep(issue.step); const match = issue.field.match(/^disciplines\[(\d+)\]/); if (match) setActiveDiscipline(Number(match[1])); setFocusField({field: issue.field})}}>{issue.label}</Button>{issue.message && <Typography component="span">{t(issue.message as 'apiError.required')}</Typography>}</Box>)}</Box>)}</Box>}
     {step === 0 && <>
       <TextField id="competition.title" label={t('competition.title')} value={competition.title} onChange={e => setCompetition({...competition, title: e.target.value})}/>
       <TextField id="competition.startDate" type="date" label={t('competition.startDate')} slotProps={{inputLabel: {shrink: true}}} value={competition.startDate} onChange={e => setCompetition({...competition, startDate: e.target.value})}/>
@@ -154,22 +150,8 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       <MenuItem value="">{t('discipline.automatic')}
       </MenuItem>{disciplines.map((other, n) => n !== i && other.type !== 'PARALLEL_SPRINT' && d.categoryIndexes.every(x => other.categoryIndexes.includes(x)) ? <MenuItem key={n} value={n}>{disciplineName(other)}</MenuItem> : null)}
       </TextField>}
-      <Button onClick={() => updateDiscipline(i, {pointsTable: {name: '', tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows: []}})}>{t('wizard.blankPoints')}
-      </Button>
-      <Button onClick={() => applyPreset(i, d)}>{t('wizard.preset')}
-      </Button>
-      <TextField select label={t('wizard.copyPoints')} value="" onChange={e => {const source = disciplines[Number(e.target.value)].pointsTable; if (source) updateDiscipline(i, {pointsTable: structuredClone(source)})}}>{disciplines.map((x, n) => n !== i && x.pointsTable ? <MenuItem key={n} value={n}>{disciplineName(x)}</MenuItem> : null)}
-      </TextField>{d.pointsTable && <><Typography>{d.pointsTable.name}</Typography><Button onClick={() => setExpandedPoints({...expandedPoints, [i]: !expandedPoints[i]})}>{t('wizard.configurePoints')}</Button>{expandedPoints[i] && <>
-      <TextField label={t('wizard.tableName')} value={d.pointsTable.name} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, name: e.target.value}})}/>{d.pointsTable.rows.map((row, n) => <Box key={n} sx={{display: 'flex', gap: 1}}>
-      <TextField id={`disciplines[${i}].pointsTable.rows[${n}].place`} type="number" label={t('wizard.place')} value={row.place} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.map((x, k) => k === n ? {...x, place: Number(e.target.value)} : x)}})}/>
-      <TextField id={`disciplines[${i}].pointsTable.rows[${n}].points`} type="number" label={t('wizard.points')} value={row.points} onChange={e => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.map((x, k) => k === n ? {...x, points: Number(e.target.value)} : x)}})}/>
-      <Button onClick={() => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: d.pointsTable!.rows.filter((_, k) => k !== n)}})}>{t('wizard.remove')}
-      </Button>
-      </Box>)}
-      <Button onClick={() => updateDiscipline(i, {pointsTable: {...d.pointsTable!, rows: [...d.pointsTable!.rows, {place: d.pointsTable!.rows.length + 1, points: 0}]}})}>{t('wizard.addRow')}
-      </Button>
-      </>}</>}
-      <Button onClick={() => {setActiveDiscipline(Math.max(0, Math.min(i, disciplines.length - 2))); setExpandedPoints(Object.fromEntries(Object.entries(expandedPoints).filter(([key]) => Number(key) !== i).map(([key, value]) => [Number(key) > i ? Number(key) - 1 : Number(key), value]))); setDisciplines(disciplines.filter((_, n) => n !== i).map((x, n) => ({...x, displayOrder: n, qualificationDisciplineIndex: x.qualificationDisciplineIndex === i ? null : x.qualificationDisciplineIndex !== null && x.qualificationDisciplineIndex > i ? x.qualificationDisciplineIndex - 1 : x.qualificationDisciplineIndex}))); setTiebreak(tiebreak === i ? null : tiebreak !== null && tiebreak > i ? tiebreak - 1 : tiebreak)}}>{t('wizard.remove')}
+      <PointsCatalog disciplineType={d.type} value={d.pointsTable} onChange={pointsTable => updateDiscipline(i, {pointsTable})} onPreset={() => setPresetSelected(true)} onEditingChange={editing => setPointsEditing(previous => ({...previous, [i]: editing}))}/>
+      <Button disabled={Object.values(pointsEditing).some(Boolean)} onClick={() => {setActiveDiscipline(Math.max(0, Math.min(i, disciplines.length - 2))); setPointsEditing(Object.fromEntries(Object.entries(pointsEditing).filter(([key]) => Number(key) !== i).map(([key, value]) => [Number(key) > i ? Number(key) - 1 : Number(key), value]))); setDisciplines(disciplines.filter((_, n) => n !== i).map((x, n) => ({...x, displayOrder: n, qualificationDisciplineIndex: x.qualificationDisciplineIndex === i ? null : x.qualificationDisciplineIndex !== null && x.qualificationDisciplineIndex > i ? x.qualificationDisciplineIndex - 1 : x.qualificationDisciplineIndex}))); setTiebreak(tiebreak === i ? null : tiebreak !== null && tiebreak > i ? tiebreak - 1 : tiebreak)}}>{t('wizard.remove')}
       </Button>
       </Box>)}
       <TextField select label={t('wizard.tiebreak')} value={tiebreak ?? ''} onChange={e => {setTiebreakExplicit(true); setTiebreak(e.target.value === '' ? null : Number(e.target.value))}}>
@@ -193,7 +175,7 @@ export default function CompetitionWizard({onCancel, onSaved, draftKey}: {draftK
       </Box>)}
       <Typography>{t('wizard.tiebreak')}: {tiebreak != null && disciplines[tiebreak] ? disciplineName(disciplines[tiebreak]) : '—'}</Typography>
       </>}
-    <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}>{step > 0 && <Button disabled={busy} onClick={() => {setStep(step - 1); setError('')}}>{t('competition.previous')}
+    <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}>{step > 0 && <Button disabled={busy} onClick={() => {if (step === 3 && Object.values(pointsEditing).some(Boolean)) {setError('pointsCatalog.finishEditing'); return} setStep(step - 1); setError('')}}>{t('competition.previous')}
       </Button>}{step < 4 ? <Button onClick={next}>{t('competition.next')}
       </Button> : <Button disabled={busy} onClick={() => void save()}>{t('competition.save')}
       </Button>}<Button disabled={busy} onClick={onCancel}>{t('competition.cancel')}
