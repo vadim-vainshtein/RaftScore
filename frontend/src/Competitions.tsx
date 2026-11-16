@@ -61,7 +61,7 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
       {(['representative', 'phone', 'whatsapp', 'telegram', 'email'] as const).map(field => <TextField key={field} select label={t(`crew.${field}`)} value={(draft.representativeFields ?? defaultFields)[field]} onChange={e => setDraft({...draft, representativeFields: {...(draft.representativeFields ?? defaultFields), [field]: e.target.value as Policy}})}>{(['HIDDEN', 'OPTIONAL', 'REQUIRED'] as const).map(policy => <MenuItem key={policy} value={policy}>{t(`crew.policy.${policy}`)}</MenuItem>)}</TextField>)}
       {draft.id && <Button component="a" href={`#/workspace/${draft.id}/disciplines?${new URLSearchParams({...Object.fromEntries(contextParams), editDisciplines: '1'})}`} onClick={event => {if (busy || (JSON.stringify(draft) !== originalDraft.current && !window.confirm(t('competition.discardChanges')))) event.preventDefault()}}>{t('navigation.disciplines')}</Button>}
       <Box><Button type="submit" disabled={busy}>{t('competition.save')}</Button><Button disabled={busy} onClick={() => {if (returnToWorkspace && draft.id) window.location.hash = `/workspace/${draft.id}${workspaceQuery}`; else setDraft(null)}}>{t('competition.cancel')}</Button></Box>
-    </Box>{returnToWorkspace && draft.id && <CompetitionCategorySeats competitionId={draft.id}/>}</> : details ? <Box sx={{display: 'grid', gap: 1}}>
+    </Box>{draft.id && <CompetitionCategorySeats competitionId={draft.id}/>}</> : details ? <Box sx={{display: 'grid', gap: 1}}>
       <Typography variant="h5">{details.title}</Typography><Typography>{displayDate(details.startDate)} – {displayDate(details.endDate)} · {details.location} · {details.timeZone}</Typography>
       {details.description && <Typography>{details.description}</Typography>}
       <Typography>{t('competition.admission')}: {t(details.admissionConfirmationRequired ? 'competition.yes' : 'competition.no')}</Typography>
@@ -80,16 +80,57 @@ export default function Competitions({readOnly, username}: {readOnly: boolean, u
 function CompetitionCategorySeats({competitionId}: {competitionId: number}) {
   const {t} = useTranslation()
   const [categories, setCategories] = useState<{id: number, displayName: string, crewSize: number, version: number, seatLabels: string[]}[]>([])
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false)
+  const [templates, setTemplates] = useState<{id: number, displayName: string, archived: boolean}[]>([]), [templateId, setTemplateId] = useState('')
   const [editing, setEditing] = useState<number | null>(null), [labels, setLabels] = useState<string[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  useEffect(() => {let active = true; apiRequest<typeof categories>(`/api/competitions/${competitionId}/categories`).then(result => {if (active) setCategories(result)}).catch(e => {if (active) setError(apiErrorKey(e))}); return () => {active = false}}, [competitionId])
+  useEffect(() => {let active = true; apiRequest<typeof categories>(`/api/competitions/${competitionId}/categories`).then(result => {if (!Array.isArray(result)) throw new Error('Invalid categories'); if (active) {setCategories(result); setCategoriesLoaded(true)}}).catch(e => {if (active) setError(apiErrorKey(e))}); return () => {active = false}}, [competitionId])
+  useEffect(() => {
+    let active = true
+    const loadTemplates = async () => {
+      try {
+        let page = 0, total = 1
+        const all: typeof templates = []
+        while (page < total) {
+          const result = await apiRequest<{content: typeof templates, totalPages: number}>(`/api/category-templates?archived=false&page=${page}&size=100`)
+          all.push(...result.content.filter(template => !template.archived))
+          total = result.totalPages
+          page++
+        }
+        if (active) setTemplates(all)
+      } catch {if (active) setError('wizard.templatesError')}
+    }
+    void loadTemplates()
+    return () => {active = false}
+  }, [])
+  const add = async () => {
+    if (!templateId) return
+    setBusy(true); setError('')
+    try {
+      const created = await csrfRequest<typeof categories[number]>(`/api/competitions/${competitionId}/categories`, 'POST', {templateId: Number(templateId)})
+      setCategories(current => [...current, created]); setTemplateId('')
+    } catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
+  }
+  const remove = async (category: typeof categories[number]) => {
+    if (!window.confirm(t('crew.confirmRemoveCategory', {name: category.displayName}))) return
+    setBusy(true); setError('')
+    try {
+      await csrfRequest(`/api/competitions/${competitionId}/categories/${category.id}`, 'DELETE', {version: category.version})
+      setCategories(current => current.filter(c => c.id !== category.id))
+      if (editing === category.id) setEditing(null)
+    } catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
+  }
   const item = categories.find(category => category.id === editing)
   const save = async () => {if (!item) return; setBusy(true); setError(''); try {const updated = await csrfRequest<typeof item>(`/api/competitions/${competitionId}/categories/${item.id}/seat-labels`, 'PUT', {version: item.version, seatLabels: labels}); setCategories(current => current.map(c => c.id === updated.id ? updated : c)); setEditing(null)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   return <Box>
     <Typography>{t('crew.categorySeats')}</Typography>
+    <Typography variant="body2">{t('crew.categoryChangesImmediate')}</Typography>
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
+    <TextField select label={t('crew.categoryTemplate')} value={templateId} onChange={e => setTemplateId(e.target.value)} sx={{minWidth: 220}}>{templates.map(template => <MenuItem key={template.id} value={String(template.id)}>{template.displayName}</MenuItem>)}</TextField>
+    <Button disabled={busy || !categoriesLoaded || !templateId} onClick={() => void add()}>{t('crew.addCategory')}</Button>
     {categories.map(category => <Box key={category.id}>
       <Typography>{category.displayName}</Typography>
       <Button disabled={busy} onClick={() => {setEditing(category.id); setLabels(category.seatLabels ?? [])}}>{t('crew.editCategory')}</Button>
+      <Button disabled={busy} onClick={() => void remove(category)} aria-label={t('crew.removeCategoryNamed', {name: category.displayName})}>{t('crew.removeCategory')}</Button>
     </Box>)}
     {item && <Box component="form" onSubmit={event => {event.preventDefault(); void save()}}>
       <fieldset><legend>{t('crew.editCategory')}: {item.displayName}</legend>

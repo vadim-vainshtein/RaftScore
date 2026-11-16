@@ -3,7 +3,7 @@ import {ApiError} from './client'
 // Only known codes are exposed; server parameters and details are never rendered.
 const codes = {
   'request.validation_failed': 'validation', 'request.malformed': 'validation',
-  'conflict.optimistic_lock': 'conflict', 'competition_category.duplicate': 'duplicate',
+  'conflict.optimistic_lock': 'conflict', 'competition_category.duplicate': 'duplicate', 'competition_category.in_use': 'categoryInUse',
   'crew_entry.participant_duplicate': 'participantDuplicate', 'crew_entry.start_number_duplicate': 'startNumberDuplicate',
   'crew_entry.invalid_roster': 'invalidRoster', 'crew_entry.invalid_requirement_answers': 'invalidRequirements',
   'start_list.invalid': 'validation', 'access.forbidden': 'access', 'database.unavailable': 'server',
