@@ -1,7 +1,7 @@
 import {useEffect, useRef, useState} from 'react'
 import type {FormEvent} from 'react'
 import {useTranslation} from 'react-i18next'
-import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
+import {Autocomplete, Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {apiRequest, csrfRequest} from './api/client'
 import {apiErrorKey} from './api/errors'
 import {formatDate} from './i18n/format'
@@ -10,7 +10,7 @@ import {supportedLocale} from './i18n/supported-locales'
 type Policy = 'HIDDEN' | 'OPTIONAL' | 'REQUIRED'
 type Field = 'representative' | 'phone' | 'whatsapp' | 'telegram' | 'email'
 type Competition = {id: number, title: string, status?: string, admissionConfirmationRequired: boolean, representativeFields?: Record<Field, Policy>}
-type SearchResult = {id: number, competitionId: number, categoryId: number, crewName: string, regionOrClub: string, startDate: string, competitionTitle: string, categoryName: string, startNumber: number, rosterVariant?: number | null, roster?: Member[]}
+type SearchResult = {id: number, competitionId: number, categoryId: number, crewName: string, regionOrClub: string, startDate: string, competitionTitle: string, categoryName: string, startNumber: number, crewSize: number, registeredAt?: string | null, rosterVariant?: number | null, roster?: Member[]}
 type Category = {id: number, displayName: string, crewSize: number, version: number, seatLabels?: string[]}
 type Requirement = {id: number, name: string, valueType: 'YES_NO' | 'TEXT' | 'DATE' | 'NUMBER', required: boolean}
 type Member = {participantId?: number, surname: string, givenName: string, patronymic: string}
@@ -29,13 +29,13 @@ const empty = (category: Category, crews: Summary[]): Draft => ({categoryId: cat
 
 export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompetition, onReadinessChange}: {readOnly?: boolean, canEdit?: boolean, fixedCompetition?: string, onReadinessChange?: () => void}) {
   const {t, i18n} = useTranslation()
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
   const [competitions, setCompetitions] = useState<Competition[]>([]), [competition, setCompetition] = useState<Competition | null>(null)
   const editable = !readOnly && canEdit && competition?.status !== 'COMPLETED'
   const [categories, setCategories] = useState<Category[]>([]), [requirements, setRequirements] = useState<Requirement[]>([]), [crews, setCrews] = useState<Summary[]>([])
   const [loadedCompetitionId, setLoadedCompetitionId] = useState<number | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
-  const searchGeneration = useRef(0)
   const [category, setCategory] = useState(() => fixedCompetition ? new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('category') ?? '' : ''), [search, setSearch] = useState(''), [admission, setAdmission] = useState('all'), [draft, setDraft] = useState<Draft | null>(null)
   useEffect(() => {
     if (!fixedCompetition) return
@@ -49,7 +49,6 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const initialDraft = useRef<Draft | null>(null)
   const startDraft = (value: Draft) => { initialDraft.current = value; setDraft(value) }
   const canDiscard = () => !draft || JSON.stringify(draft) === JSON.stringify(initialDraft.current) || window.confirm(t('resultGrid.discard'))
-  const [pendingCrew, setPendingCrew] = useState<number | null>(null)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [revision, setRevision] = useState(0)
   const base = competition ? `/api/competitions/${competition.id}/entries` : ''
   const fail = (e: unknown) => setError(apiErrorKey(e))
@@ -74,16 +73,17 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
     return () => { active = false }
   }, [base, competition, revision, readOnly])
   useEffect(() => {
-    if (!search.trim()) return
+    if (!competition || !category) { setSearchResults([]); return }
     let active = true
-    const generation = searchGeneration.current
-    const timer = setTimeout(() => { void apiRequest<SearchResult[]>(`/api/crew-search${readOnly ? '/public' : ''}?name=${encodeURIComponent(search.trim())}`).then(results => {if (active && searchGeneration.current === generation) setSearchResults(results)}).catch(e => {if (active && searchGeneration.current === generation) fail(e)}) }, 250)
-    return () => {active = false; clearTimeout(timer)}
-  }, [search, readOnly])
+    setSearchResults([])
+    void apiRequest<SearchResult[]>(`/api/crew-search${readOnly ? '/public' : ''}?categoryId=${encodeURIComponent(category)}`)
+      .then(results => { if (active) setSearchResults(results) }).catch(e => { if (active) fail(e) })
+    return () => { active = false }
+  }, [competition, category, readOnly, revision])
   const changeCompetition = async (id: string) => {
     if (!canDiscard()) return
     editSelection.current++; const generation = ++selection.current
-    setCompetition(null); setLoadedCompetitionId(null); setDraft(null); setPendingCrew(null); setCategories([]); setCrews([]); setCategory(''); setAdmission('all'); setError('')
+    setCompetition(null); setLoadedCompetitionId(null); setDraft(null); setCategories([]); setCrews([]); setCategory(''); setSearch(''); setAdmission('all'); setError('')
     if (!id) { setCompetition(null); return }
     try { const result = await apiRequest<Competition>(`/api/competitions/${id}`); if (selection.current === generation) setCompetition(result) } catch (e) { if (selection.current === generation) fail(e) }
   }
@@ -91,10 +91,10 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const openCrew = (id: number) => {
     if (!canDiscard()) return
     const generation = selection.current, editGeneration = ++editSelection.current
-    setDraft(null); setPendingCrew(id); setError('')
+    setDraft(null); setError('')
     void apiRequest<Crew>(`${base}/${id}`).then(item => {
-      if (selection.current === generation && editSelection.current === editGeneration) { setPendingCrew(null); edit(item) }
-    }).catch(e => { if (selection.current === generation && editSelection.current === editGeneration) { setPendingCrew(null); fail(e) } })
+      if (selection.current === generation && editSelection.current === editGeneration) { edit(item) }
+    }).catch(e => { if (selection.current === generation && editSelection.current === editGeneration) { fail(e) } })
   }
   const save = async (event: FormEvent) => {
     event.preventDefault(); if (!draft || busy || hasConflict) return
@@ -125,10 +125,10 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   }
   const selectSearch = async (item: SearchResult) => {
     const target = searchTarget(item)
-    if (!target || !item.roster || target.crewSize !== item.roster.length || !canDiscard()) return
+    if (!target || !item.roster || target.crewSize !== item.roster.length || loadedCompetitionId !== competition?.id) return
     setCategory(String(target.id))
     const generation = selection.current, editGeneration = ++editSelection.current
-    setPendingCrew(null)
+    setDraft(null)
     try {
       const result = await apiRequest<Crew>(`/api/competitions/${item.competitionId}/entries/${item.id}`)
       if (generation !== selection.current || editGeneration !== editSelection.current) return
@@ -144,13 +144,24 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('crew.competition')} value={competition?.id ?? ''} onChange={e => void changeCompetition(e.target.value)}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
-    {competition && <TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null); setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
-    {competition && editable && <TextField select label={t('crew.selectCrew')} disabled={busy || !category} value={pendingCrew !== null && crews.some(c => c.id === pendingCrew && String(c.categoryId) === category) ? String(pendingCrew) : draft?.editing && String(draft.categoryId) === category ? String(draft.editing.id) : ''} onChange={e => { if (e.target.value) openCrew(Number(e.target.value)); else { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null) } }}><MenuItem value="">—</MenuItem>{crews.filter(c => String(c.categoryId) === category).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.startNumber}. {c.crewName}{c.regionOrClub?.trim() && ` (${c.regionOrClub.trim()})`}</MenuItem>)}</TextField>}
+    {competition && <TextField select disabled={busy} label={t('crew.category')} value={category} onChange={e => {if (!canDiscard()) return; editSelection.current++; setDraft(null); setSearch(''); setCategory(e.target.value)}}><MenuItem value="">{t('crew.all')}</MenuItem>{categories.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {competition && <Autocomplete<SearchResult, false, false, true>
+      disabled={busy || !category || (!!editable && loadedCompetitionId !== competition?.id)} options={searchResults} value={null} inputValue={search} freeSolo forcePopupIcon openOnFocus
+      getOptionDisabled={item => !readOnly && item.crewSize !== categories.find(c => String(c.id) === category)?.crewSize}
+      getOptionKey={option => typeof option === 'string' ? option : option.id}
+      getOptionLabel={option => typeof option === 'string' ? option : option.crewName}
+      filterOptions={(options, state) => options.filter(item => item.crewName.toLocaleLowerCase().includes(state.inputValue.trim().toLocaleLowerCase()))}
+      onInputChange={(_event, value, reason) => { if (reason === 'input') { editSelection.current++; setSearch(value) } if (reason === 'clear' && canDiscard()) { editSelection.current++; setDraft(null); setSearch('') } }}
+      onChange={(_event, item) => { if (item && typeof item !== 'string' && editable) { if (!canDiscard()) return; setSearch(item.crewName); void selectSearch(item) } }}
+      renderInput={params => <TextField {...params} label={t('crew.selectCrew')}/>}
+      renderOption={(props, item) => { const {key, ...rest} = props; return <li key={key} {...rest}>{item.startNumber}. {item.crewName}{item.regionOrClub?.trim() && ` (${item.regionOrClub.trim()})`} — {item.competitionTitle} — {item.registeredAt ? formatDate(new Date(item.registeredAt), supportedLocale(i18n.language) ?? 'en', zone) : t('crew.registrationDateUnknown')}{!readOnly && item.crewSize !== categories.find(c => String(c.id) === category)?.crewSize && ` — ${t('crew.sizeMismatch')}`}{readOnly && item.rosterVariant != null && ` — ${t('crew.rosterVariant', {number: item.rosterVariant})}`}</li> }}
+    />}
+
     {!readOnly && competition?.status === 'COMPLETED' && <Typography>{t('crew.completedTarget')}</Typography>}
     {competition && <>
 
       {!readOnly && competition.admissionConfirmationRequired && <TextField select label={t('crew.admission')} value={admission} onChange={e => setAdmission(e.target.value)}><MenuItem value="all">{t('crew.all')}</MenuItem><MenuItem value="null">{t('crew.pending')}</MenuItem><MenuItem value="true">{t('crew.admitted')}</MenuItem><MenuItem value="false">{t('crew.rejected')}</MenuItem></TextField>}
-      {editable && <Button disabled={busy || !category || loadedCompetitionId !== competition?.id} onClick={() => { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); const c = categories.find(c => String(c.id) === category); if (c) startDraft(empty(c, crews)) }}>{t('crew.create')}</Button>}
+      {editable && <Button disabled={busy || !category || loadedCompetitionId !== competition?.id} onClick={() => { if (!canDiscard()) return; editSelection.current++; const c = categories.find(c => String(c.id) === category); if (c) { const next = empty(c, crews); if (c.crewSize === 1) { const [surname = '', givenName = '', ...patronymic] = search.trim().split(/\s+/); next.roster[0] = {surname, givenName, patronymic: patronymic.join(' ')} } else next.crewName = search; startDraft(next) } }}>{t('crew.create')}</Button>}
       {editable && !category && <Typography>{t('crew.chooseCategoryFirst')}</Typography>}
       {editable && draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2}}>
         {(draft.roster.length === 1 ? ['regionOrClub', 'startNumber'] as const : ['crewName', 'regionOrClub', 'startNumber'] as const).map(key => <TextField key={key} required={key !== 'regionOrClub'} label={t(`crew.${key}`)} type={key === 'startNumber' ? 'number' : 'text'} value={draft[key]} onChange={e => setDraft({...draft, [key]: e.target.value})}/>)}
@@ -158,7 +169,7 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
         {requirements.map(r => <TextField key={r.id} select={r.valueType === 'YES_NO'} label={r.name} required={r.required} type={r.valueType === 'DATE' ? 'date' : r.valueType === 'NUMBER' ? 'number' : 'text'} slotProps={r.valueType === 'DATE' ? {inputLabel: {shrink: true}} : r.valueType === 'NUMBER' ? {htmlInput: {step: 'any'}} : undefined} value={draft.answers[r.id] ?? ''} onChange={e => setDraft({...draft, answers: {...draft.answers, [r.id]: e.target.value}})}>{r.valueType === 'YES_NO' && [<MenuItem key="empty" value="">—</MenuItem>, <MenuItem key="yes" value="true">{t('crew.yes')}</MenuItem>, <MenuItem key="no" value="false">{t('crew.no')}</MenuItem>]}</TextField>)}
         {draft.roster.length !== 1 && policies.representative !== 'HIDDEN' && <><TextField select label={t('crew.representativeChoice')} value={draft.representativeIndex ?? ''} onChange={e => setDraft({...draft, representativeIndex: e.target.value === '' ? undefined : Number(e.target.value)})}><MenuItem value="">{t('crew.newRepresentative')}</MenuItem>{draft.roster.map((m, i) => <MenuItem key={i} value={i}>{i + 1}. {m.surname} {m.givenName} {m.patronymic}</MenuItem>)}</TextField>{draft.representativeIndex === undefined && <TextField required={policies.representative === 'REQUIRED'} label={t('crew.representative')} value={draft.representative} onChange={e => setDraft({...draft, representative: e.target.value})}/>}</>}
         {draft.roster.length !== 1 && (['phone', 'whatsapp', 'telegram', 'email'] as const).filter(key => policies[key] !== 'HIDDEN').map(key => <TextField key={key} required={policies[key] === 'REQUIRED'} label={t(`crew.${key}`)} value={draft.contacts[key] ?? ''} onChange={e => setDraft({...draft, contacts: {...draft.contacts, [key]: e.target.value}})}/>)}
-        <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { if (!canDiscard()) return; editSelection.current++; setPendingCrew(null); setDraft(null) }}>{t('crew.cancel')}</Button></Box>
+        <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { if (!canDiscard()) return; editSelection.current++; setDraft(null) }}>{t('crew.cancel')}</Button></Box>
       </Box>}
       {visible.map(c => <Box key={c.id}>
         <Typography>{[String(c.startNumber), c.crewName, c.regionOrClub?.trim(), categories.find(category => category.id === c.categoryId)?.displayName].filter(Boolean).join(' — ')}</Typography>
@@ -173,17 +184,5 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
       </Box>)}
 
       </>}
-    {<>
-      <TextField label={t('crew.search')} helperText={t('crew.searchHistoryHint')} value={search} onChange={e => {searchGeneration.current++; setSearchResults([]); setSearch(e.target.value)}}/>
-      {search.trim() && searchResults.map(item => {
-        const target = searchTarget(item)
-        const compatible = categories.filter(c => c.crewSize === item.roster?.length)
-        return <Box key={item.id}>
-          <Typography>{item.startNumber} — {item.crewName} — {item.competitionTitle} — {item.categoryName} — {formatDate(new Date(`${item.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC')} — {item.regionOrClub}{readOnly && item.rosterVariant != null && ` — ${t('crew.rosterVariant', {number: item.rosterVariant})}`}{!readOnly && item.roster && ` — ${item.roster.map(m => `${m.surname} ${m.givenName} ${m.patronymic ?? ''}`).join(', ')}`}</Typography>
-          {editable && item.roster && <><Button disabled={busy || !competition || loadedCompetitionId !== competition.id || !target || target.crewSize !== item.roster.length} onClick={() => void selectSearch(item)}>{t(item.competitionId === competition?.id && item.categoryId === target?.id ? 'crew.openApplication' : 'crew.copyApplication')}</Button>
-          {!competition ? <Typography>{t('crew.chooseTarget')}</Typography> : !target && compatible.length === 0 ? <Typography>{t('crew.sizeMismatch')}</Typography> : !target ? <Typography>{t('crew.chooseCompatible', {categories: compatible.map(c => c.displayName).join(', ')})}</Typography> : target.crewSize !== item.roster.length ? <Typography>{t('crew.sizeMismatch')}</Typography> : <Typography>{t('crew.targetCategory', {category: target.displayName})}</Typography>}</>}
-        </Box>
-      })}
-    </>}
   </Box>
 }

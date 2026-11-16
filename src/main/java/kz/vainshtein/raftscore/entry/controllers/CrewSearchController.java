@@ -15,29 +15,27 @@ class CrewSearchController {
     private final CrewEntryRepository entries;
     private final CrewMembershipRepository memberships;
 
-    record SearchResult(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub, LocalDate startDate, String competitionTitle, String categoryName, int startNumber, List<CrewEntryController.MemberResponse> roster) { }
+    record SearchResult(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub, LocalDate startDate, String competitionTitle, String categoryName, int startNumber, int crewSize, java.time.Instant registeredAt, List<CrewEntryController.MemberResponse> roster) { }
 
-    record PublicSearchResult(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub, LocalDate startDate, String competitionTitle, String categoryName, int startNumber, Integer rosterVariant) { }
+    record PublicSearchResult(Long id, Long competitionId, Long categoryId, String crewName, String regionOrClub, LocalDate startDate, String competitionTitle, String categoryName, int startNumber, int crewSize, java.time.Instant registeredAt, Integer rosterVariant) { }
 
     @GetMapping("/public")
     @Transactional(readOnly = true)
-    List<PublicSearchResult> publicSearch(@RequestParam String name) {
-        if (name.isBlank() || name.indexOf(0) >= 0) return List.of();
-        var matches = entries.searchByName(name.trim());
+    List<PublicSearchResult> publicSearch(@RequestParam(required = false) String name, @RequestParam(required = false) Long categoryId) {
+        var matches = findMatches(name, categoryId);
         var rosters = loadRosters(matches);
         var variants = rosterVariants(matches, rosters);
         return matches.stream().map(entry -> {
             var category = entry.getCompetitionCategory();
             var competition = category.getCompetition();
-            return new PublicSearchResult(entry.getId(), competition.getId(), category.getId(), entry.getCrewName(), entry.getRegionOrClub(), competition.getStartDate(), competition.getTitle(), category.getDisplayName(), entry.getStartNumber(), variants.get(entry.getId()));
+            return new PublicSearchResult(entry.getId(), competition.getId(), category.getId(), entry.getCrewName(), entry.getRegionOrClub(), competition.getStartDate(), competition.getTitle(), category.getDisplayName(), entry.getStartNumber(), category.getCrewSize(), entry.getRegisteredAt(), variants.get(entry.getId()));
         }).toList();
     }
 
     @GetMapping
     @Transactional(readOnly = true)
-    List<SearchResult> search(@RequestParam String name) {
-        if (name.isBlank() || name.indexOf(0) >= 0) return List.of();
-        var matches = entries.searchByName(name.trim());
+    List<SearchResult> search(@RequestParam(required = false) String name, @RequestParam(required = false) Long categoryId) {
+        var matches = findMatches(name, categoryId);
         if (matches.isEmpty()) return List.of();
         var rosters = memberships.findByCrewEntryIdInOrderByPositionAsc(matches.stream().map(entry -> entry.getId()).toList()).stream()
                 .collect(java.util.stream.Collectors.groupingBy(member -> member.getCrewEntry().getId()));
@@ -45,8 +43,13 @@ class CrewSearchController {
             var category = entry.getCompetitionCategory();
             var competition = category.getCompetition();
             var roster = rosters.getOrDefault(entry.getId(), List.of()).stream().map(CrewEntryController.MemberResponse::from).toList();
-            return new SearchResult(entry.getId(), competition.getId(), category.getId(), entry.getCrewName(), entry.getRegionOrClub(), competition.getStartDate(), competition.getTitle(), category.getDisplayName(), entry.getStartNumber(), roster);
+            return new SearchResult(entry.getId(), competition.getId(), category.getId(), entry.getCrewName(), entry.getRegionOrClub(), competition.getStartDate(), competition.getTitle(), category.getDisplayName(), entry.getStartNumber(), category.getCrewSize(), entry.getRegisteredAt(), roster);
         }).toList();
+    }
+    private List<kz.vainshtein.raftscore.entry.entities.CrewEntry> findMatches(String name, Long categoryId) {
+        if (categoryId != null) return entries.findHistoryForCategory(categoryId);
+        if (name == null || name.isBlank() || name.indexOf(0) >= 0) return List.of();
+        return entries.searchByName(name.trim());
     }
     private java.util.Map<Long, List<kz.vainshtein.raftscore.entry.entities.CrewMembership>> loadRosters(List<kz.vainshtein.raftscore.entry.entities.CrewEntry> matches) {
         if (matches.isEmpty()) return java.util.Map.of();

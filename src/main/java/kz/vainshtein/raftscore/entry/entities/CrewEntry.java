@@ -24,6 +24,10 @@ public class CrewEntry extends VersionedEntity {
     @JoinColumn(name = "competition_category_id", nullable = false)
     private CompetitionCategory competitionCategory;
 
+    @org.hibernate.annotations.CreationTimestamp
+    @Column(name = "registered_at", updatable = false)
+    private java.time.Instant registeredAt;
+
     @Column(name = "crew_name", nullable = false, columnDefinition = "TEXT")
     private String crewName;
 

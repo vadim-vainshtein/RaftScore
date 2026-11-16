@@ -82,6 +82,7 @@
     "editCategory": "Edit category",
     "rosterVariant": "Roster variant {{number}}",
     "searchHistoryHint": "Search across competitions to find or copy an entry.",
+    "registrationDateUnknown": "Registration date unknown",
     "selectCrew": "Select crew in category",
     "openApplication": "Open entry",
     "copyApplication": "Create entry from this",

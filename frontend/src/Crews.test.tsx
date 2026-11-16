@@ -10,6 +10,7 @@ beforeEach(() => { vi.mocked(apiRequest).mockReset().mockImplementation(async pa
   if (path === '/api/competitions/1') return {id: 1, title: 'Race', admissionConfirmationRequired: true}
   if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
   if (path.endsWith('/requirements')) return [{id: 5, name: 'Consent', valueType: 'YES_NO', required: true}]
+  if (path.includes('/api/crew-search')) return [{...detail, competitionId: 1, competitionTitle: 'Race', crewSize: 1, categoryName: 'R1', registeredAt: '2026-01-01T00:00:00Z'}]
   if (path.endsWith('/entries/4')) return detail
   return [detail]
 }); vi.mocked(csrfRequest).mockReset().mockResolvedValue({}) })
@@ -123,27 +124,6 @@ test('selects participants by ID when names match', async () => {
   expect(csrfRequest).not.toHaveBeenCalled()
 })
 
-test('read-only view requests only public data and offers no mutations', async () => {
-  vi.mocked(apiRequest).mockImplementation(async path => {
-    if (path === '/api/competitions?size=100') return {content: [{id: 1, title: 'Race'}]}
-    if (path === '/api/competitions/1') return {id: 1, title: 'Race', admissionConfirmationRequired: true}
-    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1', crewSize: 1}]
-    if (path.startsWith('/api/crew-search/public?')) return [{id: 99, crewName: 'Other crew', startNumber: 7, rosterVariant: 1, competitionTitle: 'Old race', categoryName: 'R1', startDate: '2025-01-01', regionOrClub: 'Old club'}, {id: 100, crewName: 'Other crew', startNumber: 8, rosterVariant: 2, competitionTitle: 'Old race', categoryName: 'R1', startDate: '2025-01-01', regionOrClub: 'Old club'}]
-    if (path.endsWith('/entries')) return [{id: 4, categoryId: 2, crewName: 'River', regionOrClub: 'Club', startNumber: 7}]
-    throw new Error(`Unexpected request ${path}`)
-  })
-  render(<Crews readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  expect(await screen.findByText(/River/)).toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'Other'}})
-  expect(await screen.findByText(/7 — Other crew — Old race/)).toBeInTheDocument()
-  expect(screen.getByText(/8 — Other crew — Old race/)).toHaveTextContent('Roster variant 2')
-  expect(screen.getByText(/7 — Other crew — Old race/)).toHaveTextContent('Roster variant 1')
-  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject|Use roster/})).not.toBeInTheDocument()
-  expect(vi.mocked(apiRequest).mock.calls.map(([path]) => path)).not.toEqual(expect.arrayContaining(['/api/competitions/1/entries/private', '/api/competitions/1/entries/requirements']))
-})
-
 test('ignores an edit response after a newer create intent', async () => {
   let resolveDetail!: (value: typeof detail) => void
   const pending = new Promise<typeof detail>(resolve => { resolveDetail = resolve })
@@ -188,152 +168,173 @@ test('uses the selected roster participant as representative', async () => {
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({representative: 'Jones Sam', representativePosition: 1})))
 })
 
-test('prefills a new registration from another competition without carrying its entry identity', async () => {
-  const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'River', startNumber: 1, regionOrClub: 'Old club', startDate: '2025-01-01', competitionTitle: 'Old race', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}]) : path === '/api/competitions/9/entries/90' ? Promise.resolve({...detail, id: 90, categoryId: 20, regionOrClub: 'Old club', representative: 'Old Member', representativePosition: 1, representativeContacts: {phone: '123'}, roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}) : previous(path))
-  render(<Crews/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'River'}})
-  fireEvent.click(await screen.findByRole('button', {name: 'Create entry from this'}))
-  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Old')
-  expect(screen.getByLabelText(/Start number/)).toHaveValue(1)
-})
-
-test('clearing or changing search hides old hits and ignores delayed responses', async () => {
-  let resolveDelayed: (value: unknown) => void = () => {}
-  const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => {
-    if (path.includes('/crew-search?name=River')) return Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'Old hit', startNumber: 1, regionOrClub: 'Club', startDate: '2025-01-01', competitionTitle: 'Race', categoryName: 'R1', roster: [{surname: 'Smith', givenName: 'Sam', patronymic: ''}]}])
-    if (path.includes('/crew-search?name=Delayed')) return new Promise(resolve => {resolveDelayed = resolve})
-    return previous(path)
+test('shows registration dates in the browser time zone', async () => {
+  const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions
+  const zone = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (this: Intl.DateTimeFormat) {
+    return {...resolvedOptions.call(this), timeZone: 'Asia/Qyzylorda'}
   })
-  render(<Crews/>)
-  const search = screen.getByLabelText('Search crews')
-  fireEvent.change(search, {target: {value: 'River'}})
-  expect(await screen.findByText(/Old hit/)).toBeInTheDocument()
-  fireEvent.change(search, {target: {value: 'Delayed'}})
-  expect(screen.queryByText(/Old hit/)).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', {name: 'Create entry from this'})).not.toBeInTheDocument()
-  await waitFor(() => expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('name=Delayed'))).toBe(true))
-  fireEvent.change(search, {target: {value: ''}})
-  await act(async () => {resolveDelayed([{id: 91, crewName: 'Late hit', startNumber: 2, startDate: '2025-01-01'}]); await Promise.resolve()})
-  expect(screen.queryByText(/Late hit|Old hit/)).not.toBeInTheDocument()
+  try {
+    const previous = vi.mocked(apiRequest).getMockImplementation()!
+    vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?')
+      ? Promise.resolve([{...detail, competitionId: 1, competitionTitle: 'Race', crewSize: 1, registeredAt: '2026-11-16T21:44:00Z'}]) : previous(path))
+    render(<Crews/>)
+    fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+    fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+    fireEvent.focus(screen.getByRole('combobox', {name: 'Select crew in category'}))
+    expect(await screen.findByRole('option', {name: /River.*Race.*11\/17\/2026/})).toBeInTheDocument()
+  } finally {zone.mockRestore()}
 })
-
-test('copies a found crew into the only compatible category of a started competition', async () => {
+test('filters category history locally and copies an earlier registration', async () => {
   const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => {
-    if (path === '/api/competitions/1') return Promise.resolve({id: 1, title: 'Race', status: 'STARTED', admissionConfirmationRequired: false})
-    if (path.includes('/crew-search?')) return Promise.resolve([{id: 90, competitionId: 9, categoryId: 20, crewName: 'Found', startNumber: 1, startDate: '2025-01-01', competitionTitle: 'Old race', categoryName: 'R1', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]}])
-    if (path === '/api/competitions/9/entries/90') return Promise.resolve({...detail, id: 90, crewName: 'Found', roster: [{participantId: 99, surname: 'Old', givenName: 'Member', patronymic: ''}]})
-    return previous(path)
-  })
+  const old = {...detail, id: 90, competitionId: 9, categoryId: 20, competitionTitle: 'Old race', crewSize: 1, registeredAt: '2025-01-01T00:00:00Z'}
+  vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([old, {...old, id: 92, competitionTitle: 'Older race', crewSize: 2}, {...old, id: 91, crewName: 'Rapid', registeredAt: null}]) : path === '/api/competitions/9/entries/90' ? Promise.resolve({...detail, id: 90, roster: [{...detail.roster[0], participantId: 99}]}) : previous(path))
   render(<Crews/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  await screen.findByLabelText('Category')
-  fireEvent.change(screen.getByLabelText('Search crews'), {target: {value: 'Found'}})
-  const copy = await screen.findByRole('button', {name: 'Create entry from this'})
-  expect(copy).toBeEnabled()
-  expect(screen.getByText('Target category: R1.')).toBeInTheDocument()
-  fireEvent.click(copy)
-  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Old')
-})
-
-test('category picker lists only category crews and opens one directly for saving', async () => {
-  const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/private') ? Promise.resolve([detail, {...detail, id: 5, categoryId: 3, crewName: 'Other'}]) : previous(path))
-  render(<Crews/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-  fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
-  expect(screen.queryByRole('option', {name: /Other/})).not.toBeInTheDocument()
-  fireEvent.click(await screen.findByRole('option', {name: /7\. River/}))
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  const picker = screen.getByRole('combobox', {name: 'Select crew in category'})
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/crew-search?categoryId=2'))
+  fireEvent.focus(picker)
+  expect(await screen.findByRole('option', {name: /Rapid.*Registration date unknown/})).toBeInTheDocument()
+  expect(screen.getByRole('option', {name: /River.*Old race/})).toBeInTheDocument()
+  fireEvent.change(picker, {target: {value: 'riv'}})
+  expect(await screen.findByRole('option', {name: /River.*Old race/})).toBeInTheDocument()
+  expect(screen.queryByRole('option', {name: /Rapid/})).not.toBeInTheDocument()
+  expect(screen.getByRole('option', {name: /River.*Older race/})).toHaveAttribute('aria-disabled', 'true')
+  expect(vi.mocked(apiRequest).mock.calls.filter(([path]) => path.includes('/crew-search'))).toHaveLength(1)
+  fireEvent.click(screen.getByRole('option', {name: /River.*Old race/}))
   expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
+  fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/})); fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries/4', 'PUT', expect.objectContaining({version: 3})))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.objectContaining({categoryId: 2})))
 })
 
-test('category changes invalidate a pending picker selection', async () => {
-  let resolveDetail!: (value: typeof detail) => void
-  const pending = new Promise<typeof detail>(resolve => { resolveDetail = resolve })
+test('preserves a typed new crew name in the creation form', async () => {
   const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? pending : previous(path))
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/categories') ? Promise.resolve([{id: 2, displayName: 'R1', crewSize: 2}]) : previous(path))
   render(<Crews/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-  fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
-  fireEvent.click(await screen.findByRole('option', {name: /7\. River/}))
-  fireEvent.mouseDown(screen.getByLabelText('Category'))
-  fireEvent.click(screen.getByRole('option', {name: 'All'}))
-  await act(async () => { resolveDetail(detail); await pending })
-  expect(screen.queryByLabelText(/Crew name/)).not.toBeInTheDocument()
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.change(screen.getByRole('combobox', {name: 'Select crew in category'}), {target: {value: 'New team'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  expect(screen.getByLabelText(/Crew name/)).toHaveValue('New team')
 })
 
-test('workspace picker opens the selected crew', async () => {
-  window.location.hash = '#/competitions/1/crews?category=2'
-  render(<Crews fixedCompetition="1"/>)
-  const picker = await screen.findByLabelText('Select crew in category')
-  await waitFor(() => expect(picker).not.toHaveAttribute('aria-disabled', 'true'))
-  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1/entries/private'))
-  fireEvent.mouseDown(picker)
-  fireEvent.click(await screen.findByRole('option', {name: /7\. River/}))
-  expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
-  window.location.hash = ''
+test('read-only history uses the public endpoint and offers no mutations', async () => {
+  render(<Crews readOnly/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/crew-search/public?categoryId=2'))
+  fireEvent.change(screen.getByRole('combobox', {name: 'Select crew in category'}), {target: {value: 'Riv'}})
+  expect(await screen.findByRole('option', {name: /River.*Race/})).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject/})).not.toBeInTheDocument()
 })
 
-test('clearing a pending picker selection prevents its detail from opening', async () => {
-  let resolveDetail!: (value: typeof detail) => void
-  const pending = new Promise<typeof detail>(resolve => { resolveDetail = resolve })
+test('waits for current entries before allowing a history selection', async () => {
+  let resolveEntries!: (value: unknown) => void
   const previous = vi.mocked(apiRequest).getMockImplementation()!
-  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? pending : previous(path))
-  render(<Crews/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-  const picker = screen.getByLabelText('Select crew in category')
-  fireEvent.mouseDown(picker)
-  fireEvent.click(await screen.findByRole('option', {name: /7\. River/}))
-  expect(picker).toHaveTextContent('River')
-  fireEvent.mouseDown(picker)
-  fireEvent.click(screen.getByRole('option', {name: '—'}))
-  await act(async () => { resolveDetail(detail); await pending })
-  expect(screen.queryByLabelText(/Crew name/)).not.toBeInTheDocument()
+  const old = {...detail, id: 90, competitionId: 9, categoryId: 20, competitionTitle: 'Old race', crewSize: 1}
+  vi.mocked(apiRequest).mockImplementation(path => {
+    if (path.endsWith('/entries/private')) return new Promise(resolve => {resolveEntries = resolve})
+    if (path.includes('/crew-search?')) return Promise.resolve([old])
+    if (path === '/api/competitions/9/entries/90') return Promise.resolve({...detail, id: 90, roster: [{...detail.roster[0], participantId: 99}]})
+    return previous(path)
+  })
+  window.location.hash = '#/workspace/1/crews?category=2'
+  try {
+    render(<Crews fixedCompetition="1"/>)
+    const picker = await screen.findByRole('combobox', {name: 'Select crew in category'})
+    expect(picker).toBeDisabled()
+    await act(async () => {resolveEntries([{...detail, startNumber: 1}]); await Promise.resolve()})
+    await waitFor(() => expect(picker).toBeEnabled())
+    fireEvent.focus(picker)
+    fireEvent.click(await screen.findByRole('option', {name: /River.*Old race/}))
+    expect(await screen.findByLabelText(/Start number/)).toHaveValue(2)
+  } finally {window.location.hash = ''}
 })
 
-test('keeps an edited draft when category or crew change is declined', async () => {
+test('clears an accepted draft before waiting for a history detail response', async () => {
+  let resolveDetail!: (value: unknown) => void
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => {
+    if (path.includes('/crew-search?')) return Promise.resolve([{...detail, id: 90, competitionId: 9, categoryId: 20, competitionTitle: 'Old race', crewSize: 1}])
+    if (path === '/api/competitions/9/entries/90') return new Promise(resolve => {resolveDetail = resolve})
+    return previous(path)
+  })
+  try {
+    render(<Crews/>)
+    fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+    fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+    fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
+    fireEvent.change(await screen.findByLabelText(/Surname/), {target: {value: 'Edited'}})
+    fireEvent.focus(screen.getByRole('combobox', {name: 'Select crew in category'}))
+    fireEvent.click(await screen.findByRole('option', {name: /River.*Old race/}))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(screen.queryByLabelText(/Surname/)).not.toBeInTheDocument()
+    await act(async () => {resolveDetail({...detail, id: 90}); await Promise.resolve()})
+    expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
+  } finally {confirm.mockRestore()}
+})
+
+test('category changes invalidate a pending selection', async () => {
+  let resolveDetail!: (value: typeof detail) => void
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? new Promise(resolve => { resolveDetail = resolve }) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  const picker = screen.getByRole('combobox', {name: 'Select crew in category'})
+  fireEvent.change(picker, {target: {value: 'River'}})
+  fireEvent.click(await screen.findByRole('option', {name: /River.*Race/}))
+  fireEvent.mouseDown(screen.getByLabelText('Category')); fireEvent.click(screen.getByRole('option', {name: 'All'}))
+  await act(async () => {resolveDetail(detail); await Promise.resolve()})
+  expect(screen.queryByLabelText(/Surname/)).not.toBeInTheDocument()
+})
+
+test('clearing the picker invalidates a pending selection', async () => {
+  let resolveDetail!: (value: typeof detail) => void
+  const previous = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/4') ? new Promise(resolve => {resolveDetail = resolve}) : previous(path))
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  const picker = screen.getByRole('combobox', {name: 'Select crew in category'})
+  fireEvent.change(picker, {target: {value: 'River'}}); fireEvent.click(await screen.findByRole('option', {name: /River.*Race/}))
+  fireEvent.change(picker, {target: {value: ''}})
+  await act(async () => {resolveDetail(detail); await Promise.resolve()})
+  expect(screen.queryByLabelText(/Surname/)).not.toBeInTheDocument()
+})
+
+test('retains a dirty draft when changing category or crew is declined', async () => {
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
   try {
     const previous = vi.mocked(apiRequest).getMockImplementation()!
-    vi.mocked(apiRequest).mockImplementation(path => path.endsWith('/entries/private') ? Promise.resolve([detail, {...detail, id: 5, crewName: 'Rapid'}]) : previous(path))
+    vi.mocked(apiRequest).mockImplementation(path => path.includes('/crew-search?') ? Promise.resolve([{...detail, competitionId: 1, competitionTitle: 'Race', crewSize: 1}, {...detail, id: 5, crewName: 'Rapid', competitionId: 1, competitionTitle: 'Race', crewSize: 1}]) : previous(path))
     render(<Crews/>)
-    fireEvent.mouseDown(await screen.findByLabelText('Competition'))
-    fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-    fireEvent.mouseDown(await screen.findByLabelText('Category'))
-    fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
-    fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
-    fireEvent.click(await screen.findByRole('option', {name: /7\. River/}))
+    fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+    fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+    fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
     fireEvent.change(await screen.findByLabelText(/Surname/), {target: {value: 'Edited'}})
-    fireEvent.mouseDown(screen.getByLabelText('Category'))
-    fireEvent.click(screen.getByRole('option', {name: 'All'}))
-    expect(screen.getByLabelText(/Surname/)).toHaveValue('Edited')
-    expect(screen.getByRole('combobox', {name: 'Category'})).toHaveTextContent('R1')
-    fireEvent.mouseDown(screen.getByLabelText('Select crew in category'))
-    fireEvent.click(screen.getByRole('option', {name: /Rapid/}))
+    fireEvent.mouseDown(screen.getByLabelText('Category')); fireEvent.click(screen.getByRole('option', {name: 'All'}))
+    const picker = screen.getByRole('combobox', {name: 'Select crew in category'})
+    fireEvent.change(picker, {target: {value: 'Rapid'}})
+    fireEvent.click(await screen.findByRole('option', {name: /Rapid/}))
     expect(screen.getByLabelText(/Surname/)).toHaveValue('Edited')
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(apiRequest).not.toHaveBeenCalledWith('/api/competitions/1/entries/5')
-  } finally { confirm.mockRestore() }
+  } finally {confirm.mockRestore()}
 })
 
+test('preserves the typed full name for a single participant', async () => {
+  render(<Crews/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
+  fireEvent.mouseDown(await screen.findByLabelText('Category')); fireEvent.click(await screen.findByRole('option', {name: 'R1'}))
+  fireEvent.change(screen.getByRole('combobox', {name: 'Select crew in category'}), {target: {value: 'Doe Jane Ann'}})
+  fireEvent.click(screen.getByRole('button', {name: 'Create crew'}))
+  expect(screen.getByLabelText(/Surname/)).toHaveValue('Doe')
+  expect(screen.getByLabelText(/Given name/)).toHaveValue('Jane')
+  expect(screen.getByLabelText(/Patronymic/)).toHaveValue('Ann')
+})
 
 test('single entry uses the member name and proposes the first free category number', async () => {
   render(<Crews/>); fireEvent.mouseDown(await screen.findByLabelText('Competition')); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
