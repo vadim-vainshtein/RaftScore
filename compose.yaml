@@ -4,9 +4,9 @@ services:
     environment:
       POSTGRES_DB: raftscore
       POSTGRES_USER: raftscore
-      POSTGRES_PASSWORD: raftscore-local-password
+      POSTGRES_PASSWORD: ${RAFT_SCORE_DATABASE_PASSWORD:?Set RAFT_SCORE_DATABASE_PASSWORD}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:${RAFT_SCORE_DATABASE_PORT:-5432}:5432"
     volumes:
       - raftscore-postgres-data:/var/lib/postgresql/data
     healthcheck:
