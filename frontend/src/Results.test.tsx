@@ -117,3 +117,17 @@ test('keeps result context visible when filters are hidden', async () => {
   fireEvent.click(screen.getByRole('button', {name: 'Hide filters'}))
   expect(screen.getByText('Race · Sprint · R4')).toBeInTheDocument()
 })
+
+test('distinguishes no finish, zero-point finish, and competition disqualification', async () => {
+  window.location.hash = '#/results?competition=1&category=2'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => p.endsWith('/standings') ? [
+    {crewId: 4, crewName: 'Finished', startNumber: 1, place: 1, totalPoints: 0, disqualified: false, disciplines: []},
+    {crewId: 5, crewName: 'No finish', startNumber: 2, place: null, totalPoints: 0, disqualified: false, disciplines: []},
+    {crewId: 6, crewName: 'Disqualified', startNumber: 3, place: null, totalPoints: 0, disqualified: true, disciplines: []},
+  ] : original(p))
+  render(<Results readOnly/>)
+  expect(await screen.findByText('Status: No eligible finish')).toBeInTheDocument()
+  expect(screen.getByText('Status: Finished')).toBeInTheDocument()
+  expect(screen.getByText('Status: Disqualified from competition')).toBeInTheDocument()
+})

@@ -43,16 +43,16 @@ public class OverallStandingsService {
         var category = categories.findById(categoryId).orElseThrow();
         var selected = category.getCompetition().getTiebreakDiscipline();
         Long selectedId = selected == null ? null : selected.getId();
-        standings.sort(Comparator.comparing(Standing::disqualified).thenComparing(Standing::totalPoints, Comparator.reverseOrder())
+        standings.sort(Comparator.comparingInt(OverallStandingsService::rankGroup).thenComparing(Standing::totalPoints, Comparator.reverseOrder())
                 .thenComparing(Standing::crewId));
         var ranked = new ArrayList<Standing>();
         for (int first = 0; first < standings.size();) {
             int end = first + 1;
             var leader = standings.get(first);
-            while (end < standings.size() && standings.get(end).disqualified() == leader.disqualified()
+            while (end < standings.size() && rankGroup(standings.get(end)) == rankGroup(leader)
                     && standings.get(end).totalPoints() == leader.totalPoints()) end++;
             var group = new ArrayList<>(standings.subList(first, end));
-            boolean resolve = !leader.disqualified() && selectedId != null
+            boolean resolve = rankGroup(leader) == 0 && selectedId != null
                     && group.stream().allMatch(standing -> tiebreakPlace(standing, selectedId) != null);
             if (resolve) {
                 group.sort(Comparator.comparing((Standing standing) -> tiebreakPlace(standing, selectedId))
@@ -68,11 +68,16 @@ public class OverallStandingsService {
                 if (resolve && index > 0 && !current.equals(previous)) place = first + index + 1;
                 previous = current;
                 ranked.add(new Standing(standing.crewId(), standing.crewName(), standing.regionOrClub(), standing.startNumber(),
-                        standing.disqualified() ? null : place, standing.totalPoints(), standing.disqualified(), standing.disciplines(), applied ? selectedId : null));
+                        rankGroup(standing) == 0 ? place : null, standing.totalPoints(), standing.disqualified(), standing.disciplines(), applied ? selectedId : null));
             }
             first = end;
         }
         return List.copyOf(ranked);
+    }
+
+    private static int rankGroup(Standing standing) {
+        if (standing.disqualified()) return 2;
+        return standing.disciplines().stream().anyMatch(result -> result.status() == CalculatedResultStatus.FINISHED) ? 0 : 1;
     }
 
     private static String displayName(kz.vainshtein.raftscore.discipline.entities.Discipline discipline) {
