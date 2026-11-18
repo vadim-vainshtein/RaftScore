@@ -38,6 +38,7 @@ export default function PointsCatalog({disciplineType, value, onChange, onPreset
       onChange={e => setDraft(current => current && ({...current, rows: current.rows.map((item, i) => i === index ? {...item, [field]: Number(e.target.value)} : item)}))}/>
   const removeRow = (index: number) => setDraft(current => current && ({...current, rows: current.rows.filter((_, i) => i !== index)}))
   const editor = editing && draft && <>
+    {!onChange && <TextField disabled={busy} label={t('wizard.tableName')} value={draft.name} onChange={e => setDraft({...draft, name: e.target.value})}/>}
     {onChange ? <>
       {draft.catalogId && <Button disabled={busy} onClick={() => void save(false)}>{t('pointsCatalog.saveChanges')}</Button>}
       <Button disabled={busy} onClick={() => void save(true)}>{t(draft.catalogId ? 'pointsCatalog.saveNew' : 'pointsCatalog.create')}</Button>
@@ -54,10 +55,10 @@ export default function PointsCatalog({disciplineType, value, onChange, onPreset
         </DialogActions>
       </Dialog>
     </Box>}
-    <TextField disabled={busy} label={t('wizard.tableName')} value={draft.name} onChange={e => setDraft({...draft, name: e.target.value})}/>
-    <TextField disabled={busy} select label={t('discipline.type')} value={draft.catalogType ?? disciplineType ?? 'SPRINT'} onChange={e => setDraft({...draft, catalogType: e.target.value})}>
+    {onChange && <TextField disabled={busy} label={t('wizard.tableName')} value={draft.name} onChange={e => setDraft({...draft, name: e.target.value})}/>}
+    {onChange && <TextField disabled={busy} select label={t('discipline.type')} value={draft.catalogType ?? disciplineType ?? 'SPRINT'} onChange={e => setDraft({...draft, catalogType: e.target.value})}>
       {types.map(type => <MenuItem key={type} value={type}>{t(`discipline.types.${type}` as 'discipline.types.SPRINT')}</MenuItem>)}
-    </TextField>
+    </TextField>}
     {onChange ? draft.rows.map((row, index) => <Box key={index} sx={{display: 'flex', gap: 1}}>
       {rowInput(row, index, 'place')}{rowInput(row, index, 'points')}
       <Button disabled={busy} onClick={() => removeRow(index)}>{t('wizard.remove')}</Button>
@@ -83,8 +84,8 @@ export default function PointsCatalog({disciplineType, value, onChange, onPreset
           <Button onClick={() => {setDraft({name: '', tiePolicy: 'SHARED_PLACE_SAME_POINTS', rows: [], catalogType: activeType}); setError(''); changeEditing(true)}}>{t('pointsCatalog.create')}</Button>
         </>}
         {type === activeType && selected && !editing && <>
-          <Box><Button onClick={() => {setDraft(structuredClone(selected)); setError(''); changeEditing(true)}}>{t('pointsCatalog.edit')}</Button><Button onClick={() => {choose(null); setError('')}}>{t('pointsCatalog.back')}</Button></Box>
           <Typography variant="h6">{selected.name}</Typography>
+          <Box><Button onClick={() => {setDraft(structuredClone(selected)); setError(''); changeEditing(true)}}>{t('pointsCatalog.edit')}</Button><Button onClick={() => {choose(null); setError('')}}>{t('pointsCatalog.back')}</Button></Box>
           <MuiTable size="small"><TableHead><TableRow><TableCell>{t('wizard.place')}</TableCell><TableCell>{t('wizard.points')}</TableCell></TableRow></TableHead><TableBody>{selected.rows.map(row => <TableRow key={row.place}><TableCell>{row.place}</TableCell><TableCell>{row.points}</TableCell></TableRow>)}</TableBody></MuiTable>
         </>}
         {type === activeType && editor}

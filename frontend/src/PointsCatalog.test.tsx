@@ -59,14 +59,14 @@ test('standalone save offers updating or creating a copy', async () => {
   fireEvent.change(screen.getByLabelText('Points table name'), {target: {value: 'Copy'}})
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: 'Create new table'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/points-catalog', 'POST', expect.objectContaining({name: 'Copy'})))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/points-catalog', 'POST', expect.objectContaining({name: 'Copy', disciplineType: 'SPRINT'})))
   expect(await screen.findByRole('heading', {name: 'Copy'})).toBeInTheDocument()
 })
 
-test('creates a table in the current tab and saves an edit to its destination tab', async () => {
+test('creates a table in the current tab and retains its type when edited', async () => {
   const rows = [{place: 1, points: 25}]
   vi.mocked(apiRequest).mockResolvedValue([])
-  vi.mocked(csrfRequest).mockResolvedValueOnce({id: 4, name: 'New', disciplineType: 'SLALOM', version: 0, preset: false, rows}).mockResolvedValueOnce({id: 4, name: 'New', disciplineType: 'SPRINT', version: 1, preset: false, rows})
+  vi.mocked(csrfRequest).mockResolvedValueOnce({id: 4, name: 'New', disciplineType: 'SLALOM', version: 0, preset: false, rows}).mockResolvedValueOnce({id: 4, name: 'New', disciplineType: 'SLALOM', version: 1, preset: false, rows})
   render(<PointsCatalog/>)
   fireEvent.click(screen.getByRole('tab', {name: 'Slalom'}))
   fireEvent.click(screen.getByRole('button', {name: 'Create table'}))
@@ -76,12 +76,11 @@ test('creates a table in the current tab and saves an edit to its destination ta
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/points-catalog', 'POST', expect.objectContaining({disciplineType: 'SLALOM'})))
   fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
-  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Type'}))
-  fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', {name: 'Sprint'}))
+  expect(screen.queryByRole('combobox', {name: 'Type'})).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: 'Save changes'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenLastCalledWith('/api/points-catalog/4', 'PUT', expect.objectContaining({disciplineType: 'SPRINT', version: 0})))
-  await waitFor(() => expect(screen.getByRole('tab', {name: 'Sprint'})).toHaveAttribute('aria-selected', 'true'))
+  await waitFor(() => expect(csrfRequest).toHaveBeenLastCalledWith('/api/points-catalog/4', 'PUT', expect.objectContaining({disciplineType: 'SLALOM', version: 0})))
+  await waitFor(() => expect(screen.getByRole('tab', {name: 'Slalom'})).toHaveAttribute('aria-selected', 'true'))
   expect(within(screen.getByRole('tabpanel')).getByRole('table')).toHaveTextContent('25')
 })
 
@@ -109,7 +108,8 @@ test('prevents edits while a save request is pending', async () => {
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', {name: 'Save changes'}))
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   expect(screen.getByLabelText('Points table name')).toBeDisabled()
-  expect(screen.getByRole('combobox', {name: 'Type'})).toHaveAttribute('aria-disabled', 'true')
+  expect(screen.getByRole('button', {name: 'Save'})).toBeDisabled()
+  expect(screen.getByRole('button', {name: 'Cancel editing'})).toBeDisabled()
   expect(screen.getByLabelText('Place')).toBeDisabled()
   expect(screen.getByLabelText('Points')).toBeDisabled()
   expect(screen.getByRole('button', {name: 'Remove'})).toBeDisabled()
