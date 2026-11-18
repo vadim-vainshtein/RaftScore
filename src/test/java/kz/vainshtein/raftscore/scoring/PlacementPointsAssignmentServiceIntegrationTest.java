@@ -185,6 +185,35 @@ class PlacementPointsAssignmentServiceIntegrationTest extends PostgreSqlIntegrat
                 .containsExactly(1, 1, 1);
     }
 
+    @Test
+    @Transactional
+    void overallRanksOnlyCrewsWithAFinishAndKeepsDisqualificationDistinct() {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Race")
+                .startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = category(competition, "Open");
+        var sprint = discipline(competition, category);
+        var selected = discipline(competition, category);
+        var missing = result(sprint, category, 1, null, CalculatedResultStatus.DNS);
+        var first = result(sprint, category, 2, 1, CalculatedResultStatus.FINISHED);
+        var second = result(sprint, category, 3, 2, CalculatedResultStatus.FINISHED);
+        var dsq = result(sprint, category, 4, 3, CalculatedResultStatus.FINISHED);
+        for (var row : List.of(missing, first, second, dsq)) row.updateResult(row.getPlace(), null, null, row.getStatus(), 0);
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(selected).crewEntry(missing.getCrewEntry())
+                .status(CalculatedResultStatus.DNF).points(0).build());
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(selected).crewEntry(dsq.getCrewEntry())
+                .status(CalculatedResultStatus.DSQ_COMPETITION).points(0).build());
+        competition.setTiebreakDiscipline(sprint);
+        entityManager.flush(); entityManager.clear();
+        var current = standings.standings(category.getId());
+        assertThat(current).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::crewId)
+                .containsExactly(first.getCrewEntry().getId(), second.getCrewEntry().getId(), missing.getCrewEntry().getId(), dsq.getCrewEntry().getId());
+        assertThat(current).extracting(kz.vainshtein.raftscore.standings.OverallStandingsService.Standing::place)
+                .containsExactly(1, 2, null, null);
+        assertThat(current.get(2).disqualified()).isFalse();
+        assertThat(current.get(3).disqualified()).isTrue();
+        assertThat(current.get(0).appliedTiebreakDisciplineId()).isEqualTo(sprint.getId());
+    }
+
     private CompetitionCategory category(Competition competition, String label) {
         return categories.saveAndFlush(CompetitionCategory.builder().competition(competition)
                 .classLabel(label).scoringGroupLabel(label).crewSize(4).build());

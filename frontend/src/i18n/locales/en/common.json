@@ -320,6 +320,7 @@
     "DNF": "Did not finish",
     "DSQ_ATTEMPT": "Attempt disqualified",
     "DSQ_DISCIPLINE": "Disqualified from discipline",
+    "NO_FINISH": "No eligible finish",
     "DSQ_COMPETITION": "Disqualified from competition",
     "refresh": "Refresh",
     "recalculate": "Recalculate",

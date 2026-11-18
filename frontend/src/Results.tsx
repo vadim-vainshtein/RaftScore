@@ -115,7 +115,7 @@ export default function Results({readOnly, fixedCompetition}: {readOnly: boolean
       <thead><tr><th>{t('results.place')}</th><th>{t('results.crew')}</th><th>{t('results.number')}</th><th>{t('results.region')}</th><th>{t('results.status')}</th><th>{t('results.time')}</th><th>{t('results.points')}</th><th>{t('results.attemptDetails')}</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.crewId}>
         <td>{number(row.place)}</td><td>{row.crewName}</td><td>{number(row.startNumber)}</td><td>{row.regionOrClub || '—'}</td>
-        <td>{discipline ? row.status && t(`results.${row.status}`) : t(`results.${row.disqualified ? 'DSQ_COMPETITION' : 'FINISHED'}`)}</td>
+        <td>{discipline ? row.status && t(`results.${row.status}`) : t(`results.${overallStatus(row)}`)}</td>
         <td>{discipline && row.status === 'FINISHED' ? time(row.totalCentiseconds) : '—'}</td><td>{number(discipline ? row.points : row.totalPoints)}</td>
         <td><details><summary>{t(discipline ? 'results.attemptDetails' : 'results.breakdown')}</summary>{discipline ? row.attempts && <AttemptDetails attempts={row.attempts} slalom={selected?.type === 'SLALOM'}/> : <OverallBreakdown row={row} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))}/>}</details></td>
       </tr>)}</tbody>
@@ -146,7 +146,7 @@ function OverallBreakdown({row, disciplines}: {row: Result, disciplines: Discipl
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const number = (value: number | null | undefined) => value == null ? '—' : formatNumber(value, locale)
   return <>
-    <Typography>{t('results.status')}: {t(`results.${row.disqualified ? 'DSQ_COMPETITION' : 'FINISHED'}`)}</Typography>
+    <Typography>{t('results.status')}: {t(`results.${overallStatus(row)}`)}</Typography>
     <Typography>{t('results.points')}: {number(row.totalPoints)}</Typography>
     {row.appliedTiebreakDisciplineId != null && <Typography>{t('results.appliedTiebreak')}: {(() => {const d = disciplines.find(item => item.id === row.appliedTiebreakDisciplineId); return d ? d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT') : '—'})()}</Typography>}
     <Typography>{t('results.breakdown')}</Typography>
@@ -155,4 +155,8 @@ function OverallBreakdown({row, disciplines}: {row: Result, disciplines: Discipl
       return <li key={d.id}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}: {part ? <>{t(`results.${part.status}`)} · {t('results.place')}: {number(part.place)} · {t('results.points')}: {number(part.points)}</> : t('results.missing')}</li>
     })}</Box>
   </>
+}
+
+function overallStatus(row: Result) {
+  return row.disqualified ? 'DSQ_COMPETITION' : row.place == null ? 'NO_FINISH' : 'FINISHED'
 }
