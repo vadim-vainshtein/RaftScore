@@ -18,6 +18,20 @@ class ParallelSprintRankingTest {
     private final ParallelSprintBracket bracket = ParallelSprintBracket.builder().discipline(discipline).category(category).build();
 
     @Test
+    void bronzeFinalDecidesThirdEvenWhenWinnerWasSlowerInSemifinal() {
+        var a = crew(1); var b = crew(2); var c = crew(3); var d = crew(4);
+        var semi1 = timedHeat(1, a, c, 700);
+        var semi2 = timedHeat(1, b, d, 600);
+        var fin = timedHeat(2, a, b, 500);
+        var bronze = ParallelSprintHeat.builder().bracket(bracket).roundNumber(2).heatNumber(2).crew1(c).crew2(d)
+                .status1(AttemptResultStatus.FINISHED).status2(AttemptResultStatus.FINISHED)
+                .time1Centiseconds(500).time2Centiseconds(600).winnerSlot(1).build();
+        var results = ParallelSprintRanking.rank(List.of(semi1, semi2, fin, bronze));
+        assertThat(results).extracting(ParallelSprintRanking.Result::crew).containsExactly(a, b, c, d);
+        assertThat(results).extracting(ParallelSprintRanking.Result::place).containsExactly(1, 2, 3, 4);
+    }
+
+    @Test
     void ranksResolvedRoundsInStageOrder() {
         var a = crew(1); var b = crew(2); var c = crew(3); var d = crew(4); var e = crew(5);
         var fin = heat(3, a, b, 1, AttemptResultStatus.FINISHED);

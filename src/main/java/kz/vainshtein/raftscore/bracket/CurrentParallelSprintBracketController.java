@@ -49,6 +49,22 @@ class CurrentParallelSprintBracketController {
         }
     }
 
+    @PostMapping("/bronze-final")
+    @Transactional
+    Bracket addBronzeFinal(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+        lifecycle.requireStarted(competitionId);
+        checkScope(competitionId, disciplineId, categoryId);
+        if (brackets.findByDisciplineIdAndCategoryId(disciplineId, categoryId).isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        try {
+            var bracket = seeding.addBronzeFinal(disciplineId, categoryId);
+            return new Bracket(bracket.getId(), heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId())
+                    .stream().map(ParallelSprintBracketController::view).toList());
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
     private void checkScope(long competitionId, long disciplineId, long categoryId) {
         disciplines.findById(disciplineId).filter(d -> d.getType() == DisciplineType.PARALLEL_SPRINT
                 && d.getCompetition().getId().equals(competitionId)

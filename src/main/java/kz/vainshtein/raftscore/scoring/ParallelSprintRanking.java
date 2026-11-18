@@ -17,21 +17,24 @@ public final class ParallelSprintRanking {
 
     public static List<Result> rank(List<ParallelSprintHeat> heats) {
         int finalRound = heats.stream().mapToInt(ParallelSprintHeat::getRoundNumber).max().orElse(0);
+        boolean hasBronze = heats.stream().anyMatch(h -> h.getRoundNumber() == finalRound && h.getHeatNumber() == 2);
         var results = new ArrayList<Result>();
         var eliminations = new ArrayList<Elimination>();
         for (var heat : heats) {
             if (heat.getWinnerSlot() == null || heat.getCrew1() == null || heat.getCrew2() == null
                     || heat.getStatus1() == null || heat.getStatus2() == null) continue;
+            if (hasBronze && heat.getRoundNumber() == finalRound - 1) continue;
+            boolean bronze = hasBronze && heat.getRoundNumber() == finalRound && heat.getHeatNumber() == 2;
             boolean firstWon = heat.getWinnerSlot() == 1;
             var loser = firstWon ? heat.getCrew2() : heat.getCrew1();
             var loserStatus = firstWon ? heat.getStatus2() : heat.getStatus1();
-            int stagePlace = (1 << (finalRound - heat.getRoundNumber())) + 1;
+            int stagePlace = bronze ? 4 : (1 << (finalRound - heat.getRoundNumber())) + 1;
             var time = firstWon ? heat.getTime2Centiseconds() : heat.getTime1Centiseconds();
             eliminations.add(new Elimination(loser, loserStatus, stagePlace, time));
             if (heat.getRoundNumber() == finalRound && heat.getNextHeat() == null) {
                 var winner = firstWon ? heat.getCrew1() : heat.getCrew2();
                 var winnerStatus = firstWon ? heat.getStatus1() : heat.getStatus2();
-                if (winnerStatus == AttemptResultStatus.FINISHED || heat.isWinnerOverridden()) results.add(new Result(winner, winnerStatus, 1));
+                if (winnerStatus == AttemptResultStatus.FINISHED || heat.isWinnerOverridden()) results.add(new Result(winner, winnerStatus, bronze ? 3 : 1));
             }
         }
         eliminations.sort(Comparator.comparingInt(Elimination::stagePlace)
