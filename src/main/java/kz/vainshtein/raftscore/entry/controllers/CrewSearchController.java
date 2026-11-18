@@ -24,6 +24,7 @@ class CrewSearchController {
     List<PublicSearchResult> publicSearch(@RequestParam(required = false) String name, @RequestParam(required = false) Long categoryId) {
         var matches = findMatches(name, categoryId);
         var rosters = loadRosters(matches);
+        if (categoryId != null) matches = distinctVersions(matches, rosters);
         var variants = rosterVariants(matches, rosters);
         return matches.stream().map(entry -> {
             var category = entry.getCompetitionCategory();
@@ -37,8 +38,8 @@ class CrewSearchController {
     List<SearchResult> search(@RequestParam(required = false) String name, @RequestParam(required = false) Long categoryId) {
         var matches = findMatches(name, categoryId);
         if (matches.isEmpty()) return List.of();
-        var rosters = memberships.findByCrewEntryIdInOrderByPositionAsc(matches.stream().map(entry -> entry.getId()).toList()).stream()
-                .collect(java.util.stream.Collectors.groupingBy(member -> member.getCrewEntry().getId()));
+        var rosters = loadRosters(matches);
+        if (categoryId != null) matches = distinctVersions(matches, rosters);
         return matches.stream().map(entry -> {
             var category = entry.getCompetitionCategory();
             var competition = category.getCompetition();
@@ -57,6 +58,19 @@ class CrewSearchController {
                 .collect(java.util.stream.Collectors.groupingBy(member -> member.getCrewEntry().getId()));
     }
 
+    private record CrewVersion(String name, String club, int crewSize, int startNumber, String representative,
+                               Integer representativePosition, java.util.Map<String, String> contacts, List<Long> roster) { }
+
+    private List<kz.vainshtein.raftscore.entry.entities.CrewEntry> distinctVersions(
+            List<kz.vainshtein.raftscore.entry.entities.CrewEntry> matches,
+            java.util.Map<Long, List<kz.vainshtein.raftscore.entry.entities.CrewMembership>> rosters) {
+        var seen = new java.util.HashSet<CrewVersion>();
+        return matches.stream().filter(entry -> seen.add(new CrewVersion(
+                entry.getCrewName(), entry.getRegionOrClub(), entry.getCompetitionCategory().getCrewSize(), entry.getStartNumber(),
+                entry.getRepresentative(), entry.getRepresentativePosition(), entry.getRepresentativeContacts(),
+                rosters.getOrDefault(entry.getId(), List.of()).stream().map(member -> member.getParticipant().getId()).toList())))
+                .toList();
+    }
     private java.util.Map<Long, Integer> rosterVariants(List<kz.vainshtein.raftscore.entry.entities.CrewEntry> matches, java.util.Map<Long, List<kz.vainshtein.raftscore.entry.entities.CrewMembership>> rosters) {
         var groups = new java.util.LinkedHashMap<String, java.util.LinkedHashMap<List<Long>, Integer>>();
         for (var entry : matches) {

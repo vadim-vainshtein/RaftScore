@@ -69,18 +69,48 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
                 .competitionCategory(matching).crewName("Legacy newer").representative("Coach").startNumber(3).build());
         jdbc.update("update crew_entries set registered_at = null where id in (?, ?)", legacy.getId(), newerLegacy.getId());
         assertThat(first.getRegisteredAt()).isNotNull();
-        jdbc.update("update crew_entries set registered_at = ? where id = ?", java.sql.Timestamp.from(java.time.Instant.parse("2025-01-01T00:00:00Z")), first.getId());
+        jdbc.update("update crew_entries set registered_at = null where id = ?", first.getId());
         jdbc.update("update crew_entries set registered_at = ? where id = ?", java.sql.Timestamp.from(java.time.Instant.parse("2026-01-01T00:00:00Z")), second.getId());
         entityManager.clear();
         mvc.perform(get("/api/crew-search/public").param("categoryId", category.getId().toString()).with(user("reader").roles("READ_ONLY")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(5))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(4))
                 .andExpect(jsonPath("$[1].id").value(second.getId())).andExpect(jsonPath("$[1].competitionTitle").value("Other"))
                 .andExpect(jsonPath("$[1].registeredAt").value("2026-01-01T00:00:00Z"))
-                .andExpect(jsonPath("$[0].crewSize").value(2)).andExpect(jsonPath("$[0].roster").doesNotExist()).andExpect(jsonPath("$[2].id").value(first.getId()))
-                .andExpect(jsonPath("$[3].id").value(newerLegacy.getId())).andExpect(jsonPath("$[3].registeredAt").value(org.hamcrest.Matchers.nullValue()))
-                .andExpect(jsonPath("$[4].id").value(legacy.getId())).andExpect(jsonPath("$[4].registeredAt").value(org.hamcrest.Matchers.nullValue()));
+                .andExpect(jsonPath("$[0].crewSize").value(2)).andExpect(jsonPath("$[0].roster").doesNotExist())
+                .andExpect(jsonPath("$[2].id").value(newerLegacy.getId())).andExpect(jsonPath("$[2].registeredAt").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$[3].id").value(legacy.getId())).andExpect(jsonPath("$[3].registeredAt").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(get("/api/crew-search").param("categoryId", category.getId().toString()).with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(4)).andExpect(jsonPath("$[1].id").value(second.getId()));
+        mvc.perform(get("/api/crew-search").param("name", "Crew").with(user("admin").roles("FULL_ACCESS")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
         mvc.perform(get("/api/crew-search").param("categoryId", category.getId().toString()).with(user("reader").roles("READ_ONLY")))
                 .andExpect(status().isForbidden());
+    }
+    @Test
+    void categoryHistoryRetainsDifferentCopyableDetails() throws Exception {
+        var matching = categories.saveAndFlush(CompetitionCategory.builder().competition(other)
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var third = competitions.saveAndFlush(Competition.builder().title("Third").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
+        var thirdCategory = categories.saveAndFlush(CompetitionCategory.builder().competition(third)
+                .classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var first = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(category).crewName("Crew").regionOrClub("Club").representative("Coach").startNumber(1).build());
+        var duplicate = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(matching).crewName("Crew").regionOrClub("Club").representative("Coach").startNumber(7).build());
+        var changed = entries.saveAndFlush(kz.vainshtein.raftscore.entry.entities.CrewEntry.builder()
+                .competitionCategory(thirdCategory).crewName("Crew").regionOrClub("Club").representative("Coach").startNumber(7).build());
+        changed.setRepresentativeContacts(java.util.Map.of("phone", "123"));
+        entries.flush();
+        jdbc.update("update crew_entries set registered_at = null where id = ?", first.getId());
+        entityManager.clear();
+        for (var endpoint : java.util.List.of("/api/crew-search", "/api/crew-search/public")) {
+            mvc.perform(get(endpoint).param("categoryId", category.getId().toString()).with(user("admin").roles("FULL_ACCESS")))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(3))
+                    .andExpect(jsonPath("$[0].id").value(changed.getId())).andExpect(jsonPath("$[1].id").value(duplicate.getId()))
+                    .andExpect(jsonPath("$[2].id").value(first.getId()))
+                    .andExpect(jsonPath("$[0].representativeContacts").doesNotExist());
+        }
+        assertThat(entries.findById(first.getId())).isPresent();
     }
     @Test
     void completedCompetitionRejectsCrewMutationsAndPreservesMissingEntryContract() throws Exception {
