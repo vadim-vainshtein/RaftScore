@@ -185,3 +185,22 @@ test('canceling competition settings keeps an immediately saved category', async
   expect(await screen.findByRole('button', {name: 'Remove category R4 / Open'})).toBeInTheDocument()
   expect(screen.getByLabelText(/Title/)).toHaveValue('Race')
 })
+
+test.each([{readOnly: true, status: 'CREATED'}, {readOnly: false, status: 'COMPLETED'}])('workspace edit respects access for $status with readOnly=$readOnly', async ({readOnly, status}) => {
+  vi.mocked(apiRequest).mockResolvedValue({id: 1, status})
+  window.location.hash = '#/workspace/1/edit?discipline=3&category=2'
+  render(<Competitions readOnly={readOnly} workspaceEditId="1"/>)
+  expect(await screen.findByRole('link', {name: 'Overview'})).toHaveAttribute('href', '#/workspace/1?discipline=3&category=2')
+  expect(screen.queryByLabelText(/Title/)).not.toBeInTheDocument()
+  expect(apiRequest).toHaveBeenCalledTimes(1)
+  expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1')
+})
+
+test('workspace edit keeps a details load failure visible without loading the competition list', async () => {
+  vi.mocked(apiRequest).mockRejectedValue(new Error('network'))
+  window.location.hash = '#/workspace/1/edit?category=2'
+  render(<Competitions readOnly={false} workspaceEditId="1"/>)
+  expect(await screen.findByRole('alert')).toBeInTheDocument()
+  expect(await screen.findByRole('link', {name: 'Overview'})).toHaveAttribute('href', '#/workspace/1?category=2')
+  expect(apiRequest).toHaveBeenCalledTimes(1)
+})

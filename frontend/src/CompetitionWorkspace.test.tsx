@@ -128,7 +128,7 @@ test('carries only selected filters to settings', async () => {
     return []
   })
   render(<CompetitionWorkspace path="/workspace/1/start-lists?discipline=3&category=2&unused=ignored" readOnly={false}/>)
-  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?edit=1&fromWorkspace=1&discipline=3&category=2')
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/workspace/1/edit?discipline=3&category=2')
 })
 
 test('completion while protocol is open updates status and removes write actions', async () => {
@@ -292,7 +292,7 @@ test('discipline edit link opens composition editing while overview keeps compet
   view.rerender(<CompetitionWorkspace path="/workspace/1/disciplines?category=2&editDisciplines=1" readOnly={false}/>)
   expect(await screen.findByRole('button', {name: 'Create discipline'})).toBeInTheDocument()
   view.rerender(<CompetitionWorkspace path="/workspace/1" readOnly={false}/>)
-  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/competitions?edit=1&fromWorkspace=1&category=2')
+  expect(await screen.findByRole('link', {name: 'Edit'})).toHaveAttribute('href', '#/workspace/1/edit?category=2')
 })
 
 test('refreshes the competition version after deleting its tiebreak before starting', async () => {

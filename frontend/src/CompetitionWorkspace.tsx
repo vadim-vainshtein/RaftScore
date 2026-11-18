@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react'
 import {Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import StartLists from './StartLists'
+import Competitions from './Competitions'
 import Crews from './Crews'
 import Disciplines from './Disciplines'
 import Results from './Results'
@@ -14,7 +15,7 @@ import {supportedLocale} from './i18n/supported-locales'
 type Competition = {id: number, title: string, version: number, startDate?: string, endDate?: string | null, location?: string, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
 export default function CompetitionWorkspace({path, readOnly}: {path: string, readOnly: boolean}) {
   const {t, i18n} = useTranslation()
-  const id = /^\/workspace\/(\d+)(?:\/(results|result-grid|parallel-sprint|start-lists|crews|disciplines))?(?:\?.*)?$/.exec(path)?.[1]
+  const id = /^\/workspace\/(\d+)(?:\/(results|result-grid|parallel-sprint|start-lists|crews|disciplines|edit))?(?:\?.*)?$/.exec(path)?.[1]
   const [competition, setCompetition] = useState<Competition | null>(null)
   const [error, setError] = useState(false)
   const [completionError, setCompletionError] = useState(false)
@@ -46,7 +47,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   if (!competition) return null
   if (competition.status === 'COMPLETED' && path.includes('/result-grid')) {window.location.replace(`#/workspace/${id}/results${path.includes('?') ? '?' + path.split('?')[1] : ''}`); return null}
   const section = /^\/workspace\/\d+\/([^?]+)/.exec(path)?.[1]
-  const settingsParams = new URLSearchParams({edit: id, fromWorkspace: '1'})
+  const settingsParams = new URLSearchParams()
   const workspaceParams = new URLSearchParams(query)
   for (const key of ['discipline', 'category']) {const value = workspaceParams.get(key); if (value) settingsParams.set(key, value)}
   const disciplineEditParams = new URLSearchParams(workspaceParams)
@@ -55,7 +56,8 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
     try {setCompetition(await apiRequest<Competition>(`/api/competitions/${id}`)); setCompetitionRefreshFailed(false)}
     catch (error) {setCompetitionRefreshFailed(true); throw error}
   }
-  const body = section === 'crews' ? <Crews fixedCompetition={id} readOnly={readOnly} canEdit={!readOnly && competition.status !== 'COMPLETED'} onReadinessChange={() => setCrewRevision(value => value + 1)}/>
+  const body = section === 'edit' ? <Competitions readOnly={readOnly} workspaceEditId={id}/>
+    : section === 'crews' ? <Crews fixedCompetition={id} readOnly={readOnly} canEdit={!readOnly && competition.status !== 'COMPLETED'} onReadinessChange={() => setCrewRevision(value => value + 1)}/>
     : section === 'disciplines' ? <Disciplines onDeletionStateChange={setRefreshingCompetition} competitionStatus={competition.status} onDeleted={refreshCompetition} compositionEditing={new URLSearchParams(path.split('?')[1] ?? '').get('editDisciplines') === '1'} fixedCompetition={id} scoringAllowed={competition.status === 'STARTED'} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
     : section === 'results' ? <Results fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'}/>
     : section === 'start-lists' ? <StartLists fixedCompetition={id} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setStartRevision(value => value + 1)}/>
@@ -90,7 +92,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     <Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
     {(!section || ['crews', 'disciplines', 'start-lists'].includes(section)) && <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>}
-    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={section === 'disciplines' ? `#/workspace/${id}/disciplines?${disciplineEditParams}` : `#/competitions?${settingsParams}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>
+    {section !== 'edit' && <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={section === 'disciplines' ? `#/workspace/${id}/disciplines?${disciplineEditParams}` : `#/workspace/${id}/edit${settingsParams.size ? '?' + settingsParams : ''}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box>}
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
     <div inert={completing}>
       <fieldset disabled={completing} style={{border: 0, margin: 0, padding: 0, minWidth: 0}}>{body}</fieldset>
