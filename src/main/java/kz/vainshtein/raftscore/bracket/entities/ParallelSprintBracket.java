@@ -17,10 +17,14 @@ public class ParallelSprintBracket extends VersionedEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "discipline_id", nullable = false, updatable = false) private Discipline discipline;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "category_id", nullable = false, updatable = false) private CompetitionCategory category;
 
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    @Column(name = "seed_order", columnDefinition = "jsonb", updatable = false) private java.util.List<Long> seedOrder;
+
     @Builder
-    private ParallelSprintBracket(Discipline discipline, CompetitionCategory category) {
+    private ParallelSprintBracket(Discipline discipline, CompetitionCategory category, java.util.List<Long> seedOrder) {
         this.discipline = Objects.requireNonNull(discipline, "discipline");
         this.category = Objects.requireNonNull(category, "category");
+        this.seedOrder = seedOrder == null ? null : java.util.List.copyOf(seedOrder);
         if (discipline.getType() != DisciplineType.PARALLEL_SPRINT) throw new IllegalArgumentException("discipline must be parallel sprint");
     }
 }

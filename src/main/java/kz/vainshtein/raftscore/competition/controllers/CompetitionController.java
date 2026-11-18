@@ -48,10 +48,14 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RequiredArgsConstructor
 class CompetitionController {
     private final CompetitionRepository repository;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final kz.vainshtein.raftscore.competition.CompletionCheck completionCheck;
     private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
     private final kz.vainshtein.raftscore.entry.entities.CrewEntryRepository entries;
     private final kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
 
+    @ExceptionHandler(kz.vainshtein.raftscore.entry.services.CrewEligibilityService.CompletedDiscipline.class)
+    ResponseEntity<ApiError> completedDiscipline() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.completed_discipline")); }
     @ExceptionHandler(kz.vainshtein.raftscore.entry.services.CrewEligibilityService.RecordedResults.class)
     ResponseEntity<ApiError> recordedResults() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.recorded_results")); }
 
@@ -114,9 +118,13 @@ class CompetitionController {
         if (competition.getVersion() != request.version().longValueExact()) {
             throw new OptimisticLockingFailureException("Stale competition version");
         }
+        var allCrews = entries.findByCompetitionCategoryCompetitionId(id);
+        var previousEligibility = new java.util.HashMap<Long, Boolean>();
+        for (var crew : allCrews) previousEligibility.put(crew.getId(), eligibility.isEligible(crew));
         competition.updateDetails(details.title(), details.startDate(), details.endDate(), details.location(),
                 details.timeZone(), details.description(), details.admissionConfirmationRequired());
-        for (var crew : entries.findByCompetitionCategoryCompetitionId(id)) {
+        for (var crew : allCrews) {
+            eligibility.requireNoNewEligibleCrew(crew, previousEligibility.get(crew.getId()));
             if (!eligibility.isEligible(crew)) { eligibility.requireNoRecordedResults(crew.getId()); eligibility.withdrawFromUnplayedBrackets(crew.getId()); }
         }
         competition.setRepresentativeFields(request.representativeFields());
@@ -127,6 +135,13 @@ class CompetitionController {
     record StatusRequest(@NotNull CompetitionStatus status,
                          @NotNull @PositiveOrZero @Digits(integer = 19, fraction = 0) @DecimalMax("9223372036854775807") BigDecimal version) { }
 
+    @GetMapping("/{id}/completion-issues")
+    @Transactional(readOnly = true)
+    List<kz.vainshtein.raftscore.competition.CompletionCheck.Issue> completionIssues(@PathVariable Long id) {
+        repository.findById(id).orElseThrow(NotFound::new);
+        return completionCheck.competition(id);
+    }
+
     @PutMapping("/{id}/status")
     @Transactional
     CompetitionResponse transition(@PathVariable Long id, @Valid @RequestBody StatusRequest request) {
@@ -134,10 +149,27 @@ class CompetitionController {
         if (competition.getVersion() != request.version().longValueExact()) {
             throw new OptimisticLockingFailureException("Stale competition version");
         }
+        if (request.status() == CompetitionStatus.COMPLETED && !completionCheck.competition(id).isEmpty())
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, "Competition has incomplete results");
         try { competition.transitionTo(request.status()); }
         catch (IllegalStateException ex) { throw new org.springframework.web.server.ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
+        if (request.status() == CompetitionStatus.COMPLETED) completeConductedDisciplines(id);
         repository.flush();
         return CompetitionResponse.from(competition);
+    }
+
+    private void completeConductedDisciplines(long competitionId) {
+        for (var disciplineId : disciplines.findIdsByCompetitionId(competitionId)) {
+            var discipline = disciplines.findForStartListUpdate(disciplineId).orElseThrow();
+            if (discipline.getStatus() != kz.vainshtein.raftscore.discipline.entities.DisciplineStatus.STARTED) continue;
+            var hasResults = jdbc.queryForObject("""
+                    SELECT EXISTS (SELECT 1 FROM attempt_results WHERE discipline_id = ?)
+                        OR EXISTS (SELECT 1 FROM parallel_sprint_brackets b JOIN parallel_sprint_heats h ON h.bracket_id = b.id
+                                   WHERE b.discipline_id = ? AND (h.status_1 IS NOT NULL OR h.status_2 IS NOT NULL OR h.winner_overridden))
+                    """, Boolean.class, disciplineId, disciplineId);
+            if (Boolean.TRUE.equals(hasResults)) discipline.transitionTo(kz.vainshtein.raftscore.discipline.entities.DisciplineStatus.COMPLETED);
+        }
+        disciplines.flush();
     }
 
     @GetMapping("/{id}/tiebreak")

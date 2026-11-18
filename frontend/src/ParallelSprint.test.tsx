@@ -67,6 +67,22 @@ test('upgrades an unfinished legacy bracket only after confirmation', async () =
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/bracket/bronze-final`, 'POST'))
   expect(await screen.findByText('Final B (places 3–4)')).toBeInTheDocument()
 })
+test('explains why qualification must be complete before seeding', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket` ? {id: null, heats: []} : original(p))
+  vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {code: 'parallel.qualification_incomplete', parameters: {}}))
+  render(<ParallelSprint readOnly={false}/>)
+  fireEvent.click(await screen.findByRole('button', {name: 'Seed bracket'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Complete qualification results for all eligible crews in this category before seeding.')
+})
+test('rebuild requires confirmation and explains recorded heats', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {code: 'parallel.recorded_heats', parameters: {}}))
+  render(<ParallelSprint readOnly={false}/>)
+  fireEvent.click(await screen.findByRole('button', {name: 'Rebuild bracket'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/bracket/rebuild`, 'POST', {bracketId: 8}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('First annul each recorded heat with a reason')
+})
 test('read-only users see positions and no editing controls', async () => {
   render(<ParallelSprint readOnly/>)
   expect(await screen.findByText('Position 1: 1 — Alpha · — · —')).toBeInTheDocument()

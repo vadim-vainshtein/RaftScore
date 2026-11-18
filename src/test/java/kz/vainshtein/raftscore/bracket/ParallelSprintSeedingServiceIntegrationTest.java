@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.*;
 @Transactional
 class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired ParallelSprintSeedingService service;
+    @Autowired kz.vainshtein.raftscore.competition.CompletionCheck completionCheck;
     @Autowired ParallelSprintResultService resultService;
     @Autowired kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
     @Autowired kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
@@ -55,6 +56,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         parallel.setPointsTable(table);
         for (int n = 1; n <= 4; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var all = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId());
         var empty = all.get(0);
@@ -65,6 +67,9 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var loserId = other.getCrew2().getId();
         var finish = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
         if (playOtherFirst) resultService.record(other.getId(), other.getVersion(), new ParallelSprintResultService.Result(finish, 100), new ParallelSprintResultService.Result(finish, 120));
+        // Model result annulment and loss of eligibility before withdrawal, retaining stale calculated rows.
+        jdbc.update("delete from attempt_results where crew_entry_id in (?, ?)", withdrawn1, withdrawn2);
+        jdbc.update("delete from crew_memberships where crew_entry_id in (?, ?)", withdrawn1, withdrawn2);
         eligibility.withdrawFromUnplayedBrackets(withdrawn1);
         eligibility.withdrawFromUnplayedBrackets(withdrawn2);
         entityManager.flush(); entityManager.clear();
@@ -76,6 +81,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         assertThat(finals).allSatisfy(h -> { assertThat(h.isSlot1Resolved()).isTrue(); assertThat(h.isSlot2Resolved()).isTrue(); assertThat(h.winner()).isNotNull(); });
         assertThat(finals.get(0).winner().getId()).isEqualTo(winnerId);
         assertThat(finals.get(1).winner().getId()).isEqualTo(loserId);
+        assertThat(completionCheck.discipline(disciplines.findById(parallel.getId()).orElseThrow())).isEmpty();
         var scored = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(parallel.getId(), category.getId());
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(winnerId); assertThat(r.getPlace()).isEqualTo(1); assertThat(r.getPoints()).isEqualTo(100); });
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(loserId); assertThat(r.getPlace()).isEqualTo(3); assertThat(r.getPoints()).isEqualTo(60); });
@@ -83,6 +89,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         entityManager.flush(); entityManager.clear();
         var reopened = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream().filter(h -> h.getRoundNumber() == 2).toList();
         assertThat(reopened).allSatisfy(h -> { assertThat(h.isSlot1Resolved()).isTrue(); assertThat(h.isSlot2Resolved()).isFalse(); assertThat(h.winner()).isNull(); });
+        assertThat(completionCheck.discipline(disciplines.findById(parallel.getId()).orElseThrow())).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).contains("unfinishedHeat");
     }
 
     @Test
@@ -93,6 +100,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         for (int n = 1; n <= 4; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var semi = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).getFirst();
         var withdrawing = semi.getCrew1();
@@ -117,6 +125,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         }
         var excluded = crew(category, 6);
         results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(excluded).status(CalculatedResultStatus.DNF).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         entityManager.flush();
         entityManager.clear();
@@ -175,7 +184,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
     }
 
     @Test
-    void refusesToUpgradeCompletedLegacyBracket() {
+    void refusesToUpgradeLegacyBracketWithoutSemifinals() {
         var competition = competitions.save(Competition.builder().title("Legacy").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
@@ -183,10 +192,26 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var a = crew(category, 1); var b = crew(category, 2);
         heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(2).heatNumber(1).crew1(a).crew2(b).winnerSlot(1).build());
         assertThatThrownBy(() -> service.addBronzeFinal(parallel.getId(), category.getId()))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("completed bracket");
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("two semifinals");
         assertThat(heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId())).hasSize(1);
     }
 
+    @Test
+    void addsBronzeAfterFinalAHasBeenRecorded() {
+        var competition = competitions.save(Competition.builder().title("Legacy").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var bracket = entityManager.merge(ParallelSprintBracket.builder().discipline(parallel).category(category).build());
+        var a = crew(category, 1); var b = crew(category, 2); var c = crew(category, 3); var d = crew(category, 4);
+        var finalA = heats.save(ParallelSprintHeat.builder().bracket(bracket).roundNumber(2).heatNumber(1).crew1(a).crew2(b).winnerSlot(1).build());
+        heats.save(ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(1).crew1(a).crew2(c).winnerSlot(1).nextHeat(finalA).nextSlot(1).build());
+        heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(1).heatNumber(2).crew1(b).crew2(d).winnerSlot(1).nextHeat(finalA).nextSlot(2).build());
+        service.addBronzeFinal(parallel.getId(), category.getId());
+        var bronze = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream().filter(h -> h.getRoundNumber() == 2 && h.getHeatNumber() == 2).findFirst().orElseThrow();
+        assertThat(bronze.getCrew1().getId()).isEqualTo(c.getId());
+        assertThat(bronze.getCrew2().getId()).isEqualTo(d.getId());
+        assertThat(finalA.getWinnerSlot()).isEqualTo(1);
+    }
     @Test
     void fullEightCrewBracketFollowsAppendixFour() {
         var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
@@ -195,6 +220,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         for (int n = 1; n <= 8; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var pairs = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream()
                 .filter(h -> h.getRoundNumber() == 1)
@@ -214,6 +240,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         parallel.setPointsTable(table);
         for (int n = 1; n <= 4; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var all = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId());
         var semi1 = all.get(0); var semi2 = all.get(1);
@@ -224,6 +251,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         assertThat(finalB.getCrew1().getId()).isEqualTo(semi1.getCrew2().getId());
         assertThat(finalB.getCrew2().getId()).isEqualTo(semi2.getCrew2().getId());
         resultService.record(finalB.getId(), finalB.getVersion(), new ParallelSprintResultService.Result(finished, 100), new ParallelSprintResultService.Result(finished, 200));
+
         var scored = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(parallel.getId(), category.getId());
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(semi1.getCrew2().getId()); assertThat(r.getPlace()).isEqualTo(3); assertThat(r.getPoints()).isEqualTo(180); });
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(semi2.getCrew2().getId()); assertThat(r.getPlace()).isEqualTo(4); assertThat(r.getPoints()).isEqualTo(170); });
@@ -247,6 +275,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         for (int n = 1; n <= 6; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var pairs = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream()
                 .filter(h -> h.getRoundNumber() == 1 && h.getCrew2() != null)
@@ -263,6 +292,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         for (int n = 1; n <= 4; n++) {
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
         }
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         entityManager.flush();
         entityManager.clear();
@@ -310,6 +340,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         for (int n = 1; n <= 4; n++)
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
         var bracket = service.seed(parallel.getId(), category.getId(), null);
         var firstRound = heats.findAll().stream().filter(h -> h.getBracket().getId().equals(bracket.getId()) && h.getRoundNumber() == 1).toList();
         var firstId = firstRound.get(0).getId();
@@ -353,6 +384,9 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
                 jdbc.update("delete from parallel_sprint_heats where bracket_id = ?", bracketId);
                 jdbc.update("delete from parallel_sprint_brackets where id = ?", bracketId);
                 jdbc.update("delete from calculated_discipline_results where discipline_id in (?, ?)", sprintId, parallelId);
+                jdbc.update("delete from attempt_results where discipline_id = ?", sprintId);
+                jdbc.update("delete from start_slots where category_id = ?", categoryId);
+                jdbc.update("delete from start_lists where category_id = ?", categoryId);
                 jdbc.update("delete from crew_memberships where competition_category_id = ?", categoryId);
                 jdbc.update("delete from crew_entries where competition_category_id = ?", categoryId);
                 jdbc.update("delete from discipline_categories where discipline_id in (?, ?)", sprintId, parallelId);
@@ -396,6 +430,152 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path + "/heats/" + heat.getId() + "/result").with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path.replace("/competitions/" + competition.getId(), "/competitions/999999") ).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).with(reader)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Person"))));
+    }
+    @Test
+    void rejectsPrematureSeedingAndReportsMissingCrewInLegacyBracket() throws Exception {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT);
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var a = crew(category, 1); var b = crew(category, 2); var c = crew(category, 3);
+        entityManager.flush();
+        var list = jdbc.queryForObject("insert into start_lists (discipline_id, category_id) values (?, ?) returning id", Long.class, sprint.getId(), category.getId());
+        for (var entry : List.of(a, b, c)) {
+            jdbc.update("insert into start_slots (start_list_id, category_id, crew_entry_id, position) values (?, ?, ?, ?)", list, category.getId(), entry.getId(), entry.getStartNumber());
+        }
+        for (var entry : List.of(a, b)) {
+            jdbc.update("insert into attempt_results (discipline_id, crew_entry_id, attempt_number, duration_centiseconds, penalty_centiseconds, status) values (?, ?, 1, 100, 0, 'FINISHED')", sprint.getId(), entry.getId());
+            results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(entry).place(entry.getStartNumber()).status(CalculatedResultStatus.FINISHED).build());
+        }
+        entityManager.flush();
+        assertThatThrownBy(() -> service.seed(parallel.getId(), category.getId(), sprint.getId())).isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
+        competition.transitionTo(CompetitionStatus.STARTED);
+        entityManager.flush();
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context)
+                .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        var path = "/api/competitions/" + competition.getId() + "/disciplines/" + parallel.getId() + "/categories/" + category.getId() + "/bracket";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS"))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("parallel.qualification_incomplete"));
+        var legacy = entityManager.merge(ParallelSprintBracket.builder().discipline(parallel).category(category).build());
+        heats.saveAndFlush(ParallelSprintHeat.builder().bracket(legacy).roundNumber(1).heatNumber(1).crew1(a).crew2(b).winnerSlot(1).build());
+        jdbc.update("insert into attempt_results (discipline_id, crew_entry_id, attempt_number, duration_centiseconds, penalty_centiseconds, status) values (?, ?, 1, 120, 0, 'FINISHED')", sprint.getId(), c.getId());
+        results.saveAndFlush(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(c).place(3).status(CalculatedResultStatus.FINISHED).build());
+        assertThat(completionCheck.discipline(parallel)).anySatisfy(issue -> {
+            assertThat(issue.code()).isEqualTo("missingSeededCrew"); assertThat(issue.crewId()).isEqualTo(c.getId());
+        });
+    }
+    @Test
+    void secretaryCanAnnulAndRebuildStaleBracketBeforeCompletion() throws Exception {
+        var competition = competitions.save(Competition.builder().title("Recovery").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        competition.transitionTo(CompetitionStatus.STARTED);
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT); var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var a = crew(category, 1); var b = crew(category, 2); var c = crew(category, 3);
+        for (var crew : List.of(a, b, c)) results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew).place(crew.getStartNumber()).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
+        var other = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Other").scoringGroupLabel("Open").crewSize(1).build());
+        sprint.replaceCategories(List.of(category, other)); parallel.replaceCategories(List.of(category, other));
+        var d = crew(other, 1); var e = crew(other, 2);
+        for (var crew : List.of(d, e)) results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew).place(crew.getStartNumber()).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, other);
+        var otherBracket = service.seed(parallel.getId(), other.getId(), sprint.getId());
+        var otherHeat = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(otherBracket.getId()).getFirst();
+        var otherFinished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        resultService.record(otherHeat.getId(), otherHeat.getVersion(), new ParallelSprintResultService.Result(otherFinished, 100), new ParallelSprintResultService.Result(otherFinished, 120));
+        var legacy = entityManager.merge(ParallelSprintBracket.builder().discipline(parallel).category(category).build());
+        var oldHeat = heats.saveAndFlush(ParallelSprintHeat.builder().bracket(legacy).roundNumber(1).heatNumber(1).crew1(a).crew2(b).build());
+        var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        var fast = new ParallelSprintResultService.Result(finished, 100); var slow = new ParallelSprintResultService.Result(finished, 120);
+        resultService.record(oldHeat.getId(), oldHeat.getVersion(), fast, slow); entityManager.flush();
+        assertThat(completionCheck.discipline(parallel)).anySatisfy(issue -> { assertThat(issue.code()).isEqualTo("missingSeededCrew"); assertThat(issue.crewId()).isEqualTo(c.getId()); });
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(context).apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+        var admin = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS");
+        var reader = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY");
+        var csrf = org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf();
+        var base = "/api/competitions/" + competition.getId() + "/disciplines/" + parallel.getId() + "/categories/" + category.getId();
+        var rebuild = base + "/bracket/rebuild"; var body = "{\"bracketId\":" + legacy.getId() + "}";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(rebuild).with(reader).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(rebuild).with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isConflict()).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value("parallel.recorded_heats"));
+        assertThat(heats.findById(oldHeat.getId()).orElseThrow().getStatus1()).isEqualTo(finished);
+        var annul = base + "/brackets/" + legacy.getId() + "/heats/" + oldHeat.getId() + "/annulment";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(annul).with(admin).with(csrf).contentType("application/json").content("{\"version\":" + oldHeat.getVersion() + ",\"reason\":\"Correct qualification\"}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(rebuild).with(admin).with(csrf).contentType("application/json").content(body)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        entityManager.flush(); entityManager.clear();
+        var replacement = entityManager.createQuery("select b from ParallelSprintBracket b where b.discipline.id = :d and b.category.id = :c", ParallelSprintBracket.class).setParameter("d", parallel.getId()).setParameter("c", category.getId()).getSingleResult();
+        assertThat(replacement.getId()).isNotEqualTo(legacy.getId());
+        assertThat(heats.findById(otherHeat.getId()).orElseThrow().getStatus1()).isEqualTo(otherFinished);
+        for (int round = 0; round < 2; round++) {
+            var current = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(replacement.getId());
+            for (var heat : current) if (heat.getCrew1() != null && heat.getCrew2() != null && heat.getWinnerSlot() == null) resultService.record(heat.getId(), heat.getVersion(), fast, slow);
+            entityManager.flush(); entityManager.clear();
+        }
+        assertThat(completionCheck.competition(competition.getId())).isEmpty();
+        var version = competitions.findById(competition.getId()).orElseThrow().getVersion();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/competitions/" + competition.getId() + "/status").with(admin).with(csrf).contentType("application/json").content("{\"status\":\"COMPLETED\",\"version\":" + version + "}"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+        assertThat(jdbc.queryForObject("select count(*) from result_annulments where discipline_id = ? and reason = 'Correct qualification'", Long.class, parallel.getId())).isEqualTo(2L);
+    }
+
+    @Test
+    void rebuildRemovesAnUnplayedBracketWhenFewerThanTwoCrewsNowQualify() {
+        var competition = competitions.save(Competition.builder().title("Correction").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT); var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var a = crew(category, 1); var b = crew(category, 2);
+        results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(a).place(1).status(CalculatedResultStatus.FINISHED).build());
+        results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(b).status(CalculatedResultStatus.DNF).build());
+        completeQualification(sprint, category);
+        var old = entityManager.merge(ParallelSprintBracket.builder().discipline(parallel).category(category).build());
+        heats.saveAndFlush(ParallelSprintHeat.builder().bracket(old).roundNumber(1).heatNumber(1).crew1(a).crew2(b).build());
+        assertThat(service.rebuild(parallel.getId(), category.getId(), old.getId())).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from parallel_sprint_brackets where id = ?", Long.class, old.getId())).isZero();
+        assertThat(completionCheck.discipline(parallel)).isEmpty();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {4, 5})
+    void qualificationReorderingRequiresReseedingWithOrWithoutByes(int count) {
+        var competition = competitions.save(Competition.builder().title("Order").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT); var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        for (int n = 1; n <= count; n++) results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        completeQualification(sprint, category);
+        jdbc.update("update attempt_results a set duration_centiseconds = c.start_number * 100 from crew_entries c where a.crew_entry_id = c.id and a.discipline_id = ?", sprint.getId());
+        recalculation.recalculateLocked(sprint, category.getId());
+        var bracket = service.seed(parallel.getId(), category.getId(), sprint.getId());
+        assertThat(completionCheck.discipline(parallel)).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).doesNotContain("seedOrderChanged");
+        var firstPlayed = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).getFirst();
+        var finished = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        resultService.record(firstPlayed.getId(), firstPlayed.getVersion(), new ParallelSprintResultService.Result(finished, 100), new ParallelSprintResultService.Result(finished, 120), firstPlayed.getCrew2().getId());
+        assertThat(completionCheck.discipline(parallel)).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).doesNotContain("seedOrderChanged");
+        resultService.annul(firstPlayed.getId(), firstPlayed.getVersion(), "Correct result");
+        jdbc.update("update attempt_results a set duration_centiseconds = case c.start_number when 1 then 250 when 2 then 100 else a.duration_centiseconds end from crew_entries c where a.crew_entry_id = c.id and a.discipline_id = ?", sprint.getId());
+        entityManager.clear(); sprint = disciplines.findById(sprint.getId()).orElseThrow(); parallel = disciplines.findById(parallel.getId()).orElseThrow();
+        recalculation.recalculateLocked(sprint, category.getId());
+        assertThat(completionCheck.discipline(parallel)).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).contains("seedOrderChanged").doesNotContain("missingSeededCrew", "extraSeededCrew");
+        var replacement = service.rebuild(parallel.getId(), category.getId(), bracket.getId());
+        assertThat(completionCheck.discipline(parallel)).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).doesNotContain("seedOrderChanged");
+        var first = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(replacement.getId()).getFirst();
+        jdbc.update("update parallel_sprint_heats set crew_1_id = crew_2_id, crew_2_id = crew_1_id where id = ?", first.getId());
+        entityManager.clear(); parallel = disciplines.findById(parallel.getId()).orElseThrow();
+        assertThat(completionCheck.discipline(parallel)).extracting(kz.vainshtein.raftscore.competition.CompletionCheck.Issue::code).contains("seedOrderChanged");
+    }
+
+    private void completeQualification(Discipline sprint, CompetitionCategory category) {
+        entityManager.flush();
+        var list = jdbc.queryForObject("insert into start_lists (discipline_id, category_id) values (?, ?) returning id", Long.class, sprint.getId(), category.getId());
+        var rows = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(sprint.getId(), category.getId());
+        int position = 0;
+        for (var row : rows) {
+            var crewId = row.getCrewEntry().getId();
+            jdbc.update("insert into start_slots (start_list_id, category_id, crew_entry_id, position) values (?, ?, ?, ?)", list, category.getId(), crewId, ++position);
+            var status = row.getStatus().name();
+            jdbc.update("insert into attempt_results (discipline_id, crew_entry_id, attempt_number, duration_centiseconds, penalty_centiseconds, status) values (?, ?, 1, ?, 0, ?)", sprint.getId(), crewId, status.equals("FINISHED") ? 100 : null, status);
+        }
     }
     private Discipline discipline(Competition competition, CompetitionCategory category, DisciplineType type) {
         var d = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());

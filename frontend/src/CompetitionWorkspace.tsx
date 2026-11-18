@@ -12,6 +12,7 @@ import {apiRequest, csrfRequest} from './api/client'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
+type CompletionIssue = {discipline: string | null, category: string | null, crew: string | null, code: 'noParticipatingCategories' | 'noEligibleCrews' | 'noDisciplines' | 'qualificationIncomplete' | 'noQualification' | 'noBracket' | 'emptyBracket' | 'missingBronze' | 'unfinishedHeat' | 'missingStart' | 'missingAttempt' | 'missingGates' | 'missingSeededCrew' | 'extraSeededCrew' | 'seedOrderChanged', attempt: number | null, round: number | null, heat: number | null}
 type Competition = {id: number, title: string, version: number, startDate?: string, endDate?: string | null, location?: string, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
 export default function CompetitionWorkspace({path, readOnly}: {path: string, readOnly: boolean}) {
   const {t, i18n} = useTranslation()
@@ -36,7 +37,8 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   useEffect(() => {if (!id || readOnly) return; let active = true; apiRequest<{eligible: boolean}[]>(`/api/competitions/${id}/entries/private`).then(crews => {if (active) setCrewReadiness({total: crews.length, admitted: crews.filter(c => c.eligible).length})}).catch(() => {}); return () => {active = false}}, [id, readOnly, crewRevision])
   useEffect(() => {const params = new URLSearchParams(query); const discipline = params.get('discipline'), category = params.get('category'); if (!id || !discipline || !category || !disciplineTypes?.some(d => String(d.id) === discipline && (!path.includes('/result-grid') || ['SPRINT', 'SLALOM', 'LONG_RACE'].includes(d.type)) && (!path.includes('/parallel-sprint') || d.type === 'PARALLEL_SPRINT'))) return; let active = true; apiRequest<{slots: unknown[]}>(`/api/competitions/${id}/disciplines/${discipline}/categories/${category}/start-list`).then(list => {if (active) setStartReadiness(list.slots.length)}).catch(() => {}); return () => {active = false}}, [id, query, disciplineTypes, path, startRevision])
   const [completionDrafts, setCompletionDrafts] = useState<number | null>(null)
-  useEffect(() => {let active = true; if (!id) return; apiRequest<Competition>(`/api/competitions/${id}`).then(c => {if (active) {setCompetition(c); const params = new URLSearchParams(path.split('?')[1] ?? ''); if (!readOnly && c.status === 'STARTED' && params.get('complete') === '1') {params.delete('complete'); const cleanQuery = params.size ? '?' + params : ''; window.history.replaceState(window.history.state, '', `#/workspace/${id}${cleanQuery}`); setQuery(cleanQuery); setCompletionDrafts(0)}}}).catch(() => {if (active) setError(true)}); return () => {active = false}}, [id, path, readOnly])
+  const [completionIssues, setCompletionIssues] = useState<CompletionIssue[] | null>(null)
+  useEffect(() => {let active = true; if (!id) return; apiRequest<Competition>(`/api/competitions/${id}`).then(c => {if (active) {setCompetition(c); const params = new URLSearchParams(path.split('?')[1] ?? ''); if (!readOnly && c.status === 'STARTED' && params.get('complete') === '1') {params.delete('complete'); const cleanQuery = params.size ? '?' + params : ''; window.history.replaceState(window.history.state, '', `#/workspace/${id}${cleanQuery}`); setQuery(cleanQuery); setCompletionDrafts(0); apiRequest<CompletionIssue[]>(`/api/competitions/${id}/completion-issues`).then(setCompletionIssues).catch(() => setCompletionError(true))}}}).catch(() => {if (active) setError(true)}); return () => {active = false}}, [id, path, readOnly])
   useEffect(() => {if (!id) return; let active = true; Promise.all([apiRequest<unknown[]>(`/api/competitions/${id}/categories`), apiRequest<{id: number, type: string}[]>(`/api/competitions/${id}/disciplines`)]).then(([categories, disciplines]) => {if (active) {setReadiness({categories: categories.length, disciplines: disciplines.length}); setDisciplineTypes(disciplines)}}).catch(() => {}); return () => {active = false}}, [id, disciplineRevision])
   useEffect(() => {
     const blockNavigation = (event: Event) => {if (completing && !intentionalNavigation.current) event.preventDefault()}
@@ -81,19 +83,30 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
       setNextRoute(`/workspace/${id}/${status === 'STARTED' ? 'disciplines' : 'results'}${currentQuery}`)
     } catch {
       setCompletionError(true)
+      if (status === 'COMPLETED') {
+        setCompletionIssues(null)
+        try {setCompletionIssues(await apiRequest<CompletionIssue[]>(`/api/competitions/${id}/completion-issues`))}
+        catch { /* Keep completion disabled until the issues can be loaded. */ }
+      }
     } finally {
       setCompleting(false)
     }
   }
-  const openCompletionDialog = () => {
+  const openCompletionDialog = async () => {
     const detail = {count: 0, busy: false}
     window.dispatchEvent(new CustomEvent('result-dirty-count', {detail}))
-    if (!detail.busy) setCompletionDrafts(detail.count)
+    if (!detail.busy) {
+      setCompletionError(false)
+      setCompletionDrafts(detail.count)
+      setCompletionIssues(null)
+      try {setCompletionIssues(await apiRequest(`/api/competitions/${id}/completion-issues`))}
+      catch {setCompletionError(true)}
+    }
   }
   return <Box sx={{display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     {!section ? <><Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
     <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>
-    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/workspace/${id}/edit${settingsParams.size ? '?' + settingsParams : ''}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box></> : <Typography component="h1" className="workspace-compact-heading" variant="h6">{[competition.title, competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' — ')}</Typography>}
+    <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/workspace/${id}/edit${settingsParams.size ? '?' + settingsParams : ''}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={() => void openCompletionDialog()}>{t('competition.complete')}</Button>}</Box></> : <Typography component="h1" className="workspace-compact-heading" variant="h6">{[competition.title, competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' — ')}</Typography>}
     {(!section || ['crews', 'start-lists', 'disciplines', 'parallel-sprint', 'edit'].includes(section)) && <Typography component="h2" variant="h6">{t(!section ? 'workspace.overview' : section === 'crews' ? 'navigation.crews' : section === 'start-lists' ? 'navigation.startLists' : section === 'disciplines' ? 'navigation.disciplines' : section === 'parallel-sprint' ? 'navigation.parallelSprint' : 'competition.edit')}</Typography>}
     {section === 'disciplines' && !readOnly && competition.status !== 'COMPLETED' && <Box><Button variant="outlined" component="a" href={`#/workspace/${id}/disciplines?${disciplineEditParams}`}>{t('competition.edit')}</Button></Box>}
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
@@ -105,10 +118,11 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
       <DialogContent>
         {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
         {completionDrafts ? t('competition.unsavedRows', {count: completionDrafts}) : t('competition.confirmComplete')}
+        {completionIssues?.map((issue, index) => <Typography key={index} role="alert">{[issue.category, issue.discipline, issue.crew, t(`competition.completionIssues.${issue.code}`, issue)].filter(Boolean).join(' — ')}</Typography>)}
       </DialogContent>
       <DialogActions>
         <Button disabled={completing} onClick={() => setCompletionDrafts(null)}>{t('competition.cancel')}</Button>
-        <Button variant="contained" disabled={completing} onClick={() => void changeStatus('COMPLETED')}>
+        <Button variant="contained" disabled={completing || completionIssues === null || completionIssues.length > 0} onClick={() => void changeStatus('COMPLETED')}>
           {completionDrafts ? t('competition.discardAndComplete') : t('competition.complete')}
         </Button>
       </DialogActions>

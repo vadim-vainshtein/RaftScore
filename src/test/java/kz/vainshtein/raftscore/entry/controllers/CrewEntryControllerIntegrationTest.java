@@ -38,6 +38,7 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
     Competition other;
     CompetitionCategory category;
     String url;
+    boolean cleanupLateEligibility;
     @BeforeEach
     void setup() {
         mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
@@ -46,6 +47,23 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         url = "/api/competitions/" + competition.getId() + "/entries";
     }
+    @org.junit.jupiter.api.AfterEach
+    void cleanupLateEligibilityFixtures() {
+        if (!cleanupLateEligibility) return;
+        var id = competition.getId();
+        jdbc.update("delete from attempt_results where discipline_id in (select id from disciplines where competition_id = ?)", id);
+        jdbc.update("delete from start_slots where start_list_id in (select id from start_lists where discipline_id in (select id from disciplines where competition_id = ?))", id);
+        jdbc.update("delete from start_lists where discipline_id in (select id from disciplines where competition_id = ?)", id);
+        jdbc.update("delete from discipline_categories where discipline_id in (select id from disciplines where competition_id = ?)", id);
+        jdbc.update("delete from disciplines where competition_id = ?", id);
+        jdbc.update("delete from crew_requirement_values where crew_entry_id in (select id from crew_entries where competition_category_id in (select id from competition_categories where competition_id = ?))", id);
+        jdbc.update("delete from crew_memberships where competition_category_id in (select id from competition_categories where competition_id = ?)", id);
+        jdbc.update("delete from crew_entries where competition_category_id in (select id from competition_categories where competition_id = ?)", id);
+        jdbc.update("delete from entry_requirements where competition_id = ?", id);
+        jdbc.update("delete from competition_categories where competition_id = ?", id);
+        jdbc.update("delete from competitions where id in (?, ?)", id, other.getId());
+    }
+
     @Test
     void categoryHistoryOrdersRegistrationsAndKeepsPublicRosterPrivate() throws Exception {
         var matching = categories.saveAndFlush(CompetitionCategory.builder().competition(other)
@@ -570,6 +588,89 @@ class CrewEntryControllerIntegrationTest extends PostgreSqlIntegrationTest {
         mvc.perform(put(admissionUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":3}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.admission_not_required"));
     }
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void completedDisciplineRejectsNewEligibleCrewsOnlyInItsCategories() throws Exception {
+        cleanupLateEligibility = true;
+        jdbc.update("update competitions set status = 'STARTED' where id = ?", competition.getId());
+        var legacy = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isCreated()).andReturn().getResponse();
+        Number legacyId = JsonPath.read(legacy.getContentAsString(), "$.id");
+        jdbc.update("delete from crew_memberships where crew_entry_id = ? and position = 4", legacyId.longValue());
+        var discipline = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Sprint', 'SPRINT', 0, 'STARTED') returning id", Long.class, competition.getId());
+        jdbc.update("insert into discipline_categories (discipline_id, category_id) values (?, ?)", discipline, category.getId());
+        var statusUrl = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline + "/status";
+        mvc.perform(put(statusUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"COMPLETED\",\"version\":0}"))
+                .andExpect(status().isOk());
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody().replace("\"startNumber\":1", "\"startNumber\":2")))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        assertThat(jdbc.queryForObject("select count(*) from crew_entries where competition_category_id = ?", Long.class, category.getId())).isEqualTo(1L);
+        var repairRoster = updateBody("0").replace("}", ",\"roster\":[{\"surname\":\"W\",\"givenName\":\"W\"},{\"surname\":\"X\",\"givenName\":\"X\"},{\"surname\":\"Y\",\"givenName\":\"Y\"},{\"surname\":\"Z\",\"givenName\":\"Z\"}]}");
+        mvc.perform(put(url + "/" + legacyId).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(repairRoster)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        assertThat(jdbc.queryForObject("select count(*) from crew_memberships where crew_entry_id = ?", Long.class, legacyId.longValue())).isEqualTo(3L);
+        var freeCategory = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("Free").scoringGroupLabel("Open").crewSize(4).build());
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content(createBody().replace("\"categoryId\":" + category.getId(), "\"categoryId\":" + freeCategory.getId())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eligible").value(true));
+        var configuration = "{\"name\":\"Sprint\",\"type\":\"SPRINT\",\"displayOrder\":0,\"categoryIds\":[" + category.getId() + "," + freeCategory.getId() + "],\"version\":1}";
+        mvc.perform(put("/api/competitions/" + competition.getId() + "/disciplines/" + discipline + "/configuration").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(configuration))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void completedDisciplineWithResultsRejectsAnotherEligibleCrew() throws Exception {
+        cleanupLateEligibility = true;
+        jdbc.update("update competitions set status = 'STARTED' where id = ?", competition.getId());
+        var created = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isCreated()).andReturn().getResponse();
+        Number crewId = JsonPath.read(created.getContentAsString(), "$.id");
+        var discipline = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Sprint', 'SPRINT', 0, 'STARTED') returning id", Long.class, competition.getId());
+        jdbc.update("insert into discipline_categories (discipline_id, category_id) values (?, ?)", discipline, category.getId());
+        var list = jdbc.queryForObject("insert into start_lists (discipline_id, category_id) values (?, ?) returning id", Long.class, discipline, category.getId());
+        jdbc.update("insert into start_slots (start_list_id, category_id, crew_entry_id, position) values (?, ?, ?, 1)", list, category.getId(), crewId.longValue());
+        jdbc.update("insert into attempt_results (discipline_id, crew_entry_id, attempt_number, duration_centiseconds, penalty_centiseconds, status) values (?, ?, 1, 100, 0, 'FINISHED')", discipline, crewId.longValue());
+        mvc.perform(put("/api/competitions/" + competition.getId() + "/disciplines/" + discipline + "/status").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"COMPLETED\",\"version\":0}")).andExpect(status().isOk());
+        mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody().replace("\"startNumber\":1", "\"startNumber\":2")))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        assertThat(jdbc.queryForObject("select count(*) from crew_entries where competition_category_id = ?", Long.class, category.getId())).isEqualTo(1L);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void completedDisciplineRejectsLateAdmissionAnswersAndCompetitionPolicyChange() throws Exception {
+        cleanupLateEligibility = true;
+        jdbc.update("update competitions set status = 'STARTED', admission_confirmation_required = true where id = ?", competition.getId());
+        var requirement = requirements.saveAndFlush(EntryRequirement.builder().competition(competition).name("Consent").valueType(EntryRequirementValueType.YES_NO).required(true).displayOrder(0).build());
+        var answered = createBody().replace("]}", "],\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":true}]}");
+        var first = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(answered)).andExpect(status().isCreated()).andReturn().getResponse();
+        Number firstId = JsonPath.read(first.getContentAsString(), "$.id");
+        var second = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody().replace("\"startNumber\":1", "\"startNumber\":2"))).andExpect(status().isCreated()).andReturn().getResponse();
+        Number secondId = JsonPath.read(second.getContentAsString(), "$.id");
+        mvc.perform(put(url + "/" + secondId + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":0}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(false));
+        var discipline = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Sprint', 'SPRINT', 0, 'STARTED') returning id", Long.class, competition.getId());
+        jdbc.update("insert into discipline_categories (discipline_id, category_id) values (?, ?)", discipline, category.getId());
+        var statusUrl = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline + "/status";
+        mvc.perform(put(statusUrl).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"COMPLETED\",\"version\":0}")).andExpect(status().isOk());
+        mvc.perform(put(url + "/" + firstId + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":0}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        var answer = updateBody("1").replace("}", ",\"requirementAnswers\":[{\"requirementId\":" + requirement.getId() + ",\"value\":false}]}");
+        mvc.perform(put(url + "/" + secondId).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(answer))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        mvc.perform(get(url + "/" + secondId).with(user("admin").roles("FULL_ACCESS"))).andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(false)).andExpect(jsonPath("$.version").value(1));
+        var compVersion = jdbc.queryForObject("select version from competitions where id = ?", Long.class, competition.getId());
+        var update = "{\"title\":\"Race\",\"startDate\":\"2026-01-01\",\"location\":\"River\",\"timeZone\":\"UTC\",\"admissionConfirmationRequired\":false,\"version\":" + compVersion + "}";
+        mvc.perform(put("/api/competitions/" + competition.getId()).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(update))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("crew_entry.completed_discipline"));
+        assertThat(jdbc.queryForObject("select admission_confirmation_required from competitions where id = ?", Boolean.class, competition.getId())).isTrue();
+        var freeCategory = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("Free").scoringGroupLabel("Open").crewSize(4).build());
+        var free = mvc.perform(post(url).with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content(answered.replace("\"categoryId\":" + category.getId(), "\"categoryId\":" + freeCategory.getId())))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eligible").value(false)).andReturn().getResponse();
+        Number freeId = JsonPath.read(free.getContentAsString(), "$.id");
+        mvc.perform(put(url + "/" + freeId + "/admission").with(user("admin").roles("FULL_ACCESS")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"admitted\":true,\"version\":0}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.eligible").value(true));
+    }
+
     @Test
     void validatesAndEnforcesSecurity() throws Exception {
         mvc.perform(post(url).with(user("reader").roles("READ_ONLY")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(createBody())).andExpect(status().isForbidden());

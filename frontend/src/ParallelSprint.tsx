@@ -44,12 +44,11 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [conflict, setConflict] = useState<number | null>(null)
   const [dependentHeats, setDependentHeats] = useState<number[]>([])
-  const [error, setError] = useState<ApiErrorKey | 'parallel.invalid' | ''>('')
+  const [error, setError] = useState<ApiErrorKey | 'parallel.invalid' | 'parallel.qualificationIncomplete' | 'parallel.recordedHeats' | ''>('')
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
   const finalRound = Math.max(0, ...(bracket?.heats.map(h => h.round) ?? []))
   const hasBronzeFinal = bracket?.heats.some(h => h.round === finalRound && h.number === 2) ?? false
-  const finalResolved = bracket?.heats.some(h => h.round === finalRound && h.number === 1 && h.winnerSlot !== null) ?? false
   const seededCrews = bracket?.heats.filter(h => h.round === 1).reduce((count, h) => count + Number(!!h.first) + Number(!!h.second), 0) ?? 0
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}`
   useEffect(() => {let active = true; const load = async () => {
@@ -77,7 +76,18 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   useEffect(() => {const listener = (event: Event) => {const detail = (event as CustomEvent<{count: number, busy: boolean}>).detail; detail.count += bracket?.heats.filter(heat => {const draft = drafts[heat.id]; return draft && JSON.stringify(draft) !== JSON.stringify(draftFor(heat))}).length ?? 0; detail.busy ||= busy}; window.addEventListener('result-dirty-count', listener); return () => window.removeEventListener('result-dirty-count', listener)}, [bracket, drafts, busy])
   const clearSelection = () => {setBracket(null); setDrafts({}); setConflict(null); setError('')}
   const refresh = async () => {const updated = await apiRequest<Bracket>(`${base}/bracket`); setBracket(updated); setSelectedRound(current => updated.heats.some(heat => heat.round === current) ? current : updated.heats[0]?.round ?? 1)}
-  const seed = async () => {if (readOnly || selected?.status !== 'STARTED') return; setBusy(true); setError(''); try {const seeded = await csrfRequest<Bracket>(`${base}/bracket`, 'POST'); setBracket(seeded); setSelectedRound(seeded.heats[0]?.round ?? 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
+  const seed = async () => {if (readOnly || selected?.status !== 'STARTED') return; setBusy(true); setError(''); try {const seeded = await csrfRequest<Bracket>(`${base}/bracket`, 'POST'); setBracket(seeded); setSelectedRound(seeded.heats[0]?.round ?? 1)} catch (e) {setError(e instanceof ApiError && e.code === 'parallel.qualification_incomplete' ? 'parallel.qualificationIncomplete' : apiErrorKey(e))} finally {setBusy(false)}}
+  const rebuild = async () => {
+    if (!bracket?.id || !canLeave() || !window.confirm(t('parallel.rebuildConfirm'))) return
+    setBusy(true); setError(''); setDependentHeats([])
+    try {
+      const updated = await csrfRequest<Bracket>(`${base}/bracket/rebuild`, 'POST', {bracketId: bracket.id})
+      setBracket(updated); setDrafts({}); setConflict(null); setSelectedRound(updated.heats[0]?.round ?? 1)
+    } catch (e) {
+      setError(e instanceof ApiError && e.code === 'parallel.recorded_heats' ? 'parallel.recordedHeats'
+        : e instanceof ApiError && e.code === 'parallel.qualification_incomplete' ? 'parallel.qualificationIncomplete' : apiErrorKey(e))
+    } finally {setBusy(false)}
+  }
   const addBronze = async () => {if (!canLeave() || !window.confirm(t('parallel.upgradeConfirm'))) return; setBusy(true); setError(''); try {const updated = await csrfRequest<Bracket>(`${base}/bracket/bronze-final`, 'POST'); setBracket(updated); setDrafts({}); setConflict(null)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   const save = async (h: Heat) => {
     const draft = drafts[h.id] ?? draftFor(h)
@@ -120,7 +130,8 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
     }).join('; ')}</Typography>}
     {selected && selected.status !== 'STARTED' && <Typography role="status">{t('discipline.entryClosed')}</Typography>}
     {bracket && !bracket.id && <><Typography>{t('parallel.empty')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void seed()}>{t('parallel.seed')}</Button>}</>}
-    {!!bracket?.id && seededCrews >= 4 && !hasBronzeFinal && <><Typography role="status">{t(finalResolved || selected?.status === 'COMPLETED' ? 'parallel.legacyCompleted' : 'parallel.legacy')}</Typography>{!readOnly && selected?.status === 'STARTED' && !finalResolved && <Button disabled={busy} onClick={() => void addBronze()}>{t('parallel.upgrade')}</Button>}</>}
+    {!!bracket?.id && seededCrews >= 4 && !hasBronzeFinal && <><Typography role="status">{t(selected?.status === 'COMPLETED' ? 'parallel.legacyCompleted' : 'parallel.legacy')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void addBronze()}>{t('parallel.upgrade')}</Button>}</>}
+    {!!bracket?.id && !readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void rebuild()}>{t('parallel.rebuild')}</Button>}
     {!!bracket?.heats.length && <TextField select label={t('parallel.chooseRound')} value={selectedRound} onChange={e => setSelectedRound(Number(e.target.value))} sx={{display: {xs: 'block', md: 'none'}}}>{[...new Set(bracket.heats.map(h => h.round))].map(round => <MenuItem key={round} value={round}>{t('parallel.round', {round})}</MenuItem>)}</TextField>}
     <Box sx={{display: {md: 'flex'}, gap: 2, alignItems: 'start', overflowX: 'auto'}}>
     {[...new Set(bracket?.heats.map(h => h.round) ?? [])].map(round => <Box component="section" key={round} sx={{display: {xs: selectedRound === round ? 'grid' : 'none', md: 'grid'}, gap: 2, minWidth: {md: 320}, flex: 1}}><Typography component="h2" variant="h5">{t('parallel.round', {round})}</Typography>{bracket?.heats.filter(h => h.round === round).map(h => {

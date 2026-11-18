@@ -42,6 +42,8 @@ class CurrentParallelSprintBracketController {
             var bracket = seeding.seed(disciplineId, categoryId, null);
             return new Bracket(bracket.getId(), heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId())
                     .stream().map(ParallelSprintBracketController::view).toList());
+        } catch (ParallelSprintSeedingService.QualificationIncomplete ex) {
+            throw ex;
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -49,6 +51,30 @@ class CurrentParallelSprintBracketController {
         }
     }
 
+    record RebuildRequest(@jakarta.validation.constraints.NotNull @jakarta.validation.constraints.Positive Long bracketId) { }
+
+    @PostMapping("/rebuild")
+    @Transactional
+    Bracket rebuild(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
+                    @jakarta.validation.Valid @RequestBody RebuildRequest request) {
+        lifecycle.requireStarted(competitionId);
+        checkScope(competitionId, disciplineId, categoryId);
+        try {
+            var bracket = seeding.rebuild(disciplineId, categoryId, request.bracketId());
+            return bracket == null ? new Bracket(null, List.of()) : new Bracket(bracket.getId(),
+                    heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream().map(ParallelSprintBracketController::view).toList());
+        } catch (ParallelSprintSeedingService.RecordedHeats | ParallelSprintSeedingService.QualificationIncomplete ex) {
+            throw ex;
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
+    @ExceptionHandler(ParallelSprintSeedingService.RecordedHeats.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> recordedHeats() {
+        return org.springframework.http.ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(kz.vainshtein.raftscore.api.ApiError.of("parallel.recorded_heats"));
+    }
     @PostMapping("/bronze-final")
     @Transactional
     Bracket addBronzeFinal(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
@@ -65,6 +91,11 @@ class CurrentParallelSprintBracketController {
         }
     }
 
+    @ExceptionHandler(ParallelSprintSeedingService.QualificationIncomplete.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> qualificationIncomplete() {
+        return org.springframework.http.ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(kz.vainshtein.raftscore.api.ApiError.of("parallel.qualification_incomplete"));
+    }
     private void checkScope(long competitionId, long disciplineId, long categoryId) {
         disciplines.findById(disciplineId).filter(d -> d.getType() == DisciplineType.PARALLEL_SPRINT
                 && d.getCompetition().getId().equals(competitionId)
