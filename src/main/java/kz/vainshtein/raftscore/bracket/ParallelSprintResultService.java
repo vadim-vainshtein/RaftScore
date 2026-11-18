@@ -62,6 +62,18 @@ public class ParallelSprintResultService {
             entityManager.lock(next, LockModeType.OPTIMISTIC);
             next.advance(heat.getNextSlot(), oldWinner, winner == null ? null : winner == 1 ? heat.getCrew1() : heat.getCrew2());
         }
+        if (next != null && next.getNextHeat() == null && next.getHeatNumber() == 1
+                && !java.util.Objects.equals(heat.getWinnerSlot(), winner)) {
+            var bronze = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(heat.getBracket().getId()).stream()
+                    .filter(h -> h.getRoundNumber() == next.getRoundNumber() && h.getHeatNumber() == 2)
+                    .findFirst().orElse(null);
+            if (bronze != null) {
+                entityManager.lock(bronze, LockModeType.OPTIMISTIC);
+                var oldLoser = heat.getWinnerSlot() == null ? null : heat.getWinnerSlot() == 1 ? heat.getCrew2() : heat.getCrew1();
+                var loser = winner == null ? null : winner == 1 ? heat.getCrew2() : heat.getCrew1();
+                bronze.advance(heat.getNextSlot(), oldLoser, loser);
+            }
+        }
         heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
         heats.flush();
         if (heat.getVersion() == expectedVersion) entityManager.lock(heat, LockModeType.PESSIMISTIC_FORCE_INCREMENT);

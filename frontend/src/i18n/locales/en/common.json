@@ -335,6 +335,12 @@
     "exitFullscreen": "Exit fullscreen"
   },
   "parallel": {
+    "finalA": "Final A (places 1–2)",
+    "finalB": "Final B (places 3–4)",
+    "legacy": "This bracket was created under the previous rules: there is no final B, and semifinal losers are ranked by time.",
+    "legacyCompleted": "This completed bracket was created under the previous rules: there is no final B, and its places and points retain the previous calculation.",
+    "upgrade": "Add final B",
+    "upgradeConfirm": "Add final B? Heat results will be kept, and semifinal losers' places and points will be determined after final B.",
     "slot": "Position {{number}}",
     "winner": "Winner",
     "manual": "manual",

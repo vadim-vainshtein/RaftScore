@@ -17,6 +17,34 @@ beforeEach(() => {
   })
 })
 afterEach(() => {cleanup(); vi.resetAllMocks(); window.location.hash = ''})
+test('identifies both finals and explains older brackets', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  const secondSemi = {...heat, id: 8, number: 2, first: {...heat.first, id: 6}, second: {...heat.second, id: 7}}
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket`
+    ? {id: 8, heats: [heat, secondSemi, {...heat, id: 9, round: 2, number: 1}, {...heat, id: 10, round: 2, number: 2}]}
+    : original(p))
+  const {unmount} = render(<ParallelSprint readOnly/>)
+  expect(await screen.findByText('Final B (places 3–4)')).toBeInTheDocument()
+  expect(screen.getByText('Final A (places 1–2)')).toBeInTheDocument()
+  unmount()
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket`
+    ? {id: 8, heats: [heat, secondSemi, {...heat, id: 9, round: 2, number: 1}]}
+    : original(p))
+  render(<ParallelSprint readOnly/>)
+  expect(await screen.findByText(/created under the previous rules/)).toBeInTheDocument()
+})
+test('upgrades an unfinished legacy bracket only after confirmation', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  const secondSemi = {...heat, id: 8, number: 2, first: {...heat.first, id: 6}, second: {...heat.second, id: 7}}
+  const legacy = {id: 8, heats: [heat, secondSemi, {...heat, id: 9, round: 2, number: 1}]}
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket` ? legacy : original(p))
+  vi.mocked(csrfRequest).mockResolvedValue({...legacy, heats: [...legacy.heats, {...heat, id: 10, round: 2, number: 2}]})
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<ParallelSprint readOnly={false}/> )
+  fireEvent.click(await screen.findByRole('button', {name: 'Add final B'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/bracket/bronze-final`, 'POST'))
+  expect(await screen.findByText('Final B (places 3–4)')).toBeInTheDocument()
+})
 test('read-only users see positions and no editing controls', async () => {
   render(<ParallelSprint readOnly/>)
   expect(await screen.findByText('Position 1: 1 — Alpha · — · —')).toBeInTheDocument()

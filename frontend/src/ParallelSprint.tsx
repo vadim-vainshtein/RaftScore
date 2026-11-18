@@ -46,6 +46,10 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   const [error, setError] = useState<ApiErrorKey | 'parallel.invalid' | ''>('')
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
+  const finalRound = Math.max(0, ...(bracket?.heats.map(h => h.round) ?? []))
+  const hasBronzeFinal = bracket?.heats.some(h => h.round === finalRound && h.number === 2) ?? false
+  const finalResolved = bracket?.heats.some(h => h.round === finalRound && h.number === 1 && h.winnerSlot !== null) ?? false
+  const seededCrews = bracket?.heats.filter(h => h.round === 1).reduce((count, h) => count + Number(!!h.first) + Number(!!h.second), 0) ?? 0
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}`
   useEffect(() => {let active = true; const load = async () => {
       if (fixedCompetition) {const item = await apiRequest<Competition>(`/api/competitions/${fixedCompetition}`); if (active) setCompetitions([item]); return}const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [fixedCompetition])
@@ -73,6 +77,7 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   const clearSelection = () => {setBracket(null); setDrafts({}); setConflict(null); setError('')}
   const refresh = async () => {const updated = await apiRequest<Bracket>(`${base}/bracket`); setBracket(updated); setSelectedRound(current => updated.heats.some(heat => heat.round === current) ? current : updated.heats[0]?.round ?? 1)}
   const seed = async () => {if (readOnly || selected?.status !== 'STARTED') return; setBusy(true); setError(''); try {const seeded = await csrfRequest<Bracket>(`${base}/bracket`, 'POST'); setBracket(seeded); setSelectedRound(seeded.heats[0]?.round ?? 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
+  const addBronze = async () => {if (!canLeave() || !window.confirm(t('parallel.upgradeConfirm'))) return; setBusy(true); setError(''); try {const updated = await csrfRequest<Bracket>(`${base}/bracket/bronze-final`, 'POST'); setBracket(updated); setDrafts({}); setConflict(null)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}
   const save = async (h: Heat) => {
     const draft = drafts[h.id] ?? draftFor(h)
     const first = draft.firstStatus === 'FINISHED' ? parseTime(draft.firstTime) : null
@@ -96,13 +101,14 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
     {error && <Typography role="alert">{t(error)}</Typography>}
     {selected && selected.status !== 'STARTED' && <Typography role="status">{t('discipline.entryClosed')}</Typography>}
     {bracket && !bracket.id && <><Typography>{t('parallel.empty')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void seed()}>{t('parallel.seed')}</Button>}</>}
+    {!!bracket?.id && seededCrews >= 4 && !hasBronzeFinal && <><Typography role="status">{t(finalResolved || selected?.status === 'COMPLETED' ? 'parallel.legacyCompleted' : 'parallel.legacy')}</Typography>{!readOnly && selected?.status === 'STARTED' && !finalResolved && <Button disabled={busy} onClick={() => void addBronze()}>{t('parallel.upgrade')}</Button>}</>}
     {!!bracket?.heats.length && <TextField select label={t('parallel.chooseRound')} value={selectedRound} onChange={e => setSelectedRound(Number(e.target.value))} sx={{display: {xs: 'block', md: 'none'}}}>{[...new Set(bracket.heats.map(h => h.round))].map(round => <MenuItem key={round} value={round}>{t('parallel.round', {round})}</MenuItem>)}</TextField>}
     <Box sx={{display: {md: 'flex'}, gap: 2, alignItems: 'start', overflowX: 'auto'}}>
     {[...new Set(bracket?.heats.map(h => h.round) ?? [])].map(round => <Box component="section" key={round} sx={{display: {xs: selectedRound === round ? 'grid' : 'none', md: 'grid'}, gap: 2, minWidth: {md: 320}, flex: 1}}><Typography component="h2" variant="h5">{t('parallel.round', {round})}</Typography>{bracket?.heats.filter(h => h.round === round).map(h => {
       const draft = drafts[h.id] ?? draftFor(h)
       const winner = h.winnerSlot === 1 ? h.first : h.winnerSlot === 2 ? h.second : null
       return <Box component="section" key={h.id} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere'}}>
-        <Typography component="h3" variant="h6">{t('parallel.heat', {heat: h.number})}</Typography>
+        <Typography component="h3" variant="h6">{round === finalRound && hasBronzeFinal ? t(h.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : t('parallel.heat', {heat: h.number})}</Typography>
         {[{crew: h.first, status: h.firstStatus, value: h.firstTimeCentiseconds}, {crew: h.second, status: h.secondStatus, value: h.secondTimeCentiseconds}].map((slot, i) => <Typography key={i}>{t('parallel.slot', {number: i + 1})}: {slot.crew ? `${slot.crew.startNumber} — ${slot.crew.name}` : t(h.round === 1 ? 'parallel.bye' : 'parallel.pending')} · {slot.status ? t(`results.${slot.status}`) : '—'} · {displayTime(slot.value) || '—'}</Typography>)}
         <Typography>{t('parallel.winner')}: {winner?.name ?? '—'}{h.winnerOverridden ? ` (${t('parallel.manual')})` : ''}</Typography>
         {!readOnly && selected?.status === 'STARTED' && h.first && h.second && <details open={desktop || undefined}><summary>{t('parallel.editHeat', {heat: h.number})}</summary><Box sx={{display: 'grid', gap: 1, mt: 1}}>

@@ -22,6 +22,37 @@ public class ParallelSprintSeedingService {
     private final CalculatedDisciplineResultRepository results;
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
+    private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
+
+    /** Explicitly upgrades an unfinished legacy bracket without changing any existing heat. */
+    @Transactional
+    public ParallelSprintBracket addBronzeFinal(long disciplineId, long categoryId) {
+        var discipline = disciplines.findForStartListUpdate(disciplineId).orElseThrow();
+        discipline.requireStarted();
+        var bracket = brackets.findByDisciplineIdAndCategoryId(disciplineId, categoryId).orElseThrow();
+        var all = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId());
+        int finalRound = all.stream().mapToInt(ParallelSprintHeat::getRoundNumber).max().orElseThrow();
+        var finals = all.stream().filter(h -> h.getRoundNumber() == finalRound).toList();
+        if (finals.size() != 1 || finals.getFirst().getHeatNumber() != 1)
+            throw new IllegalStateException("bracket already has a bronze final or invalid finals");
+        var finalA = finals.getFirst();
+        if (finalA.getWinnerSlot() != null) throw new IllegalStateException("completed bracket cannot be upgraded");
+        var semifinals = all.stream().filter(h -> h.getNextHeat() != null && h.getNextHeat().getId().equals(finalA.getId()))
+                .sorted(Comparator.comparingInt(ParallelSprintHeat::getNextSlot)).toList();
+        long entrants = all.stream().filter(h -> h.getRoundNumber() == 1)
+                .mapToLong(h -> (h.getCrew1() == null ? 0 : 1) + (h.getCrew2() == null ? 0 : 1)).sum();
+        if (entrants < 4 || semifinals.size() != 2 || semifinals.get(0).getNextSlot() != 1 || semifinals.get(1).getNextSlot() != 2)
+            throw new IllegalStateException("bracket does not have two semifinals");
+        heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(finalRound).heatNumber(2)
+                .crew1(loser(semifinals.get(0))).crew2(loser(semifinals.get(1))).build());
+        recalculation.recalculateLocked(discipline, categoryId);
+        return bracket;
+    }
+
+    private CrewEntry loser(ParallelSprintHeat heat) {
+        if (heat.getWinnerSlot() == null) return null;
+        return heat.getWinnerSlot() == 1 ? heat.getCrew2() : heat.getCrew1();
+    }
 
     /** A null qualificationId selects the first configured ordinary sprint. */
     @Transactional
@@ -65,18 +96,28 @@ public class ParallelSprintSeedingService {
     private void createHeats(ParallelSprintBracket bracket, List<CrewEntry> ranked) {
         int size = 2;
         while (size < ranked.size()) size = Math.multiplyExact(size, 2);
-        var positions = new ArrayList<>(List.of(1, 2));
-        for (int width = 4; width <= size; width *= 2) {
+        int stageSize = ranked.size() == size ? size : size / 2;
+        var positions = new ArrayList<>(List.of(2, 1));
+        for (int width = 4; width <= stageSize; width *= 2) {
             var expanded = new ArrayList<Integer>();
-            for (var seed : positions) { expanded.add(seed); expanded.add(width + 1 - seed); }
+            for (var seed : positions) { expanded.add(seed + width / 2); expanded.add(seed); }
             positions = expanded;
         }
         var firstRound = new ArrayList<CrewEntry[]>();
-        for (int i = 0; i < size; i += 2) {
-            firstRound.add(new CrewEntry[]{crewAt(positions.get(i), ranked), crewAt(positions.get(i + 1), ranked)});
+        if (ranked.size() == size) {
+            for (int i = 0; i < size; i += 2)
+                firstRound.add(new CrewEntry[]{crewAt(positions.get(i), ranked), crewAt(positions.get(i + 1), ranked)});
+        } else {
+            for (var seed : positions) {
+                int opponent = seed <= size - ranked.size() ? size + 1 : seed + ranked.size() - size / 2;
+                firstRound.add(new CrewEntry[]{crewAt(seed, ranked), crewAt(opponent, ranked)});
+            }
         }
         int rounds = Integer.numberOfTrailingZeros(size);
         List<ParallelSprintHeat> next = List.of();
+        if (ranked.size() >= 4) {
+            heats.save(ParallelSprintHeat.builder().bracket(bracket).roundNumber(rounds).heatNumber(2).build());
+        }
         for (int round = rounds; round >= 1; round--) {
             int count = size >> round;
             var current = new ArrayList<ParallelSprintHeat>();
