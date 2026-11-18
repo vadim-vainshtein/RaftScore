@@ -66,3 +66,5 @@
 .start-list-table th { text-align: left; }
 
 .MuiInputBase-inputMultiline:focus-visible { outline: none !important; }
+
+.workspace-compact-heading { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
