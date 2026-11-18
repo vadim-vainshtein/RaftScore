@@ -19,6 +19,7 @@ public class SlalomRankingService {
     private final AttemptResultRepository attempts;
     private final SlalomConfigurationRepository configurations;
     private final SlalomGatePenaltyRepository penalties;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityPolicy eligibility;
 
     @Transactional(readOnly = true)
     public List<SlalomRanking.Result> rank(Long startListId) {
@@ -26,11 +27,14 @@ public class SlalomRankingService {
         if (list.getDiscipline().getType() != DisciplineType.SLALOM)
             throw new IllegalArgumentException("start list must belong to a slalom");
         var disciplineId = list.getDiscipline().getId();
-        var recordedAttempts = attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(disciplineId, list.getCategory().getId());
+        var eligible = eligibility.eligibleIds(list.getCategory().getId());
+        var recordedAttempts = attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(disciplineId, list.getCategory().getId()).stream()
+                .filter(a -> eligible.contains(a.getCrewEntry().getId())).toList();
         if (recordedAttempts.isEmpty()) return List.of();
         var configuration = configurations.findByDisciplineId(disciplineId).orElseThrow();
         return SlalomRanking.rank(configuration, startSlots.findByStartListIdOrderByPositionAsc(startListId),
                 recordedAttempts,
-                penalties.findByConfigurationIdAndAttemptCrewEntryCompetitionCategoryId(configuration.getId(), list.getCategory().getId()));
+                penalties.findByConfigurationIdAndAttemptCrewEntryCompetitionCategoryId(configuration.getId(), list.getCategory().getId()).stream()
+                        .filter(p -> recordedAttempts.contains(p.getAttempt())).toList());
     }
 }

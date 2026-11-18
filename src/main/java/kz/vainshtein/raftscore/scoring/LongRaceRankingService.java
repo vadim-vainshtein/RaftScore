@@ -15,14 +15,16 @@ public class LongRaceRankingService {
     private final StartListRepository startLists;
     private final StartSlotRepository startSlots;
     private final AttemptResultRepository attempts;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityPolicy eligibility;
 
     @Transactional(readOnly = true)
     public List<LongRaceRanking.Result> rank(Long startListId) {
         var list = startLists.findById(startListId).orElseThrow();
         if (list.getDiscipline().getType() != DisciplineType.LONG_RACE)
             throw new IllegalArgumentException("start list must belong to a long race");
+        var eligible = eligibility.eligibleIds(list.getCategory().getId());
         return LongRaceRanking.rank(startSlots.findByStartListIdOrderByPositionAsc(startListId),
                 attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(
-                        list.getDiscipline().getId(), list.getCategory().getId()));
+                        list.getDiscipline().getId(), list.getCategory().getId()).stream().filter(a -> eligible.contains(a.getCrewEntry().getId())).toList());
     }
 }

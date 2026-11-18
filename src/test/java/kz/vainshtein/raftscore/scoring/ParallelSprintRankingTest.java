@@ -18,6 +18,16 @@ class ParallelSprintRankingTest {
     private final ParallelSprintBracket bracket = ParallelSprintBracket.builder().discipline(discipline).category(category).build();
 
     @Test
+    void doesNotScoreAHeatContainingAnIneligibleCrew() {
+        var withdrawn = crew(1); var eligible = crew(2); var opponent = crew(3);
+        var semifinal = timedHeat(1, eligible, opponent, 700);
+        var finalHeat = timedHeat(2, withdrawn, eligible, 500);
+        var ranked = ParallelSprintRanking.rank(List.of(semifinal, finalHeat), crew -> crew != withdrawn);
+        assertThat(ranked).extracting(ParallelSprintRanking.Result::crew).doesNotContain(withdrawn, eligible);
+        assertThat(ranked).extracting(ParallelSprintRanking.Result::crew).containsExactly(opponent);
+    }
+
+    @Test
     void bronzeFinalDecidesThirdEvenWhenWinnerWasSlowerInSemifinal() {
         var a = crew(1); var b = crew(2); var c = crew(3); var d = crew(4);
         var semi1 = timedHeat(1, a, c, 700);

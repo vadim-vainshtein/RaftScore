@@ -59,7 +59,7 @@ try {
     await delay(1000)
   }
   tests = spawn(process.execPath, [path.join(root, 'frontend/node_modules/@playwright/test/cli.js'), 'test', ...process.argv.slice(2)], {
-    cwd: path.join(root, 'frontend'), stdio: 'inherit', env: {...process.env, RAFTSCORE_E2E_URL: url},
+    cwd: path.join(root, 'frontend'), stdio: 'inherit', env: {...process.env, RAFTSCORE_E2E_URL: url, RAFTSCORE_E2E_CONTAINER: container},
   })
   process.exitCode = await new Promise(resolve => {
     tests.on('error', () => resolve(1))

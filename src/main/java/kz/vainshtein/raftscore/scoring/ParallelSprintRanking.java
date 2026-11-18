@@ -16,11 +16,25 @@ public final class ParallelSprintRanking {
     private record Elimination(CrewEntry crew, AttemptResultStatus status, int stagePlace, Integer time) { }
 
     public static List<Result> rank(List<ParallelSprintHeat> heats) {
+        return rank(heats, crew -> true);
+    }
+
+    public static List<Result> rank(List<ParallelSprintHeat> heats, java.util.function.Predicate<CrewEntry> eligible) {
         int finalRound = heats.stream().mapToInt(ParallelSprintHeat::getRoundNumber).max().orElse(0);
         boolean hasBronze = heats.stream().anyMatch(h -> h.getRoundNumber() == finalRound && h.getHeatNumber() == 2);
         var results = new ArrayList<Result>();
         var eliminations = new ArrayList<Elimination>();
         for (var heat : heats) {
+            if ((heat.getCrew1() != null && !eligible.test(heat.getCrew1()))
+                    || (heat.getCrew2() != null && !eligible.test(heat.getCrew2()))) continue;
+            if (heat.getRoundNumber() == finalRound && heat.getNextHeat() == null && heat.outcomeResolved()
+                    && heat.winner() != null && (heat.getCrew1() == null || heat.getCrew2() == null)) {
+                var winner = heat.winner();
+                var status = latestStatus(heats, winner, finalRound, eligible);
+                if (status != null) results.add(new Result(winner, status,
+                        status == AttemptResultStatus.FINISHED ? (heat.getHeatNumber() == 2 ? 3 : 1) : null));
+                continue;
+            }
             if (heat.getWinnerSlot() == null || heat.getCrew1() == null || heat.getCrew2() == null
                     || heat.getStatus1() == null || heat.getStatus2() == null) continue;
             if (hasBronze && heat.getRoundNumber() == finalRound - 1) continue;
@@ -55,5 +69,15 @@ public final class ParallelSprintRanking {
                 .thenComparing(r -> r.crew().getStartNumber())
                 .thenComparing(r -> r.crew().getId(), Comparator.nullsLast(Comparator.naturalOrder())));
         return List.copyOf(results);
+    }
+
+    private static AttemptResultStatus latestStatus(List<ParallelSprintHeat> heats, CrewEntry crew, int beforeRound,
+                                                    java.util.function.Predicate<CrewEntry> eligible) {
+        return heats.stream().filter(h -> h.getRoundNumber() < beforeRound)
+                .filter(h -> (h.getCrew1() == null || eligible.test(h.getCrew1())) && (h.getCrew2() == null || eligible.test(h.getCrew2())))
+                .sorted(Comparator.comparingInt(ParallelSprintHeat::getRoundNumber).reversed())
+                .map(h -> h.getCrew1() != null && h.getCrew1().getId().equals(crew.getId()) ? h.getStatus1()
+                        : h.getCrew2() != null && h.getCrew2().getId().equals(crew.getId()) ? h.getStatus2() : null)
+                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
     }
 }

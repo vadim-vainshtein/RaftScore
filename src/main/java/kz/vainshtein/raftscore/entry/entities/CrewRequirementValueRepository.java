@@ -5,4 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CrewRequirementValueRepository extends JpaRepository<CrewRequirementValue, Long> {
     List<CrewRequirementValue> findByCrewEntryId(Long crewEntryId);
+    List<CrewRequirementValue> findByCrewEntryIdIn(java.util.Collection<Long> crewEntryIds);
 }

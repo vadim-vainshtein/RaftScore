@@ -15,6 +15,11 @@ class StartListController {
     private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final StartListService service;
     record ReplaceRequest(@NotNull Boolean random, Boolean reverseOverall, List<@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal> crewIds, Instant firstStart, @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal intervalSeconds) { }
+    @io.swagger.v3.oas.annotations.media.Schema(name = "AttemptAnnulRequest")
+    record AnnulRequest(@NotNull @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal crewId,
+                        @NotNull @DecimalMin("1") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal attemptNumber,
+                        @NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version,
+                        @NotBlank @Size(max = 2000) @Pattern(regexp = "[^\\x00]*") String reason) { }
 
     @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
     org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> error(org.springframework.web.server.ResponseStatusException ex) {
@@ -26,12 +31,18 @@ class StartListController {
         return service.read(competitionId, disciplineId, categoryId);
     }
 
+    @GetMapping("/annulments")
+    List<StartListService.Annulment> annulments(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+        return service.annulments(competitionId, disciplineId, categoryId);
+    }
+
     @DeleteMapping("/source-results")
     @org.springframework.transaction.annotation.Transactional
     @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
-    void clearResults(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId) {
+    void clearResults(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
+                      @Valid @RequestBody AnnulRequest request) {
         lifecycle.requireStarted(competitionId);
-        service.clearResults(competitionId, disciplineId, categoryId);
+        service.clearResults(competitionId, disciplineId, categoryId, request.crewId().longValueExact(), request.attemptNumber().intValueExact(), request.version().longValueExact(), request.reason());
     }
     @PutMapping
     @org.springframework.transaction.annotation.Transactional

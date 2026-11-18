@@ -43,8 +43,10 @@ public class ParallelSprintSeedingService {
                 .mapToLong(h -> (h.getCrew1() == null ? 0 : 1) + (h.getCrew2() == null ? 0 : 1)).sum();
         if (entrants < 4 || semifinals.size() != 2 || semifinals.get(0).getNextSlot() != 1 || semifinals.get(1).getNextSlot() != 2)
             throw new IllegalStateException("bracket does not have two semifinals");
-        heats.saveAndFlush(ParallelSprintHeat.builder().bracket(bracket).roundNumber(finalRound).heatNumber(2)
-                .crew1(loser(semifinals.get(0))).crew2(loser(semifinals.get(1))).build());
+        var bronze = ParallelSprintHeat.builder().bracket(bracket).roundNumber(finalRound).heatNumber(2).build();
+        for (var semifinal : semifinals)
+            bronze.replaceWithdrawnFeeder(semifinal.getNextSlot(), null, loser(semifinal), semifinal.outcomeResolved());
+        heats.saveAndFlush(bronze);
         recalculation.recalculateLocked(discipline, categoryId);
         return bracket;
     }
@@ -53,6 +55,7 @@ public class ParallelSprintSeedingService {
         if (heat.getWinnerSlot() == null) return null;
         return heat.getWinnerSlot() == 1 ? heat.getCrew2() : heat.getCrew1();
     }
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
 
     /** A null qualificationId selects the first configured ordinary sprint. */
     @Transactional
@@ -79,7 +82,7 @@ public class ParallelSprintSeedingService {
             throw new IllegalArgumentException("qualification must be another discipline in the same competition and category");
         }
         var ranked = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(qualification.getId(), categoryId).stream()
-                .filter(r -> r.getStatus() == CalculatedResultStatus.FINISHED && r.getPlace() != null)
+                .filter(r -> r.getStatus() == CalculatedResultStatus.FINISHED && r.getPlace() != null && eligibility.isEligible(r.getCrewEntry()))
                 .sorted(Comparator.comparing(CalculatedDisciplineResult::getPlace)
                         .thenComparing(r -> r.getCrewEntry().getStartNumber())
                         .thenComparing(r -> r.getCrewEntry().getId()))

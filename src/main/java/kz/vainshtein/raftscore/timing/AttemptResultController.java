@@ -33,6 +33,7 @@ class AttemptResultController {
     private final SlalomConfigurationRepository configurations;
     private final SlalomGatePenaltyRepository penalties;
     private final RecalculationService recalculation;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
 
     record Gate(@NotNull @DecimalMin("1") @Digits(integer=10, fraction=0) BigDecimal number,
                 @NotNull @DecimalMin("0") @Digits(integer=10, fraction=0) BigDecimal penaltySeconds) { }
@@ -56,6 +57,7 @@ class AttemptResultController {
         var crew = crews.findByIdAndCompetitionCategoryCompetitionId(crewId, competitionId)
                 .filter(c -> c.getCompetitionCategory().getId().equals(categoryId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        eligibility.requireEligible(crew);
         var list = lists.findByDisciplineIdAndCategoryId(disciplineId, categoryId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         if (discipline.getType() == DisciplineType.PARALLEL_SPRINT || slots.findByStartListIdOrderByPositionAsc(list.getId()).stream().noneMatch(s -> s.getCrew().getId().equals(crewId)))

@@ -21,6 +21,8 @@ class LongRaceRankingServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired StartListRepository lists;
     @Autowired StartSlotRepository slots;
     @Autowired AttemptResultRepository attempts;
@@ -49,6 +51,12 @@ class LongRaceRankingServiceIntegrationTest extends PostgreSqlIntegrationTest {
     }
 
     private CrewEntry crew(CompetitionCategory category, int number) {
-        return crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Coach").startNumber(number).build());
+        var entry = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Coach").startNumber(number).build());
+        for (int i = 1; i <= category.getCrewSize(); i++) {
+            var person = participants.save(Participant.builder().surname("Crew" + number).givenName("Person" + i).build());
+            memberships.save(CrewMembership.builder().crewEntry(entry).participant(person).position(i).build());
+        }
+        memberships.flush();
+        return entry;
     }
 }

@@ -11,7 +11,7 @@ type Category = {id: number, displayName: string}
 type Discipline = {id: number, name: string, type: string, status: string, categoryIds: number[]}
 type Status = 'FINISHED' | 'DNS' | 'DNF' | 'DSQ_ATTEMPT' | 'DSQ_DISCIPLINE' | 'DSQ_COMPETITION'
 type Crew = {id: number, name: string, startNumber: number}
-type Heat = {id: number, version: number, round: number, number: number, first: Crew | null, second: Crew | null, firstStatus: Status | null, secondStatus: Status | null, firstTimeCentiseconds: number | null, secondTimeCentiseconds: number | null, winnerSlot: number | null, winnerOverridden: boolean}
+type Heat = {id: number, version: number, round: number, number: number, first: Crew | null, second: Crew | null, firstStatus: Status | null, secondStatus: Status | null, firstTimeCentiseconds: number | null, secondTimeCentiseconds: number | null, winnerSlot: number | null, winnerOverridden: boolean, firstResolved?: boolean, secondResolved?: boolean}
 type Bracket = {id: number | null, heats: Heat[]}
 type Draft = {version: number, firstStatus: Status, secondStatus: Status, firstTime: string, secondTime: string, winner: string}
 const statuses: Status[] = ['FINISHED', 'DNS', 'DNF', 'DSQ_ATTEMPT', 'DSQ_DISCIPLINE', 'DSQ_COMPETITION']
@@ -43,6 +43,7 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   const [bracket, setBracket] = useState<Bracket | null>(null)
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [conflict, setConflict] = useState<number | null>(null)
+  const [dependentHeats, setDependentHeats] = useState<number[]>([])
   const [error, setError] = useState<ApiErrorKey | 'parallel.invalid' | ''>('')
   const [busy, setBusy] = useState(false)
   const selected = disciplines.find(d => String(d.id) === discipline)
@@ -92,6 +93,20 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
       if (e instanceof ApiError && e.status === 409) {try {await refresh(); setConflict(h.id)} catch (refreshError) {setError(apiErrorKey(refreshError))}} else setError(apiErrorKey(e))
     } finally {setBusy(false)}
   }
+  const annul = async (h: Heat) => {
+    if (!window.confirm(t('parallel.confirmAnnul'))) return
+    const reason = window.prompt(t('startList.annulReason'))?.trim()
+    if (!reason) return
+    setBusy(true); setError(''); setDependentHeats([])
+    try {
+      await csrfRequest(`${base}/brackets/${bracket?.id}/heats/${h.id}/annulment`, 'POST', {version: h.version, reason})
+      await refresh(); setDrafts(old => {const next = {...old}; delete next[h.id]; return next})
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'parallel.dependent_heats' && Array.isArray(e.parameters?.heatIds)) {
+        setDependentHeats(e.parameters.heatIds.filter((id): id is number => typeof id === 'number'))
+      } else setError(apiErrorKey(e))
+    } finally {setBusy(false)}
+  }
   const update = (h: Heat, patch: Partial<Draft>) => setDrafts(old => ({...old, [h.id]: {...(old[h.id] ?? draftFor(h)), ...patch}}))
   return <Box sx={{display: 'grid', gap: 2, mt: 2, minWidth: 0}}>
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('results.competition')} value={competition} onChange={e => {if (canLeave()) {setCompetition(e.target.value); setDiscipline(''); setCategory(''); setDisciplines([]); setCategories([]); clearSelection()}}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
@@ -99,6 +114,10 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
     {competition && <TextField select disabled={busy} label={t('results.discipline')} value={discipline} onChange={e => {if (canLeave()) {setDiscipline(e.target.value); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); clearSelection()}}}><MenuItem value="">—</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}
     {discipline && <TextField select disabled={busy} label={t('results.category')} value={category} onChange={e => {if (canLeave()) {setCategory(e.target.value); clearSelection()}}}><MenuItem value="">—</MenuItem>{categories.filter(c => selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {error && <Typography role="alert">{t(error)}</Typography>}
+    {dependentHeats.length > 0 && <Typography role="alert">{t('parallel.dependentHeats')}: {dependentHeats.map(id => {
+      const heat = bracket?.heats.find(item => item.id === id)
+      return heat ? `${t('parallel.round', {round: heat.round})}, ${t('parallel.heat', {heat: heat.number})}` : String(id)
+    }).join('; ')}</Typography>}
     {selected && selected.status !== 'STARTED' && <Typography role="status">{t('discipline.entryClosed')}</Typography>}
     {bracket && !bracket.id && <><Typography>{t('parallel.empty')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void seed()}>{t('parallel.seed')}</Button>}</>}
     {!!bracket?.id && seededCrews >= 4 && !hasBronzeFinal && <><Typography role="status">{t(finalResolved || selected?.status === 'COMPLETED' ? 'parallel.legacyCompleted' : 'parallel.legacy')}</Typography>{!readOnly && selected?.status === 'STARTED' && !finalResolved && <Button disabled={busy} onClick={() => void addBronze()}>{t('parallel.upgrade')}</Button>}</>}
@@ -109,13 +128,14 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
       const winner = h.winnerSlot === 1 ? h.first : h.winnerSlot === 2 ? h.second : null
       return <Box component="section" key={h.id} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere'}}>
         <Typography component="h3" variant="h6">{round === finalRound && hasBronzeFinal ? t(h.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : t('parallel.heat', {heat: h.number})}</Typography>
-        {[{crew: h.first, status: h.firstStatus, value: h.firstTimeCentiseconds}, {crew: h.second, status: h.secondStatus, value: h.secondTimeCentiseconds}].map((slot, i) => <Typography key={i}>{t('parallel.slot', {number: i + 1})}: {slot.crew ? `${slot.crew.startNumber} — ${slot.crew.name}` : t(h.round === 1 ? 'parallel.bye' : 'parallel.pending')} · {slot.status ? t(`results.${slot.status}`) : '—'} · {displayTime(slot.value) || '—'}</Typography>)}
+        {[{crew: h.first, status: h.firstStatus, value: h.firstTimeCentiseconds, resolved: h.firstResolved}, {crew: h.second, status: h.secondStatus, value: h.secondTimeCentiseconds, resolved: h.secondResolved}].map((slot, i) => <Typography key={i}>{t('parallel.slot', {number: i + 1})}: {slot.crew ? `${slot.crew.startNumber} — ${slot.crew.name}` : t((slot.resolved ?? h.round === 1) ? 'parallel.bye' : 'parallel.pending')} · {slot.status ? t(`results.${slot.status}`) : '—'} · {displayTime(slot.value) || '—'}</Typography>)}
         <Typography>{t('parallel.winner')}: {winner?.name ?? '—'}{h.winnerOverridden ? ` (${t('parallel.manual')})` : ''}</Typography>
         {!readOnly && selected?.status === 'STARTED' && h.first && h.second && <details open={desktop || undefined}><summary>{t('parallel.editHeat', {heat: h.number})}</summary><Box sx={{display: 'grid', gap: 1, mt: 1}}>
           {([1, 2] as const).map(i => <Box key={i} sx={{display: 'grid', gap: 1}}><TextField select disabled={busy} label={`${t('results.status')} ${i}`} value={i === 1 ? draft.firstStatus : draft.secondStatus} onChange={e => update(h, i === 1 ? {firstStatus: e.target.value as Status} : {secondStatus: e.target.value as Status})}>{statuses.map(status => <MenuItem key={status} value={status}>{t(`results.${status}`)}</MenuItem>)}</TextField><TextField label={`${t('results.time')} ${t('parallel.slot', {number: i})} — ${i === 1 ? h.first?.name : h.second?.name}`} value={i === 1 ? draft.firstTime : draft.secondTime} disabled={busy || (i === 1 ? draft.firstStatus : draft.secondStatus) !== 'FINISHED'} onChange={e => update(h, i === 1 ? {firstTime: e.target.value} : {secondTime: e.target.value})}/></Box>)}
           <TextField select disabled={busy} label={t('parallel.override')} value={draft.winner} onChange={e => update(h, {winner: e.target.value})}><MenuItem value="">{t('parallel.automatic')}</MenuItem><MenuItem value={String(h.first.id)}>{h.first.name}</MenuItem><MenuItem value={String(h.second.id)}>{h.second.name}</MenuItem></TextField>
           {conflict === h.id && <><Typography role="alert">{t('parallel.conflict')}</Typography><Button disabled={busy} onClick={() => {setDrafts(old => {const next = {...old}; delete next[h.id]; return next}); setConflict(null)}}>{t('parallel.useLatest')}</Button></>}
           <Button disabled={busy || conflict === h.id} onClick={() => void save(h)}>{t('parallel.save')}</Button>
+          {(h.firstStatus || h.secondStatus) && <Button disabled={busy} onClick={() => void annul(h)}>{t('parallel.annul')}</Button>}
         </Box></details>}
       </Box>
     })}</Box>)}
