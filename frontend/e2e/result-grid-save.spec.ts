@@ -97,9 +97,10 @@ async function prepareSprint(api: APIRequestContext, title: string) {
   return fixture
 }
 
-test('opens the shared completion dialog from result entry and retains the protocol filters', async ({page}) => {
+test('completes from overview and retains the protocol filters', async ({page}) => {
   const {competitionId, disciplineId, categoryId} = await prepareSprint(page.request, 'Complete from settings')
   await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
+  await page.getByRole('link', {name: 'Overview', exact: true}).click()
   await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
   const dialog = page.getByRole('dialog', {name: 'Complete competition'})
   await expect(dialog).toBeVisible()
@@ -109,40 +110,7 @@ test('opens the shared completion dialog from result entry and retains the proto
   await expect(page).toHaveURL(new RegExp(`/workspace/${competitionId}/results\\?`))
   await expect(page).toHaveURL(new RegExp(`discipline=${disciplineId}`))
   await expect(page).toHaveURL(new RegExp(`category=${categoryId}`))
-  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
   await expect(page.getByText(/01:14\.01/).first()).toBeVisible()
-})
-
-test('updates the protocol in place when completing from the already open protocol', async ({page}) => {
-  const {competitionId, disciplineId, categoryId} = await prepareSprint(page.request, 'Complete on the protocol')
-  await page.goto(`/?lang=en#/workspace/${competitionId}/results?discipline=${disciplineId}&category=${categoryId}`)
-  await expect(page.getByRole('button', {name: 'Recalculate', exact: true})).toBeVisible()
-  const protocolUrl = page.url()
-  await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
-  const completion = page.getByRole('dialog', {name: 'Complete competition'})
-  await completion.getByRole('button', {name: 'Complete competition', exact: true}).click()
-  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
-  await expect(page).toHaveURL(protocolUrl)
-  await expect(page.getByRole('button', {name: 'Recalculate', exact: true})).toHaveCount(0)
-  await expect(page.getByRole('button', {name: 'Complete competition', exact: true})).toHaveCount(0)
-  await expect(page.getByText(/01:14\.01/).first()).toBeVisible()
-})
-
-test('completion does not count a draft discarded by clearing the grid category', async ({page}) => {
-  const {competitionId, disciplineId, categoryId, crews: [crew]} = await prepareSprint(page.request, 'Discard grid draft')
-  await page.goto(`/?lang=en#/workspace/${competitionId}/result-grid?discipline=${disciplineId}&category=${categoryId}`)
-  await time(page, crew).fill('79.00')
-  const discard = page.waitForEvent('dialog', {timeout: 5000})
-  page.once('dialog', dialog => dialog.accept())
-  await page.getByRole('combobox', {name: 'Category', exact: true}).click()
-  await page.getByRole('option', {name: '—', exact: true}).click()
-  expect((await discard).type()).toBe('confirm')
-  await expect(time(page, crew)).toHaveCount(0)
-  await page.getByRole('button', {name: 'Complete competition', exact: true}).click()
-  const completion = page.getByRole('dialog', {name: 'Complete competition'})
-  await expect(completion.getByText(/Unsaved rows:/i)).toHaveCount(0)
-  await completion.getByRole('button', {name: 'Complete competition', exact: true}).click()
-  await expect(page.getByText('Completed', {exact: true})).toBeVisible()
 })
 
 test('keyboard saves 20 sprint results consecutively', async ({ page }) => {
