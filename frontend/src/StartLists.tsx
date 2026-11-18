@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react'
+import {useEffect, useRef, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
@@ -20,6 +20,8 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
   const [category, setCategory] = useState(params.get('category') ?? '')
+  const selection = useRef({discipline, category})
+  useEffect(() => {selection.current = {discipline, category}}, [discipline, category])
   useEffect(() => {
     if (!fixedCompetition) return
     const [route, query = ''] = window.location.hash.slice(1).split('?')
@@ -30,6 +32,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     window.dispatchEvent(new Event('workspace-filter-change'))
   }, [fixedCompetition, discipline, category])
   const [competitions, setCompetitions] = useState<Competition[]>([])
+  useEffect(() => {if (!fixedCompetition) document.title = [t('navigation.startLists'), competitions.find(c => String(c.id) === competition)?.title, 'RaftScore'].filter(Boolean).join(' — ')}, [fixedCompetition, competition, competitions, t])
   const [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [crews, setCrews] = useState<Crew[]>([])
@@ -56,7 +59,15 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     if (!competition) return
     let active = true
     Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`), readOnly ? Promise.resolve([] as Crew[]) : apiRequest<Crew[]>(`/api/competitions/${competition}/entries/private`)])
-      .then(([ds, cs, entries]) => {if (active) {setDisciplines(ds); setCategories(cs); setCrews(entries)}})
+      .then(([ds, cs, entries]) => {
+        if (!active) return
+        setDisciplines(ds); setCategories(cs); setCrews(entries)
+        const chosen = ds.find(d => String(d.id) === selection.current.discipline) ?? (ds.length === 1 ? ds[0] : undefined)
+        const options = chosen ? cs.filter(c => chosen.categoryIds.includes(c.id)) : cs
+        const validCategory = options.some(c => String(c.id) === selection.current.category)
+        setDiscipline(chosen ? String(chosen.id) : '')
+        setCategory(validCategory ? selection.current.category : chosen && options.length === 1 ? String(options[0].id) : '')
+      })
       .catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
   }, [competition, readOnly])
@@ -118,11 +129,11 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     catch (error) {setError(apiErrorKey(error))} finally {setBusy(false)}
   }
   const selected = disciplines.find(d => String(d.id) === discipline)
-  return <Box sx={{display: 'grid', gap: 2, mt: 2}}>
+  return <Box sx={{display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 2, mt: 2}}>
     {!fixedCompetition && <TextField select disabled={busy || !!fixedCompetition} label={t('startList.competition')} value={competition} onChange={e => {setManualOrder(null); setTiming(null); setCompetition(e.target.value); setDiscipline(''); setCategory(''); setList(null); setDisciplines([]); setCategories([]); setCrews([])}}>
       <MenuItem value="">—</MenuItem>
       {competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
-    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setTiming(null); setDiscipline(e.target.value); if (!disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setList(null)}}>
+    {competition && <TextField select disabled={busy} label={t('startList.discipline')} value={discipline} onChange={e => {setManualOrder(null); setTiming(null); setDiscipline(e.target.value); const options = categories.filter(c => disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(c.id)); if (!options.some(c => String(c.id) === category)) setCategory(options.length === 1 ? String(options[0].id) : ''); setList(null)}}>
       <MenuItem value="">—</MenuItem>
       {disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>
     }
@@ -133,7 +144,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     {error && <Typography role="alert">{t(error === 'invalid' ? 'startList.invalid' : error as 'apiError.network')}</Typography>}
     {list && selectedCompetition && <>
       {list.locked && <Typography role="status">{t('startList.locked')}</Typography>}
-      {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box component="table" className="start-list-table">
+      {!list.id ? <Typography>{t('startList.empty')}</Typography> : <Box sx={{overflowX: 'auto', minWidth: 0}}><Box component="table" className="start-list-table">
         <thead><tr><th>{t('startList.position')}</th>
           <th>{t('startList.number')}</th>
           <th>{t('startList.crew')}</th>
@@ -144,7 +155,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
           <td>{slot.crewName}</td>
           <td>{categories.find(c => String(c.id) === category)?.displayName}</td>
           <td>{slot.plannedTime ? formatDate(new Date(slot.plannedTime), locale, zone ?? 'UTC', {dateStyle: 'medium', timeStyle: 'medium'}) : '—'}</td></tr>)}</tbody>
-      </Box>}
+      </Box></Box>}
       {!readOnly && <>
         {list.locked && canClear && <Button disabled={busy} onClick={() => void clear()}>{t('startList.clear')}</Button>}
         <TextField select label={t('startList.mode')} value={mode} disabled={busy || list.locked} onChange={e => setMode(e.target.value)}>

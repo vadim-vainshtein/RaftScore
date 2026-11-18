@@ -133,7 +133,10 @@
       "CREATED": "Preparation",
       "STARTED": "Started",
       "COMPLETED": "Completed"
-    }
+    },
+    "startNamed": "Start {{name}}",
+    "partialSave": "Discipline settings were saved, but the points table change could not be confirmed. Review the current discipline before trying again.",
+    "partialSaveReload": "Discipline settings were saved, but the points table change could not be confirmed and the list could not be refreshed. Reload the page before continuing."
   },
   "competition": {
     "title": "Title",
@@ -327,7 +330,8 @@
     "showFilters": "Show filters",
     "fullscreen": "Toggle fullscreen",
     "appliedTiebreak": "Applied tiebreak discipline",
-    "updatedAt": "Updated: {{time}}"
+    "updatedAt": "Updated: {{time}}",
+    "exitFullscreen": "Exit fullscreen"
   },
   "parallel": {
     "slot": "Position {{number}}",

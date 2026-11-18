@@ -20,6 +20,7 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
   const [tables, setTables] = useState<{id: number, name: string | null}[]>([])
   const [categories, setCategories] = useState<Category[]>([]), [items, setItems] = useState<Discipline[]>([])
   const [draft, setDraft] = useState<Draft | null>(null), [revision, setRevision] = useState(0)
+  const [pointsDraft, setPointsDraft] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState('')
   const base = `/api/competitions/${competition}/disciplines`
   useEffect(() => { let active = true; const load = async () => {
@@ -41,12 +42,36 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
     return `#/workspace/${fixedCompetition}/${section}?${params}`
   }
   const save = async (event: FormEvent) => {
-    event.preventDefault(); if (!draft || busy) return
+    event.preventDefault()
+    if (!draft || busy) return
+    if (draft.editing?.resultsEntered && pointsDraft !== String(draft.editing.pointsTableId ?? '') && !window.confirm(t('discipline.confirmPoints'))) return
     setBusy(true); setError('')
     try {
       const {editing, ...form} = draft
       delete (form as Partial<Discipline>).status
-      await csrfRequest(editing ? `${base}/${editing.id}/configuration` : base, editing ? 'PUT' : 'POST', {...form, ...(editing ? {version: editing.version} : {})})
+      const saved = await csrfRequest<Discipline>(editing ? `${base}/${editing.id}/configuration` : base, editing ? 'PUT' : 'POST', {...form, ...(editing ? {version: editing.version} : {})})
+      if (editing && pointsDraft !== String(editing.pointsTableId ?? '')) {
+        setDraft({...draft, editing: saved})
+        const isCatalog = pointsDraft.startsWith('catalog:')
+        try {
+          await csrfRequest(isCatalog ? `${base}/${editing.id}/points-catalog` : `${base}/${editing.id}`, 'PUT', isCatalog
+            ? {catalogId: Number(pointsDraft.slice(8)), version: saved.version}
+            : {displayOrder: saved.displayOrder, pointsTableId: pointsDraft ? Number(pointsDraft) : null, version: saved.version})
+        } catch {
+          // The second request may have reached the server despite an error response.
+          // Reload before enabling further actions, including after the editor closes.
+          try {
+            setItems(await apiRequest<Discipline[]>(base))
+            setError('discipline.partialSave')
+          } catch {
+            setItems([])
+            setError('discipline.partialSaveReload')
+          }
+          setDraft(null)
+          onReadinessChange?.()
+          return
+        }
+      }
       setDraft(null); setRevision(v => v + 1); onReadinessChange?.()
     } catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
   }
@@ -55,20 +80,6 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
     setBusy(true); setError(''); onDeletionStateChange?.(true)
     try {await csrfRequest(base + '/' + item.id, 'DELETE', {version: item.version}); setRevision(v => v + 1); onReadinessChange?.(); window.dispatchEvent(new Event('discipline-status-change')); await onDeleted?.()}
     catch (e) {setError(apiErrorKey(e))} finally {setBusy(false); onDeletionStateChange?.(false)}
-  }
-  const setPoints = async (item: Discipline, value: string) => {
-    if (value.startsWith('catalog:')) {
-      if (item.resultsEntered && !window.confirm(t('discipline.confirmPoints'))) return
-      setBusy(true); setError('')
-      try {await csrfRequest(`${base}/${item.id}/points-catalog`, 'PUT', {catalogId: Number(value.slice(8)), version: item.version}); setRevision(v => v + 1)}
-      catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}
-      return
-    }
-    const selected = value ? Number(value) : null
-    if (selected === item.pointsTableId || (item.resultsEntered && !window.confirm(t('discipline.confirmPoints')))) return
-    setBusy(true); setError('')
-    try { await csrfRequest(`${base}/${item.id}`, 'PUT', {displayOrder: item.displayOrder, pointsTableId: selected, version: item.version}); setRevision(v => v + 1) }
-    catch (e) { setError(apiErrorKey(e)) } finally {setBusy(false)}
   }
   const changeStatus = async (item: Discipline, status: 'STARTED' | 'COMPLETED') => {
     setBusy(true); setError('')
@@ -80,8 +91,9 @@ export default function Disciplines({readOnly, fixedCompetition, onReadinessChan
     {error && <Typography role="alert">{t(error as 'apiError.network')}</Typography>}
     {competition && <>
       {!readOnly && compositionEditing && <Button disabled={busy} onClick={() => setDraft(blank())}>{t('discipline.create')}</Button>}
-      {items.map(item => <Box key={item.id}><Typography>{item.displayOrder} — {item.name || t(`discipline.types.${item.type}`)} — {item.categoryIds.map(id => categories.find(c => c.id === id)?.displayName).filter(Boolean).join(', ')} — {t(item.resultsEntered ? 'discipline.resultsEntered' : 'discipline.noResults')} — {t(`discipline.states.${item.status}`)}{item.type !== 'PARALLEL_SPRINT' && <> — {t('discipline.attemptCount')}: {item.type === 'SLALOM' ? item.attemptCount ?? '—' : 1}</>}</Typography>{!readOnly && item.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => void changeStatus(item, item.status === 'CREATED' ? 'STARTED' : 'COMPLETED')}>{t(item.status === 'CREATED' ? 'discipline.start' : 'discipline.complete')}</Button>}<Button component="a" href={disciplineLink(item, 'start-lists')}>{t('navigation.startLists')}</Button><Button component="a" href={disciplineLink(item, 'results')}>{t('navigation.results')}</Button>{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type !== 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'result-grid')}>{t('navigation.resultGrid')}</Button>}{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type === 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'parallel-sprint')}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <TextField select size="small" label={t('discipline.points')} value={item.pointsTableId ?? ''} disabled={busy || !!draft} onChange={e => void setPoints(item, String(e.target.value))}><MenuItem value="">{t('discipline.noPoints')}</MenuItem>{tables.map(table => <MenuItem key={table.id} value={table.id}>{table.name || `#${table.id}`}</MenuItem>)}{[...catalog].sort((a, b) => Number(b.disciplineType === item.type) - Number(a.disciplineType === item.type) || a.name.localeCompare(b.name)).map(table => <MenuItem key={`catalog:${table.id}`} value={`catalog:${table.id}`}>{table.name}{catalog.filter(x => x.name === table.name && x.disciplineType === table.disciplineType).length > 1 ? ` #${table.id}` : ''} ({t(`discipline.types.${table.disciplineType}` as 'discipline.types.SPRINT')})</MenuItem>)}</TextField>}{!readOnly && compositionEditing && <Button disabled={busy} onClick={() => setDraft({...item, editing: item})}>{t('discipline.edit')}</Button>}{!readOnly && compositionEditing && (competitionStatus ?? competitions.find(c => String(c.id) === competition)?.status ?? competitions.find(c => String(c.id) === competition)?.state) === 'CREATED' && item.status === 'CREATED' && <Button disabled={busy || !!draft} onClick={() => void remove(item)}>{t('discipline.delete')}</Button>}</Box>)}
+      {items.map(item => <Box key={item.id}><Box sx={{display: 'flex', gap: 1, alignItems: 'baseline', flexWrap: 'wrap'}}><Typography component="h2" variant="h6">{item.name || t(`discipline.types.${item.type}`)}</Typography><Typography>{t(`discipline.states.${item.status}`)}</Typography></Box><Typography>{item.categoryIds.map(id => categories.find(c => c.id === id)?.displayName).filter(Boolean).join(', ')}{item.type !== 'PARALLEL_SPRINT' && <> · {t('discipline.attemptCount')}: {item.type === 'SLALOM' ? item.attemptCount ?? '—' : 1}</>}</Typography><Typography>{t(item.resultsEntered ? 'discipline.resultsEntered' : 'discipline.noResults')}</Typography>{!readOnly && item.status !== 'COMPLETED' && <Button disabled={busy} onClick={() => void changeStatus(item, item.status === 'CREATED' ? 'STARTED' : 'COMPLETED')}>{item.status === 'CREATED' ? t('discipline.startNamed', {name: item.name || t(`discipline.types.${item.type}`)}) : t('discipline.complete')}</Button>}<Button component="a" href={disciplineLink(item, 'start-lists')}>{t('navigation.startLists')}</Button><Button component="a" href={disciplineLink(item, 'results')}>{t('navigation.results')}</Button>{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type !== 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'result-grid')}>{t('navigation.resultGrid')}</Button>}{!readOnly && scoringAllowed && item.status === 'STARTED' && item.type === 'PARALLEL_SPRINT' && <Button component="a" href={disciplineLink(item, 'parallel-sprint')}>{t('navigation.parallelSprint')}</Button>}{!readOnly && compositionEditing && <Button disabled={busy} onClick={() => {setPointsDraft(String(item.pointsTableId ?? '')); setDraft({...item, editing: item})}}>{t('discipline.edit')}</Button>}{!readOnly && compositionEditing && (competitionStatus ?? competitions.find(c => String(c.id) === competition)?.status ?? competitions.find(c => String(c.id) === competition)?.state) === 'CREATED' && item.status === 'CREATED' && <Button disabled={busy || !!draft} onClick={() => void remove(item)}>{t('discipline.delete')}</Button>}</Box>)}
       {draft && <Box component="form" onSubmit={save} sx={{display: 'grid', gap: 2, maxWidth: 500}}>
+        {draft.editing && <TextField select size="small" label={t('discipline.points')} value={pointsDraft} disabled={busy} onChange={e => setPointsDraft(String(e.target.value))}><MenuItem value="">{t('discipline.noPoints')}</MenuItem>{tables.map(table => <MenuItem key={table.id} value={table.id}>{table.name || `#${table.id}`}</MenuItem>)}{[...catalog].sort((a, b) => Number(b.disciplineType === draft.editing!.type) - Number(a.disciplineType === draft.editing!.type) || a.name.localeCompare(b.name)).map(table => <MenuItem key={`catalog:${table.id}`} value={`catalog:${table.id}`}>{table.name}{catalog.filter(x => x.name === table.name && x.disciplineType === table.disciplineType).length > 1 ? ` #${table.id}` : ''} ({t(`discipline.types.${table.disciplineType}` as 'discipline.types.SPRINT')})</MenuItem>)}</TextField>}
         <TextField label={t('discipline.name')} value={draft.name} onChange={e => setDraft({...draft, name: e.target.value})}/>
         <TextField select disabled={!!draft.editing} label={t('discipline.type')} value={draft.type} onChange={e => {const type = e.target.value as DisciplineType; setDraft({...draft, type, gateCount: type === 'SLALOM' ? 1 : null, attemptCount: type === 'SLALOM' ? 2 : null, qualificationDisciplineId: null})}}>{types.map(type => <MenuItem key={type} value={type}>{t(`discipline.types.${type}`)}</MenuItem>)}</TextField>
         <TextField required type="number" label={t('discipline.order')} value={draft.displayOrder} slotProps={{htmlInput: {min: 0, step: 1}}} onChange={e => setDraft({...draft, displayOrder: Number(e.target.value)})}/>

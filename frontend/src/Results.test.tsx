@@ -109,3 +109,11 @@ test('shows a compact desktop protocol table with details', async () => {
     expect(screen.getAllByText('Attempt and gate details')).toHaveLength(2)
   } finally {vi.unstubAllGlobals()}
 })
+
+test('keeps result context visible when filters are hidden', async () => {
+  window.location.hash = '#/results?competition=1&discipline=3&category=2'
+  render(<Results readOnly/>)
+  expect(await screen.findByText('Race · Sprint · R4')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Hide filters'}))
+  expect(screen.getByText('Race · Sprint · R4')).toBeInTheDocument()
+})
