@@ -1,6 +1,7 @@
 package kz.vainshtein.raftscore.auth.controllers;
 
 import kz.vainshtein.raftscore.auth.services.PasswordChangeService;
+import kz.vainshtein.raftscore.api.ApiError;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,11 +18,11 @@ class PasswordChangeController {
     private final PasswordChangeService passwordChangeService;
 
     @PutMapping("/api/auth/password")
-    ResponseEntity<Void> changePassword(Authentication authentication, @RequestBody PasswordChangeRequest request) {
+    ResponseEntity<?> changePassword(Authentication authentication, @RequestBody PasswordChangeRequest request) {
         try {
             return passwordChangeService.change(authentication.getName(), request.currentPassword(), request.newPassword())
                     ? ResponseEntity.noContent().build()
-                    : ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+                    : ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(ApiError.of("auth.current_password_invalid"));
         } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().build();
         }

@@ -135,7 +135,12 @@
       "COMPLETED": "Completed"
     },
     "startNamed": "Start discipline “{{name}}”",
-    "startTypes": {"SPRINT": "Start sprint", "PARALLEL_SPRINT": "Start parallel sprint", "SLALOM": "Start slalom", "LONG_RACE": "Start long race"},
+    "startTypes": {
+      "SPRINT": "Start sprint",
+      "PARALLEL_SPRINT": "Start parallel sprint",
+      "SLALOM": "Start slalom",
+      "LONG_RACE": "Start long race"
+    },
     "partialSave": "Discipline settings were saved, but the points table change could not be confirmed. Review the current discipline before trying again.",
     "partialSaveReload": "Discipline settings were saved, but the points table change could not be confirmed and the list could not be refreshed. Reload the page before continuing."
   },
@@ -435,5 +440,20 @@
     "create": "Create table",
     "finishEditing": "Save or cancel the points table edit before continuing",
     "snapshot": "saved snapshot"
+  },
+  "users": {
+    "username": "Username",
+    "initialPassword": "Initial password",
+    "newPassword": "New password",
+    "currentPassword": "Current password",
+    "create": "Create viewer",
+    "enabled": "Active",
+    "blocked": "Blocked",
+    "reset": "Set password",
+    "block": "Block access",
+    "changeOwn": "Change password",
+    "cancel": "Cancel",
+    "save": "Save",
+    "currentPasswordInvalid": "Current password was not accepted."
   }
 }

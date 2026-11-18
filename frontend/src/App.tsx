@@ -10,6 +10,8 @@ import StartLists from './StartLists'
 import ResultGrid from './ResultGrid'
 import Results from './Results'
 import Backups from './Backups'
+import Users from './Users'
+import ChangePassword from './ChangePassword'
 import Competitions from './Competitions'
 import type {Draft} from './Categories'
 import {useTranslation} from 'react-i18next'
@@ -253,7 +255,7 @@ function Shell({locale}: {locale: Locale}) {
         {activeRoute?.path === '/workspace' && workspaceCompetition && workspaceCompetition.id === workspaceId && <Typography variant="body2" sx={{overflowWrap: 'anywhere'}}>{workspaceCompetition.title}</Typography>}
       </Toolbar>
       <List>
-        {(activeRoute?.path === '/workspace' ? [{path: `/workspace/${workspaceId}${workspaceQuery}`, label: 'workspace.overview', readOnly: true}, ...['crews', 'disciplines', 'start-lists', 'results'].map((section, index) => ({path: `/workspace/${workspaceId}/${section}${workspaceQuery}`, label: ['navigation.crews', 'navigation.disciplines', 'navigation.startLists', 'navigation.results'][index], readOnly: true})), ...workspaceDisciplines.filter(d => principal.role === 'FULL_ACCESS' && workspaceLoadedId === workspaceId && workspaceCompetitionStatus === 'STARTED' && d.status === 'STARTED').map(d => ({path: disciplinePath(d), label: d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT'), readOnly: true, literal: true})), {path: '/competitions', label: 'competition.back', readOnly: true}] : routes).filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && route.path !== '/users' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
+        {(activeRoute?.path === '/workspace' ? [{path: `/workspace/${workspaceId}${workspaceQuery}`, label: 'workspace.overview', readOnly: true}, ...['crews', 'disciplines', 'start-lists', 'results'].map((section, index) => ({path: `/workspace/${workspaceId}/${section}${workspaceQuery}`, label: ['navigation.crews', 'navigation.disciplines', 'navigation.startLists', 'navigation.results'][index], readOnly: true})), ...workspaceDisciplines.filter(d => principal.role === 'FULL_ACCESS' && workspaceLoadedId === workspaceId && workspaceCompetitionStatus === 'STARTED' && d.status === 'STARTED').map(d => ({path: disciplinePath(d), label: d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT'), readOnly: true, literal: true})), {path: '/competitions', label: 'competition.back', readOnly: true}] : routes).filter(route => route.path !== '/workspace' && route.path !== '/result-grid' && (principal.role !== 'READ_ONLY' || route.readOnly)).map(route => (
           <ListItem key={route.path} disablePadding>
           <ListItemButton
             component="a"
@@ -288,6 +290,7 @@ function Shell({locale}: {locale: Locale}) {
           <Box sx={{flexGrow: 1}}/>
           <Typography>{auth(`roles.${principal.role}`)}</Typography><Box component="details" sx={{position: 'relative', '& summary': {maxWidth: {xs: 110, md: 240}, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}}><summary title={principal.username}>{principal.username}</summary><Box sx={{position: 'absolute', right: 0, top: '100%', p: 2, display: 'grid', gap: 1, minWidth: 180, backgroundColor: '#17383b', boxShadow: 4}}>
 
+          <ChangePassword/>
           <Button color="inherit" disabled={busy} onClick={logout}>{auth('logout')}</Button>
           <TextField select size="small" label={t('app.language')} value={locale} onChange={event => changeLanguage(event.target.value)} sx={{minWidth: 120, backgroundColor: 'background.paper', borderRadius: 1}}>
             {Object.entries(locales).map(([code, config]) => <MenuItem key={code} value={code} lang={code}>{config.autonym}</MenuItem>)}
@@ -304,7 +307,7 @@ function Shell({locale}: {locale: Locale}) {
         <Toolbar sx={{py: 1}}/>
         {activeRoute?.path !== '/workspace' && <Typography component="h1" variant="h4">{title}</Typography>}
         {error && <Typography role="alert">{error.kind === 'auth' ? auth(error.key) : t(error.key)}</Typography>}
-        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={`${visiblePath}:${navigationRevision}`} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions key={visiblePath} readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/points-tables' && principal.role === 'FULL_ACCESS' ? <PointsCatalog/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
+        {activeRoute?.path === '/workspace' ? <CompetitionWorkspace key={`${visiblePath}:${navigationRevision}`} path={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : (activeRoute?.path === '/competitions' || visiblePath === '/') ? <Competitions key={visiblePath} readOnly={principal.role === 'READ_ONLY'} username={principal.username}/> : activeRoute?.path === '/start-lists' ? <StartLists key={visiblePath} readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/results' ? <Results key={visiblePath} readOnly/> : activeRoute?.path === '/result-grid' ? <ResultGrid key={visiblePath}/> : activeRoute?.path === '/crews' ? <Crews readOnly={principal.role === 'READ_ONLY'}/> : activeRoute?.path === '/users' && principal.role === 'FULL_ACCESS' ? <Users/> : activeRoute?.path === '/backups' && principal.role === 'FULL_ACCESS' ? <Backups/> : activeRoute?.path === '/points-tables' && principal.role === 'FULL_ACCESS' ? <PointsCatalog/> : activeRoute?.path === '/categories' && principal.role === 'FULL_ACCESS' ? <Categories initialDraft={categoryDraft?.username === principal.username ? categoryDraft.draft : null} onDraft={saveDraft}/> : <Typography sx={{mt: 2}}>{activeRoute || visiblePath === '/' ? t('placeholder.unavailable') : t('placeholder.notFoundDescription')}</Typography>}
       </Box>
     </Box>
   )

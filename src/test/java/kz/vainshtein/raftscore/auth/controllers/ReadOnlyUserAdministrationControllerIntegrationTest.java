@@ -72,6 +72,17 @@ class ReadOnlyUserAdministrationControllerIntegrationTest extends PostgreSqlInte
         assertThat(createdUser.isEnabled()).isTrue();
         assertThat(passwordHashingService.matches("initial-password", createdUser.getPasswordHash())).isTrue();
 
+        userRepository.saveAndFlush(User.builder().username("full-access-administration")
+                .passwordHash(passwordHashingService.hash("admin-secret"))
+                .role(UserRole.FULL_ACCESS).enabled(true).build());
+        var listing = mockMvc.perform(get("/api/users").with(fullAccessUser()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat((java.util.List<String>) JsonPath.read(listing, "$[*].username"))
+                .contains(username, "full-access-administration");
+        assertThat((java.util.List<String>) JsonPath.read(listing, "$[*].role"))
+                .contains("READ_ONLY", "FULL_ACCESS");
+        assertThat(listing).doesNotContain("passwordHash", "initial-password", "admin-secret");
+
         mockMvc.perform(put("/api/users/{id}/password", createdUser.getId())
                         .with(fullAccessUser())
                         .with(SecurityMockMvcRequestPostProcessors.csrf())
@@ -92,6 +103,8 @@ class ReadOnlyUserAdministrationControllerIntegrationTest extends PostgreSqlInte
     @Test
     void readOnlyUserCannotAdministerUsers() throws Exception {
         var readOnlyUser = SecurityMockMvcRequestPostProcessors.user("reader").roles("READ_ONLY");
+
+        mockMvc.perform(get("/api/users").with(readOnlyUser)).andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/users")
                         .with(readOnlyUser)

@@ -39,6 +39,8 @@ export default function Results({readOnly, fixedCompetition}: {readOnly: boolean
   const [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [rows, setRows] = useState<Result[] | null>(null)
   const [error, setError] = useState<ApiErrorKey | 'results.error' | null>(null)
+  const [resultError, setResultError] = useState<ApiErrorKey | null>(null)
+  const [listError, setListError] = useState<ApiErrorKey | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
   const [busy, setBusy] = useState(false)
@@ -70,46 +72,68 @@ export default function Results({readOnly, fixedCompetition}: {readOnly: boolean
   useEffect(() => {
     if (!competition || !category) return
     let active = true
-    let pending = false
+    const controller = new AbortController()
+    let resultsPending = false
+    let listsPending = false
+    let latestRows: Result[] | null = null
+    let latestLists: {id: number, list: {slots: {crewId: number}[]}}[] | null = null
     const path = discipline ? `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}/results` : `/api/competitions/${competition}/categories/${category}/standings`
-    const load = async () => {
-      if (pending) return
-      pending = true
+    const updateIncomplete = () => {
+      if (!active || !latestRows || !latestLists) return
+      const rows = latestRows
+      setIncomplete(latestLists.some(({id, list}) => list.slots.some(slot => !rows.some(row => row.crewId === slot.crewId && (discipline || row.disciplines?.some(part => part.disciplineId === id))))))
+    }
+    const loadResults = async () => {
+      if (resultsPending) return
+      resultsPending = true
       try {
-        const data = await apiRequest<Result[]>(path)
-        if (active) {setRows(data); setUpdatedAt(new Date()); setError(null)}
+        const data = await apiRequest<Result[]>(path, {signal: controller.signal})
+        if (active) {latestRows = data; setRows(data); setUpdatedAt(new Date()); setResultError(null); updateIncomplete()}
+      } catch (e) {if (active) setResultError(apiErrorKey(e))} finally {resultsPending = false}
+    }
+    const loadLists = async () => {
+      if (listsPending) return
+      listsPending = true
+      try {
         const scoped = disciplines.filter(d => d.categoryIds.includes(Number(category)) && (!discipline || String(d.id) === discipline))
-        const lists = await Promise.all(scoped.map(async d => {
+        const settled = await Promise.allSettled(scoped.map(async d => {
           const base = `/api/competitions/${competition}/disciplines/${d.id}/categories/${category}`
           if (d.type === 'PARALLEL_SPRINT') {
-            const bracket = await apiRequest<{heats: {round: number, first: {id: number} | null, second: {id: number} | null}[]}>(`${base}/bracket`)
+            const bracket = await apiRequest<{heats: {round: number, first: {id: number} | null, second: {id: number} | null}[]}>(`${base}/bracket`, {signal: controller.signal})
             const slots = bracket.heats.filter(h => h.round === 1).flatMap(h => [h.first, h.second]).filter(c => c !== null).map(c => ({crewId: c.id}))
             return {id: d.id, list: {slots}}
           }
-          return {id: d.id, list: await apiRequest<{slots: {crewId: number}[]}>(`${base}/start-list`)}
+          return {id: d.id, list: await apiRequest<{slots: {crewId: number}[]}>(`${base}/start-list`, {signal: controller.signal})}
         }))
-        const missing = lists.some(({id, list}) => list.slots.some(slot => !data.some(row => row.crewId === slot.crewId && (discipline || row.disciplines?.some(part => part.disciplineId === id)))))
-        if (active) setIncomplete(missing)
-      }
-      catch (e) {if (active) setError(apiErrorKey(e))} finally {pending = false}
+        const failure = settled.find(result => result.status === 'rejected')
+        if (failure?.status === 'rejected') throw failure.reason
+        if (active) {
+          setListError(null)
+          latestLists = settled.map(result => (result as PromiseFulfilledResult<{id: number, list: {slots: {crewId: number}[]}}>).value)
+          updateIncomplete()
+        }
+      } catch (e) {if (active) setListError(apiErrorKey(e))} finally {listsPending = false}
     }
-    void load()
-    const timer = readOnly ? window.setInterval(() => void load(), 10000) : undefined
-    return () => {active = false; window.clearInterval(timer)}
+    const load = () => {void loadResults(); void loadLists()}
+    load()
+    const timer = readOnly ? window.setInterval(load, 2000) : undefined
+    return () => {active = false; controller.abort(); window.clearInterval(timer)}
   }, [competition, category, discipline, readOnly, refresh, disciplines])
   const selected = disciplines.find(d => String(d.id) === discipline)
   return <Box ref={display} sx={{display: 'grid', alignContent: 'start', gap: 1, mt: 2, overflow: 'auto', '&:fullscreen': {backgroundColor: 'background.paper', p: 2}}}>
     <Box className="section-heading"><Typography component="h2" variant="h6">{t('workspace.protocol')}</Typography></Box>
     <Typography>{[competitions.find(c => String(c.id) === competition)?.title, discipline ? selected && (selected.name || t(`discipline.types.${selected.type}` as 'discipline.types.SPRINT')) : t('results.overall'), categories.find(c => String(c.id) === category)?.displayName].filter(Boolean).join(' · ')}</Typography>
     <Box><Button onClick={() => setFiltersVisible(value => !value)}>{t(filtersVisible ? 'results.hideFilters' : 'results.showFilters')}</Button><Button onClick={() => {if (document.fullscreenElement) void document.exitFullscreen(); else if (display.current?.requestFullscreen) void display.current.requestFullscreen().catch(() => setError('results.error'))}}>{t(fullscreen ? 'results.exitFullscreen' : 'results.fullscreen')}</Button></Box>
-    {filtersVisible && <Box className="filter-panel">{!fixedCompetition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} disabled={!!fixedCompetition} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(null)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
+    {filtersVisible && <Box className="filter-panel">{!fixedCompetition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} disabled={!!fixedCompetition} label={t('results.competition')} value={competition} onChange={e => {setCompetition(e.target.value); setCategory(''); setDiscipline(''); setRows(null); setCategories([]); setDisciplines([]); setIncomplete(false); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">—</MenuItem>{competitions.map(c => <MenuItem key={c.id} value={String(c.id)}>{c.title}</MenuItem>)}</TextField>}
     {!fixedCompetition && competition && <Button component="a" href={`#/workspace/${competition}`}>{t('competition.workspace')}</Button>}
-    {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
-    {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}</Box>}
+    {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
+    {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}</Box>}
     {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{updatedAt && <Typography component="span">{t('results.updatedAt', {time: new Intl.DateTimeFormat(locale, {timeStyle: 'medium'}).format(updatedAt)})}</Typography>}{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/workspace/${competition}/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`${fixedCompetition ? `#/workspace/${competition}/result-grid` : '#/result-grid'}?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
     {rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
     {error && <Typography role="alert">{t(error)}</Typography>}
-    {category && !rows && !error && <Typography>{t('results.loading')}</Typography>}
+    {resultError && <Typography role="alert">{t(resultError)}</Typography>}
+    {listError && <Typography role="alert">{t(listError)}</Typography>}
+    {category && !rows && !error && !resultError && <Typography>{t('results.loading')}</Typography>}
     {rows && rows.length === 0 && <Typography>{t('results.empty')}</Typography>}
     {desktop && rows && rows.length > 0 && <Box sx={{overflowX: 'auto'}}><Box component="table" sx={{width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums', '& th, & td': {textAlign: 'left', borderBottom: 1, borderColor: 'divider', p: 1}}}>
       <thead><tr><th>{t('results.place')}</th><th>{t('results.crew')}</th><th>{t('results.number')}</th><th>{t('results.region')}</th><th>{t('results.status')}</th><th>{t('results.time')}</th><th>{t('results.points')}</th><th>{t('results.attemptDetails')}</th></tr></thead>
