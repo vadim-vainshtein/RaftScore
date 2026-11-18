@@ -23,32 +23,41 @@ test('edits persisted slalom settings with the current version', async () => {
 test('read-only users see attempt counts without write controls', async () => {
   load([slalom, {...slalom, id: 4, name: 'Sprint', type: 'SPRINT', status: 'STARTED', attemptCount: null}, {...slalom, id: 5, name: 'Long race', type: 'LONG_RACE', status: 'STARTED', attemptCount: null}])
   render(<Disciplines readOnly/>); await selectCompetition()
-  expect(await screen.findByText(/Slalom.*Attempts: 2/)).toBeInTheDocument()
-  expect(screen.getByText(/Sprint.*Attempts: 1/)).toBeInTheDocument()
-  expect(screen.getByText(/Long race.*Attempts: 1/)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', {name: 'Slalom'})).toBeInTheDocument()
+  expect(screen.getByText(/Attempts: 2/)).toBeInTheDocument()
+  expect(screen.getAllByText(/Attempts: 1/)).toHaveLength(2)
   expect(screen.queryByRole('button', {name: 'Edit'})).not.toBeInTheDocument()
 })
-test('assigns points with the existing versioned endpoint', async () => {
+test('saves points after configuration using the updated version', async () => {
+  vi.mocked(csrfRequest).mockResolvedValueOnce({...slalom, version: 6})
   render(<Disciplines readOnly={false}/>); await selectCompetition()
-  fireEvent.mouseDown(await screen.findByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'PUT', {displayOrder: 1, pointsTableId: 8, version: 5}))
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  fireEvent.mouseDown(screen.getByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
+  expect(csrfRequest).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'PUT', {displayOrder: 1, pointsTableId: 8, version: 6}))
 })
-test('requires confirmation before changing points after results exist', async () => {
+test('cancels points changes and confirms them when results exist', async () => {
   load([{...slalom, resultsEntered: true}]); const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  vi.mocked(csrfRequest).mockResolvedValueOnce({...slalom, version: 6})
   render(<Disciplines readOnly={false}/>); await selectCompetition()
-  fireEvent.mouseDown(await screen.findByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
-  expect(confirm).toHaveBeenCalledWith('Changing the points table will recalculate existing results. Continue?'); expect(csrfRequest).not.toHaveBeenCalled()
-  await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
-  fireEvent.mouseDown(screen.getByRole('combobox', {name: 'Points table'})); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'PUT', expect.objectContaining({pointsTableId: 8, version: 5})))
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  fireEvent.mouseDown(screen.getByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Cancel'})); expect(csrfRequest).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
+  fireEvent.mouseDown(screen.getByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'})); expect(csrfRequest).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3', 'PUT', expect.objectContaining({pointsTableId: 8, version: 6})))
+  expect(confirm).toHaveBeenCalledTimes(2)
 })
 test('clears a qualification selection when categories make it incompatible', async () => {
   const sprint = {...slalom, id: 4, name: 'Qualifier', type: 'SPRINT', status: 'STARTED', attemptCount: null}
   const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', gateCount: null, attemptCount: null, qualificationDisciplineId: 4}
   load([sprint, parallel]); render(<Disciplines readOnly={false}/>); await selectCompetition()
-  const label = await screen.findByText(/Parallel —/)
+  const label = await screen.findByRole('heading', {name: 'Parallel'})
   expect(label).not.toHaveTextContent('Parallel sprint')
-  const row = label.parentElement!
+  const row = label.parentElement!.parentElement!
   fireEvent.click(within(row).getByRole('button', {name: 'Edit'}))
   expect(screen.getByLabelText('Qualification discipline')).toHaveTextContent('Qualifier')
   fireEvent.click(screen.getByLabelText('R6'))
@@ -62,11 +71,11 @@ test('contextual discipline links retain only compatible categories', async () =
   const parallel = {...slalom, id: 5, name: 'Parallel', type: 'PARALLEL_SPRINT', status: 'STARTED', categoryIds: [9]}
   load([slalom, parallel])
   render(<Disciplines fixedCompetition="1" readOnly={false} scoringAllowed/>)
-  const timedRow = (await screen.findByText(/Slalom —/)).parentElement!
+  const timedRow = (await screen.findByRole('heading', {name: 'Slalom'})).parentElement!.parentElement!
   expect(within(timedRow).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/workspace/1/start-lists?discipline=3&category=2')
   expect(within(timedRow).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/workspace/1/results?discipline=3&category=2')
   expect(within(timedRow).getByRole('link', {name: 'Result entry'})).toHaveAttribute('href', '#/workspace/1/result-grid?discipline=3&category=2')
-  const parallelRow = screen.getByText(/Parallel —/).parentElement!
+  const parallelRow = screen.getByRole('heading', {name: 'Parallel'}).parentElement!.parentElement!
   expect(within(parallelRow).getByRole('link', {name: 'Parallel sprint'})).toHaveAttribute('href', '#/workspace/1/parallel-sprint?discipline=5')
   window.location.hash = ''
 })
@@ -74,7 +83,7 @@ test('contextual discipline links retain only compatible categories', async () =
 test('global discipline links retain their established routes', async () => {
   render(<Disciplines readOnly={false} scoringAllowed/>)
   await selectCompetition()
-  const row = (await screen.findByText(/Slalom —/)).parentElement!
+  const row = (await screen.findByRole('heading', {name: 'Slalom'})).parentElement!.parentElement!
   expect(within(row).getByRole('link', {name: 'Start lists'})).toHaveAttribute('href', '#/start-lists?competition=1&discipline=3')
   expect(within(row).getByRole('link', {name: 'Results'})).toHaveAttribute('href', '#/results?competition=1&discipline=3')
   expect(within(row).getByRole('link', {name: 'Result entry'})).toHaveAttribute('href', '#/result-grid?competition=1&discipline=3')
@@ -85,7 +94,7 @@ test('starts a discipline with its current version and hides scoring until start
   render(<Disciplines readOnly={false}/>); await selectCompetition()
   expect(await screen.findByText(/Preparation/)).toBeInTheDocument()
   expect(screen.queryByRole('link', {name: 'Result entry'})).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', {name: 'Start discipline'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Start Slalom'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/status', 'PUT', {status: 'STARTED', version: 5}))
 })
 
@@ -99,6 +108,34 @@ test('confirms removal and sends the current discipline version', async () => {
 test('hides deletion after the competition starts', async () => {
   load([{...slalom, status: 'CREATED'}])
   render(<Disciplines readOnly={false} competitionStatus="STARTED"/>); await selectCompetition()
-  expect(await screen.findByText(/Slalom/)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', {name: 'Slalom'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument()
+})
+
+test('refreshes the discipline after a points assignment failure and uses the current version', async () => {
+  const saved = {...slalom, name: 'Updated slalom', version: 6}
+  vi.mocked(csrfRequest).mockResolvedValueOnce(saved).mockRejectedValueOnce(new Error('network'))
+  render(<Disciplines readOnly={false}/>); await selectCompetition()
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  fireEvent.change(screen.getByLabelText('Name'), {target: {value: saved.name}})
+  fireEvent.mouseDown(screen.getByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
+  load([saved])
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Discipline settings were saved, but the points table change could not be confirmed')
+  expect(screen.queryByRole('button', {name: 'Cancel'})).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', {name: 'Updated slalom'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Complete discipline'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/status', 'PUT', {status: 'COMPLETED', version: 6}))
+})
+
+test('hides stale disciplines if refreshing after a partial save fails', async () => {
+  vi.mocked(csrfRequest).mockResolvedValueOnce({...slalom, version: 6}).mockRejectedValueOnce(new Error('network'))
+  render(<Disciplines readOnly={false}/>); await selectCompetition()
+  fireEvent.click(await screen.findByRole('button', {name: 'Edit'}))
+  fireEvent.mouseDown(screen.getByLabelText('Points table')); fireEvent.click(await screen.findByRole('option', {name: 'Standard'}))
+  vi.mocked(apiRequest).mockRejectedValue(new Error('offline'))
+  fireEvent.click(screen.getByRole('button', {name: 'Save'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Reload the page before continuing')
+  expect(screen.queryByRole('heading', {name: 'Slalom'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Complete discipline'})).not.toBeInTheDocument()
 })

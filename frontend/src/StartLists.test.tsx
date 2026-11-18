@@ -135,3 +135,49 @@ test('resets timing when selecting another category and preserves it after a fai
   expect(screen.getByLabelText(/First start date/)).toHaveValue('2026-01-01')
   expect(screen.getByLabelText('Interval (seconds)')).toHaveValue(120)
 })
+
+test('automatically selects the only discipline and eligible category', async () => {
+  window.location.hash = '#/workspace/1/start-lists'
+  render(<StartLists fixedCompetition="1" readOnly/>)
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith(base))
+  expect(screen.getByLabelText('Discipline')).toHaveTextContent('Sprint')
+  expect(screen.getByLabelText('Category')).toHaveTextContent('R4')
+  expect(window.location.hash).toContain('discipline=3')
+  expect(window.location.hash).toContain('category=2')
+})
+
+test('preserves valid linked selections when multiple options exist', async () => {
+  window.location.hash = '#/workspace/1/start-lists?discipline=3&category=2'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async (path, options) => {
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', categoryIds: [2, 9]}, {id: 4, name: 'Slalom', categoryIds: [9]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 9, displayName: 'R6'}]
+    return original(path, options)
+  })
+  render(<StartLists fixedCompetition="1" readOnly/>)
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith(base))
+  expect(screen.getByLabelText('Discipline')).toHaveTextContent('Sprint')
+  expect(screen.getByLabelText('Category')).toHaveTextContent('R4')
+})
+
+test.each([
+  ['Sprint', 'R4', '2'],
+  ['Slalom', 'R6', '9'],
+])('retains a linked category until choosing %s, then applies compatibility', async (chosen, expectedCategory, expectedId) => {
+  window.location.hash = '#/workspace/1/start-lists?category=2'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async (path, options) => {
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', categoryIds: [2]}, {id: 4, name: 'Slalom', categoryIds: [9]}]
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}, {id: 9, displayName: 'R6'}]
+    if (path.endsWith('/categories/9/start-list')) return {id: null, locked: false, slots: []}
+    return original(path, options)
+  })
+  render(<StartLists fixedCompetition="1" readOnly/>)
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith('/api/competitions/1/categories'))
+  await screen.findByLabelText('Discipline')
+  expect(window.location.hash).toContain('category=2')
+  fireEvent.mouseDown(screen.getByLabelText('Discipline'))
+  fireEvent.click(await screen.findByRole('option', {name: chosen}))
+  await waitFor(() => expect(screen.getByLabelText('Category')).toHaveTextContent(expectedCategory))
+  expect(window.location.hash).toContain(`category=${expectedId}`)
+})

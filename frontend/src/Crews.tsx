@@ -37,6 +37,7 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
   const [competitions, setCompetitions] = useState<Competition[]>([]), [competition, setCompetition] = useState<Competition | null>(null)
+  useEffect(() => {if (!fixedCompetition) document.title = [t('navigation.crews'), competition?.title, 'RaftScore'].filter(Boolean).join(' — ')}, [fixedCompetition, competition?.title, t])
   const editable = !readOnly && canEdit && competition?.status !== 'COMPLETED'
   const [categories, setCategories] = useState<Category[]>([]), [requirements, setRequirements] = useState<Requirement[]>([]), [crews, setCrews] = useState<Summary[]>([])
   const [loadedCompetitionId, setLoadedCompetitionId] = useState<number | null>(null)

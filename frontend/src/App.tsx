@@ -137,6 +137,7 @@ function Shell({locale}: {locale: Locale}) {
     void i18n.changeLanguage(next)
   }
   const [path, setPath] = useState(window.location.hash.slice(1) || '/')
+  useEffect(() => {if (!principal) document.title = [auth('login'), 'RaftScore'].join(' — '); else if (!path.startsWith('/workspace/')) {const route = routes.find(item => path === item.path || path.startsWith(item.path + '?')); document.title = [route ? t(route.label) : t('navigation.competitions'), 'RaftScore'].join(' — ')}}, [path, t, principal, auth])
   const pathRef = useRef(path)
   const [menuOpen, setMenuOpen] = useState(false)
   const theme = useTheme()

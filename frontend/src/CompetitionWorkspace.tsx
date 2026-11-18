@@ -43,6 +43,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
     window.addEventListener('category-navigation', blockNavigation)
     return () => window.removeEventListener('category-navigation', blockNavigation)
   }, [completing])
+  useEffect(() => {const labels: Record<string, string> = {'crews': t('navigation.crews'), 'start-lists': t('navigation.startLists'), 'disciplines': t('navigation.disciplines'), 'results': t('navigation.results'), 'result-grid': t('navigation.resultGrid'), 'parallel-sprint': t('navigation.parallelSprint'), 'edit': t('competition.edit')}; const current = /^\/workspace\/\d+\/([^?]+)/.exec(path)?.[1]; document.title = [current ? labels[current] : t('workspace.overview'), competition?.title, 'RaftScore'].filter(Boolean).join(' — ')}, [path, competition?.title, t])
   if (error || !id) return <Typography role="alert">{t('competition.error')}</Typography>
   if (!competition) return null
   if (competition.status === 'COMPLETED' && path.includes('/result-grid')) {window.location.replace(`#/workspace/${id}/results${path.includes('?') ? '?' + path.split('?')[1] : ''}`); return null}
@@ -89,13 +90,14 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
     window.dispatchEvent(new CustomEvent('result-dirty-count', {detail}))
     if (!detail.busy) setCompletionDrafts(detail.count)
   }
-  return <Box sx={{display: 'grid', gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
+  return <Box sx={{display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     {!section ? <><Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
     <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>
     <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/workspace/${id}/edit${settingsParams.size ? '?' + settingsParams : ''}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={openCompletionDialog}>{t('competition.complete')}</Button>}</Box></> : <Typography component="h1" className="workspace-compact-heading" variant="h6">{[competition.title, competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' — ')}</Typography>}
+    {(!section || ['crews', 'start-lists', 'disciplines', 'parallel-sprint', 'edit'].includes(section)) && <Typography component="h2" variant="h6">{t(!section ? 'workspace.overview' : section === 'crews' ? 'navigation.crews' : section === 'start-lists' ? 'navigation.startLists' : section === 'disciplines' ? 'navigation.disciplines' : section === 'parallel-sprint' ? 'navigation.parallelSprint' : 'competition.edit')}</Typography>}
     {section === 'disciplines' && !readOnly && competition.status !== 'COMPLETED' && <Box><Button variant="outlined" component="a" href={`#/workspace/${id}/disciplines?${disciplineEditParams}`}>{t('competition.edit')}</Button></Box>}
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
-    <div inert={completing}>
+    <div inert={completing} style={{minWidth: 0}}>
       <fieldset disabled={completing} style={{border: 0, margin: 0, padding: 0, minWidth: 0}}>{body}</fieldset>
     </div>
     <Dialog open={completionDrafts !== null} onClose={() => setCompletionDrafts(null)} aria-labelledby="completion-title">
