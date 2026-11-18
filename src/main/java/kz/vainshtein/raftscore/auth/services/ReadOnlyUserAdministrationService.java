@@ -21,6 +21,14 @@ public class ReadOnlyUserAdministrationService {
     private final UserRepository userRepository;
     private final PasswordHashingService passwordHashingService;
 
+    @Transactional(readOnly = true)
+    public java.util.List<UserSummary> list() {
+        return userRepository.findAllByOrderByUsernameAsc().stream()
+                .map(user -> new UserSummary(user.getId(), user.getUsername(), user.getRole(), user.isEnabled())).toList();
+    }
+
+    public record UserSummary(Long id, String username, UserRole role, boolean enabled) {}
+
     @Transactional
     public Long create(CreateReadOnlyUserRequest request) {
         if (userRepository.findByUsername(request.username()).isPresent()) {

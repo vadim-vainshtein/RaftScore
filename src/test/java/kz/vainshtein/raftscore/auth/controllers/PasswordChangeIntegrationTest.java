@@ -74,12 +74,16 @@ class PasswordChangeIntegrationTest extends PostgreSqlIntegrationTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(put("/api/auth/password").session(session).contentType(MediaType.APPLICATION_JSON).content(valid))
                 .andExpect(status().isForbidden());
-        for (var body : new String[]{"{\"currentPassword\":\"wrong\",\"newPassword\":\"new\"}",
-                "{\"currentPassword\":\"old-password\",\"newPassword\":\" \"}",
+        var wrong = mvc.perform(put("/api/auth/password").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"wrong\",\"newPassword\":\"new\"}"))
+                .andExpect(status().isUnauthorized()).andReturn().getResponse().getContentAsString();
+        assertThat(wrong).contains("auth.current_password_invalid");
+        for (var body : new String[]{"{\"currentPassword\":\"old-password\",\"newPassword\":\" \"}",
                 "{\"currentPassword\":\"old-password\",\"newPassword\":\"" + "é".repeat(37) + "\"}"}) {
             mvc.perform(put("/api/auth/password").session(session).with(csrf())
                             .contentType(MediaType.APPLICATION_JSON).content(body))
-                    .andExpect(body.contains("wrong") ? status().isUnauthorized() : status().isBadRequest());
+                    .andExpect(status().isBadRequest());
         }
         assertThat(users.findByUsername("password-reader").orElseThrow().getPasswordHash()).isEqualTo(originalHash);
     }

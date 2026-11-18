@@ -33,8 +33,8 @@ test('keeps the last results when refresh fails', async () => {
   fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   await screen.findByText('1 — Crew A')
   vi.mocked(apiRequest).mockRejectedValue(new Error('offline'))
-  await act(async () => { (interval.mock.calls.find(call => call[1] === 10000)?.[0] as () => void)(); await Promise.resolve() })
-  await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  await act(async () => { (interval.mock.calls.find(call => call[1] === 2000)?.[0] as () => void)(); await Promise.resolve() })
+  await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0))
   expect(screen.getByText('1 — Crew A')).toBeInTheDocument()
 })
 
@@ -130,4 +130,59 @@ test('distinguishes no finish, zero-point finish, and competition disqualificati
   expect(await screen.findByText('Status: No eligible finish')).toBeInTheDocument()
   expect(screen.getByText('Status: Finished')).toBeInTheDocument()
   expect(screen.getByText('Status: Disqualified from competition')).toBeInTheDocument()
+})
+
+test('polls new results while a start list is delayed and compares it with the latest results', async () => {
+  window.location.hash = '#/results?competition=1&discipline=3&category=2'
+  const interval = vi.spyOn(window, 'setInterval')
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  let release!: (value: unknown) => void
+  const delayed = new Promise(resolve => {release = resolve})
+  let updated = false
+  vi.mocked(apiRequest).mockImplementation(async p => {
+    if (p.endsWith('/start-list')) return delayed
+    if (p === path) {
+      return [{crewId: updated ? 5 : 4, crewName: 'Crew A', regionOrClub: 'Club', startNumber: 1, place: 1, totalCentiseconds: updated ? 8001 : 7425, status: 'FINISHED', points: 100}]
+    }
+    return original(p)
+  })
+  render(<Results readOnly/>)
+  expect(await screen.findByText('Time: 01:14.25')).toBeInTheDocument()
+  await waitFor(() => expect(vi.mocked(apiRequest).mock.calls.filter(([p]) => p.endsWith('/start-list'))).toHaveLength(1))
+  const poll = interval.mock.calls.filter(call => call[1] === 2000).at(-1)?.[0] as () => void
+  updated = true
+  await act(async () => {poll(); await Promise.resolve()})
+  expect(await screen.findByText('Time: 01:20.01')).toBeInTheDocument()
+  await act(async () => {poll(); await Promise.resolve()})
+  expect(vi.mocked(apiRequest).mock.calls.filter(([p]) => p.endsWith('/start-list'))).toHaveLength(1)
+  await act(async () => {release({slots: [{crewId: 5}]}); await delayed})
+  expect(screen.getByText('Time: 01:20.01')).toBeInTheDocument()
+  expect(screen.queryByText(/Standings use available calculated results/)).not.toBeInTheDocument()
+})
+
+test('retains a failed start list warning after a later successful result and clears it only when the list recovers', async () => {
+  const interval = vi.spyOn(window, 'setInterval')
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  let release!: (value: unknown) => void
+  const delayedResult = new Promise(resolve => {release = resolve})
+  let listHealthy = false
+  vi.mocked(apiRequest).mockImplementation(async p => {
+    if (p.endsWith('/start-list')) {
+      if (!listHealthy) throw new Error('offline')
+      return {slots: [{crewId: 4}]}
+    }
+    if (p === path) return delayedResult
+    return original(p)
+  })
+  render(<Results readOnly/>)
+  fireEvent.mouseDown(await screen.findByLabelText('Category'))
+  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Connection failed')
+  await act(async () => {release([{crewId: 4, crewName: 'Crew A', startNumber: 1, place: 1, status: 'FINISHED', totalCentiseconds: 7425}]); await delayedResult})
+  expect(await screen.findByText('Time: 01:14.25')).toBeInTheDocument()
+  expect(screen.getByRole('alert')).toHaveTextContent('Connection failed')
+  listHealthy = true
+  const poll = interval.mock.calls.filter(call => call[1] === 2000).at(-1)?.[0] as () => void
+  await act(async () => {poll(); await Promise.resolve()})
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
 })

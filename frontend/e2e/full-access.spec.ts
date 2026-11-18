@@ -8,7 +8,7 @@ async function select(page: Page, label: string, option: string) {
 async function navigate(page: Page, label: string, touch: boolean) {
   if (touch) await page.getByRole('button', {name: 'Open navigation'}).click()
   const navigation = page.getByRole('navigation', {name: 'Main navigation'})
-  await expect(navigation.getByRole('link', {name: 'Users', exact: true})).toHaveCount(0)
+  await expect(navigation.getByRole('link', {name: 'Users', exact: true})).toBeVisible()
   await navigation.getByRole('link', {name: label, exact: true}).click()
 }
 
