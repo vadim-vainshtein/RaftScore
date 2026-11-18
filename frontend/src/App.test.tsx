@@ -469,3 +469,20 @@ test('refreshes workspace navigation after deleting a discipline', async () => {
   expect(within(nav).queryByRole('link', {name: 'Sprint to remove'})).not.toBeInTheDocument()
   vi.restoreAllMocks()
 })
+
+test.each(['save', 'cancel'])('edits within the workspace and returns to its overview on %s', async action => {
+  const details = {id: 1, version: 7, title: 'River race', startDate: '2026-04-01', endDate: '2026-04-02', location: 'River', timeZone: 'UTC', description: '', admissionConfirmationRequired: false, status: 'CREATED'}
+  vi.mocked(apiRequest).mockImplementation(async path => path === '/api/auth/principal' ? {username: 'admin', role: 'FULL_ACCESS'} : path === '/api/competitions/1' ? details : path.startsWith('/api/category-templates') ? {content: [], totalPages: 0} : [])
+  vi.mocked(csrfRequest).mockResolvedValue(details)
+  window.history.replaceState(null, '', '/#/workspace/1?discipline=3&category=2')
+  desktop = true
+  render(<App/>)
+  const edit = await screen.findByRole('link', {name: 'Edit'})
+  expect(edit).toHaveAttribute('href', '#/workspace/1/edit?discipline=3&category=2')
+  fireEvent.click(edit)
+  expect(await screen.findByLabelText(/Title/)).toHaveValue('River race')
+  expect(within(screen.getByRole('navigation', {name: 'Main navigation'})).getByRole('link', {name: 'Overview'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: action === 'save' ? 'Save' : 'Cancel'}))
+  await waitFor(() => expect(window.location.hash).toBe('#/workspace/1?discipline=3&category=2'))
+  if (action === 'save') expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1', 'PUT', expect.objectContaining({version: 7, title: 'River race'}))
+})
