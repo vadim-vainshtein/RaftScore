@@ -8,7 +8,6 @@ async function select(page: Page, label: string, option: string) {
 async function navigate(page: Page, label: string, touch: boolean) {
   if (touch) await page.getByRole('button', {name: 'Open navigation'}).click()
   const navigation = page.getByRole('navigation', {name: 'Main navigation'})
-  await expect(navigation.getByRole('link', {name: 'Users', exact: true})).toBeVisible()
   await navigation.getByRole('link', {name: label, exact: true}).click()
 }
 
@@ -58,6 +57,11 @@ for (const width of [1440, 360, 390]) {
       await page.getByLabel('Username').fill('e2e-admin')
       await page.getByLabel('Password').fill('e2e-password')
       await page.getByRole('button', {name: 'Sign in'}).click()
+      await expect(page.getByRole('heading', {name: 'Competitions', exact: true})).toBeVisible()
+      await navigate(page, 'Users', touch)
+      await expect(page.getByRole('heading', {name: 'Users', exact: true})).toBeVisible()
+      await expect(page.getByRole('button', {name: 'Create viewer', exact: true})).toBeVisible()
+      await navigate(page, 'Competitions', touch)
       const skip = page.getByRole('link', {name: /skip to .*content/i})
       await skip.focus()
       await skip.press('Enter')
