@@ -28,6 +28,8 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 class DisciplineConfigurationController {
     private final DisciplineRepository disciplines;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityPolicy eligibilityPolicy;
+    private final kz.vainshtein.raftscore.competition.CompletionCheck completionCheck;
     private final CompetitionRepository competitions;
     private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final CompetitionCategoryRepository categories;
@@ -120,6 +122,10 @@ class DisciplineConfigurationController {
         disciplines.flush();
     }
 
+    @ExceptionHandler(kz.vainshtein.raftscore.entry.services.CrewEligibilityService.CompletedDiscipline.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> completedDiscipline() {
+        return org.springframework.http.ResponseEntity.status(409).body(kz.vainshtein.raftscore.api.ApiError.of("crew_entry.completed_discipline"));
+    }
     @ExceptionHandler(DeleteBlocked.class)
     org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> deleteBlocked() {
         return org.springframework.http.ResponseEntity.status(409).body(kz.vainshtein.raftscore.api.ApiError.of("discipline.delete_blocked"));
@@ -140,6 +146,8 @@ class DisciplineConfigurationController {
         var discipline = disciplines.findForStartListUpdate(disciplineId)
                 .filter(d -> d.getCompetition().getId().equals(competitionId)).orElseThrow(DisciplineConfigurationController::notFound);
         if (discipline.getVersion() != request.version()) throw new OptimisticLockingFailureException("Stale discipline version");
+        if (request.status() == DisciplineStatus.COMPLETED && !completionCheck.discipline(discipline).isEmpty())
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Discipline has incomplete results");
         try { discipline.transitionTo(request.status()); }
         catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
         disciplines.flush();
@@ -171,6 +179,11 @@ class DisciplineConfigurationController {
             var config = slalom.findByDisciplineId(discipline.getId()).orElse(null);
             if (discipline.getType() != request.type() || !oldIds.equals(newIds) || (config != null && (!Integer.valueOf(config.getGateCount()).equals(request.gateCount()) || !Integer.valueOf(config.getAttemptCount()).equals(request.attemptCount()))))
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "configuration has recorded activity");
+        }
+        if (existing && discipline.getStatus() == DisciplineStatus.COMPLETED) {
+            var oldIds = discipline.getCategories().stream().map(CompetitionCategory::getId).collect(java.util.stream.Collectors.toSet());
+            if (selected.stream().anyMatch(category -> !oldIds.contains(category.getId()) && !eligibilityPolicy.eligibleIds(category.getId()).isEmpty()))
+                throw new kz.vainshtein.raftscore.entry.services.CrewEligibilityService.CompletedDiscipline();
         }
         discipline.setName(request.name()); discipline.setType(request.type()); discipline.setDisplayOrder(request.displayOrder());
         discipline.replaceCategories(selected); discipline.setQualificationDiscipline(qualification);

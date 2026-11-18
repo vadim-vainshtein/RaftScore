@@ -16,6 +16,18 @@ public class CrewEligibilityService {
     private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
     private final kz.vainshtein.raftscore.bracket.ParallelSprintProgressionService progression;
 
+    /** A newly eligible crew cannot be entered into an already closed discipline. */
+    public void requireNoNewEligibleCrew(CrewEntry entry, boolean wasEligible) {
+        if (wasEligible || !isEligible(entry)) return;
+        var closed = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM discipline_categories dc JOIN disciplines d ON d.id = dc.discipline_id
+                               WHERE dc.category_id = ? AND d.status = 'COMPLETED')
+                """, Boolean.class, entry.getCompetitionCategory().getId());
+        if (Boolean.TRUE.equals(closed)) throw new CompletedDiscipline();
+    }
+
+    public static class CompletedDiscipline extends RuntimeException { }
+
     public void requireNoRecordedResults(long crewId) {
         var recorded = jdbc.queryForObject("""
                 SELECT EXISTS (SELECT 1 FROM attempt_results WHERE crew_entry_id = ?)

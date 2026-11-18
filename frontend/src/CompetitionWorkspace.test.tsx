@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, expect, test, vi} from 'vitest'
 import CompetitionWorkspace from './CompetitionWorkspace'
 import {apiRequest, csrfRequest} from './api/client'
@@ -133,4 +133,83 @@ test('refreshes the competition version after deleting its tiebreak before start
   await waitFor(() => expect(screen.getByRole('button', {name: 'Start competition'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button', {name: 'Start competition'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/status', 'PUT', {status: 'STARTED', version: 1}))
+})
+
+test('shows missing results and prevents completion', async () => {
+  window.location.hash = '#/workspace/1'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/completion-issues')) return [{discipline: 'Sprint', category: 'Open', crew: 'River', code: 'missingAttempt', attempt: 1, round: null, heat: null}]
+    return []
+  })
+  vi.mocked(csrfRequest).mockClear()
+  render(<CompetitionWorkspace path="/workspace/1" readOnly={false}/> )
+  fireEvent.click(await screen.findByRole('button', {name: 'Complete competition'}))
+  expect(await screen.findByText(/Open — Sprint — River — Missing result for attempt 1/)).toBeInTheDocument()
+  expect(screen.getByRole('dialog').querySelector('button.MuiButton-contained')).toBeDisabled()
+  expect(csrfRequest).not.toHaveBeenCalled()
+})
+
+test('refreshes missing results after completion is rejected', async () => {
+  window.location.hash = '#/workspace/1'
+  let issueRequests = 0
+  let finishRefresh!: (value: unknown) => void
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/completion-issues')) {
+      if (++issueRequests === 1) return []
+      return new Promise(resolve => {finishRefresh = resolve})
+    }
+    return []
+  })
+  vi.mocked(csrfRequest).mockRejectedValue(new Error('409'))
+  render(<CompetitionWorkspace path="/workspace/1" readOnly={false}/> )
+  fireEvent.click(await screen.findByRole('button', {name: 'Complete competition'}))
+  const dialog = await screen.findByRole('dialog')
+  const complete = within(dialog).getByRole('button', {name: 'Complete competition'})
+  await waitFor(() => expect(complete).toBeEnabled())
+  fireEvent.click(complete)
+  await waitFor(() => expect(issueRequests).toBe(2))
+  expect(complete).toBeDisabled()
+  finishRefresh([{discipline: 'Sprint', category: 'Open', crew: 'River', code: 'missingAttempt', attempt: 1, round: null, heat: null}])
+  expect(await within(dialog).findByText(/Open — Sprint — River — Missing result for attempt 1/)).toBeInTheDocument()
+  expect(complete).toBeDisabled()
+})
+
+test('keeps completion disabled if refreshing issues fails', async () => {
+  window.location.hash = '#/workspace/1'
+  let issueRequests = 0
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/completion-issues')) {
+      if (++issueRequests === 1) return []
+      throw new Error('refresh failed')
+    }
+    return []
+  })
+  vi.mocked(csrfRequest).mockRejectedValue(new Error('409'))
+  render(<CompetitionWorkspace path="/workspace/1" readOnly={false}/> )
+  fireEvent.click(await screen.findByRole('button', {name: 'Complete competition'}))
+  const dialog = await screen.findByRole('dialog')
+  const complete = within(dialog).getByRole('button', {name: 'Complete competition'})
+  await waitFor(() => expect(complete).toBeEnabled())
+  fireEvent.click(complete)
+  await waitFor(() => expect(issueRequests).toBe(2))
+  await waitFor(() => expect(complete).toBeDisabled())
+})
+
+test.each([
+  ['noParticipatingCategories', 'No categories are entered in any discipline'],
+  ['noEligibleCrews', 'No eligible crews in participating categories'],
+])('explains why an empty competition cannot be completed: %s', async (code, message) => {
+  window.location.hash = '#/workspace/1'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'STARTED'}
+    if (path.endsWith('/completion-issues')) return [{discipline: null, category: null, crew: null, code, attempt: null, round: null, heat: null}]
+    return []
+  })
+  render(<CompetitionWorkspace path="/workspace/1" readOnly={false}/> )
+  fireEvent.click(await screen.findByRole('button', {name: 'Complete competition'}))
+  expect(await screen.findByText(message)).toBeInTheDocument()
+  expect(within(screen.getByRole('dialog')).getByRole('button', {name: 'Complete competition'})).toBeDisabled()
 })

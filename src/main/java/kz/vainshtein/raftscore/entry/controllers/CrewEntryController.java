@@ -194,18 +194,22 @@ class CrewEntryController {
         lifecycle.requireEditable(competitionId);
         entityManager.refresh(competition, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         if (!competition.isAdmissionConfirmationRequired()) throw new AdmissionNotRequired();
+        var wasEligible = eligibility.isEligible(entry);
         if (!request.admitted()) { eligibility.requireNoRecordedResults(entryId); eligibility.withdrawFromUnplayedBrackets(entryId); }
         var updated = entityManager.createNativeQuery("update crew_entries set admission_decision = :decision, version = version + 1 where id = :id and version = :version")
                 .setParameter("decision", request.admitted()).setParameter("id", entryId)
                 .setParameter("version", request.version().longValueExact()).executeUpdate();
         if (updated != 1) throw new OptimisticLockingFailureException("Stale entry version");
         entityManager.refresh(entry);
+        eligibility.requireNoNewEligibleCrew(entry, wasEligible);
         return EntryResponse.from(entry, memberships.findByCrewEntryIdOrderByPositionAsc(entryId), eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }
 
     @ExceptionHandler(AdmissionNotRequired.class)
     ResponseEntity<ApiError> admissionNotRequired() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.admission_not_required")); }
     private static class AdmissionNotRequired extends RuntimeException { }
+    @ExceptionHandler(CrewEligibilityService.CompletedDiscipline.class)
+    ResponseEntity<ApiError> completedDiscipline() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.completed_discipline")); }
     @ExceptionHandler(CrewEligibilityService.RecordedResults.class)
     ResponseEntity<ApiError> recordedResults() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.recorded_results")); }
     @Operation(summary = "Create a crew entry", description = "Requires FULL_ACCESS and a CSRF token.")
@@ -231,6 +235,7 @@ class CrewEntryController {
         var roster = replaceRoster(entry, request.roster());
         validateSelectedRepresentative(request.representativePosition(), request.representative(), roster);
         replaceAnswers(entry, request.requirementAnswers());
+        eligibility.requireNoNewEligibleCrew(entry, false);
         return ResponseEntity.created(URI.create("/api/competitions/" + competitionId + "/entries/" + entry.getId())).body(EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId())));
     }
 
@@ -247,6 +252,7 @@ class CrewEntryController {
         var entry = entries.findByIdAndCompetitionCategoryCompetitionId(entryId, competitionId).orElseThrow(EntryNotFound::new);
         lifecycle.requireEditable(competitionId);
         if (entry.getVersion() != request.version().longValueExact()) throw new OptimisticLockingFailureException("Stale entry version");
+        var wasEligible = eligibility.isEligible(entry);
         var roster = memberships.findByCrewEntryIdOrderByPositionAsc(entryId);
         validateRoster(request.roster() == null ? roster : request.roster(), entry.getCompetitionCategory().getCrewSize());
         var position = updatedRepresentativePosition(request, entry, roster);
@@ -267,6 +273,7 @@ class CrewEntryController {
             if (request.roster() != null) roster = replaceRoster(entry, request.roster());
             replaceAnswers(entry, request.requirementAnswers());
         }
+        eligibility.requireNoNewEligibleCrew(entry, wasEligible);
         if (!eligibility.isEligible(entry)) { eligibility.requireNoRecordedResults(entryId); eligibility.withdrawFromUnplayedBrackets(entryId); }
         if (request.representativePosition() != null) validateSelectedRepresentative(position, request.representative(), roster);
         return EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));

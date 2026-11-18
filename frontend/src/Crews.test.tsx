@@ -15,6 +15,14 @@ beforeEach(() => { vi.mocked(apiRequest).mockReset().mockImplementation(async pa
   return [detail]
 }); vi.mocked(csrfRequest).mockReset().mockResolvedValue({}) })
 afterEach(() => cleanup())
+test('explains why admission is blocked by a completed discipline', async () => {
+  vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {code: 'crew_entry.completed_discipline', parameters: {}}))
+  render(<Crews fixedCompetition="1"/>)
+  await screen.findByText(/7 — River/, {}, {timeout: 10000})
+  fireEvent.click(await screen.findByRole('button', {name: 'Admit'}, {timeout: 10000}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('A discipline in this category is already complete, so another crew cannot become eligible.')
+})
+
 test('submits the current roster, typed answers and version', async () => {
   render(<Crews/>); const competition = await screen.findByLabelText('Competition')
   fireEvent.mouseDown(competition); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
