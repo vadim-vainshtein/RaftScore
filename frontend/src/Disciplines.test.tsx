@@ -2,7 +2,7 @@ import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-libr
 import {afterEach, beforeEach, expect, test, vi} from 'vitest'
 import Disciplines from './Disciplines'
 import {apiRequest, csrfRequest} from './api/client'
-import './i18n'
+import i18n from './i18n'
 vi.mock('./api/client', async original => ({...(await original<typeof import('./api/client')>()), apiRequest: vi.fn(), csrfRequest: vi.fn()}))
 const slalom = {id: 3, name: 'Slalom', type: 'SLALOM', status: 'STARTED', displayOrder: 1, categoryIds: [2], gateCount: 4, attemptCount: 2, qualificationDisciplineId: null, pointsTableId: null, version: 5, resultsEntered: false}
 const load = (items: object[] = [slalom]) => vi.mocked(apiRequest).mockImplementation(async path => {
@@ -94,7 +94,7 @@ test('starts a discipline with its current version and hides scoring until start
   render(<Disciplines readOnly={false}/>); await selectCompetition()
   expect(await screen.findByText(/Preparation/)).toBeInTheDocument()
   expect(screen.queryByRole('link', {name: 'Result entry'})).not.toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', {name: 'Start Slalom'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Start slalom'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/disciplines/3/status', 'PUT', {status: 'STARTED', version: 5}))
 })
 
@@ -138,4 +138,26 @@ test('hides stale disciplines if refreshing after a partial save fails', async (
   expect(await screen.findByRole('alert')).toHaveTextContent('Reload the page before continuing')
   expect(screen.queryByRole('heading', {name: 'Slalom'})).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Complete discipline'})).not.toBeInTheDocument()
+})
+
+
+test('localizes standard and custom start labels and joins only nonempty card details', async () => {
+  await i18n.changeLanguage('ru')
+  try {
+    load([
+      {...slalom, id: 3, name: 'Длинная гонка', type: 'LONG_RACE', status: 'CREATED'},
+      {...slalom, id: 4, name: 'Спринт', type: 'SPRINT', status: 'CREATED'},
+      {...slalom, id: 5, name: 'Слалом', status: 'CREATED', categoryIds: []},
+      {...slalom, id: 6, name: 'Горный маршрут', status: 'CREATED', attemptCount: 1},
+      {...slalom, id: 7, name: '', type: 'PARALLEL_SPRINT', status: 'CREATED'},
+    ])
+    render(<Disciplines readOnly={false} fixedCompetition="1"/>)
+    expect(await screen.findByRole('button', {name: 'Начать длинную гонку'})).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Начать спринт'})).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Начать слалом'})).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Начать дисциплину „Горный маршрут“'})).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: 'Начать параллельный спринт'})).toBeInTheDocument()
+    expect(screen.getByText('Попытки: 2')).toBeInTheDocument()
+    expect(screen.getAllByText('R4 · Попытки: 1')).toHaveLength(3)
+  } finally { await i18n.changeLanguage('en') }
 })
