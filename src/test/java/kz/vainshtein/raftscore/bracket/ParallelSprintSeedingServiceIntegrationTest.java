@@ -23,17 +23,86 @@ import static org.assertj.core.api.Assertions.*;
 class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired ParallelSprintSeedingService service;
     @Autowired ParallelSprintResultService resultService;
+    @Autowired kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
     @Autowired kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
     @Autowired CompetitionRepository competitions;
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired CalculatedDisciplineResultRepository results;
     @Autowired ParallelSprintHeatRepository heats;
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate transactionTemplate;
     @Autowired org.springframework.web.context.WebApplicationContext context;
+
+    @Test
+    void emptySemifinalBeforeOtherResultResolvesBothFinals() { verifyEmptySemifinal(false); }
+
+    @Test
+    void emptySemifinalAfterOtherResultResolvesBothFinals() { verifyEmptySemifinal(true); }
+
+    private void verifyEmptySemifinal(boolean playOtherFirst) {
+        var competition = competitions.save(Competition.builder().title("Empty semifinal").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT);
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var table = new PlacementPointsTable(competition, "Points", TiePointsPolicy.SHARED_PLACE_SAME_POINTS,
+                List.of(new PlacementPointsRow(1, 100), new PlacementPointsRow(3, 60)));
+        entityManager.persist(table);
+        parallel.setPointsTable(table);
+        for (int n = 1; n <= 4; n++)
+            results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        var bracket = service.seed(parallel.getId(), category.getId(), null);
+        var all = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId());
+        var empty = all.get(0);
+        var other = all.get(1);
+        var withdrawn1 = empty.getCrew1().getId();
+        var withdrawn2 = empty.getCrew2().getId();
+        var winnerId = other.getCrew1().getId();
+        var loserId = other.getCrew2().getId();
+        var finish = kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED;
+        if (playOtherFirst) resultService.record(other.getId(), other.getVersion(), new ParallelSprintResultService.Result(finish, 100), new ParallelSprintResultService.Result(finish, 120));
+        eligibility.withdrawFromUnplayedBrackets(withdrawn1);
+        eligibility.withdrawFromUnplayedBrackets(withdrawn2);
+        entityManager.flush(); entityManager.clear();
+        other = heats.findById(other.getId()).orElseThrow();
+        if (!playOtherFirst) resultService.record(other.getId(), other.getVersion(), new ParallelSprintResultService.Result(finish, 100), new ParallelSprintResultService.Result(finish, 120));
+        entityManager.flush(); entityManager.clear();
+        var finals = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream().filter(h -> h.getRoundNumber() == 2).toList();
+        assertThat(finals).hasSize(2);
+        assertThat(finals).allSatisfy(h -> { assertThat(h.isSlot1Resolved()).isTrue(); assertThat(h.isSlot2Resolved()).isTrue(); assertThat(h.winner()).isNotNull(); });
+        assertThat(finals.get(0).winner().getId()).isEqualTo(winnerId);
+        assertThat(finals.get(1).winner().getId()).isEqualTo(loserId);
+        var scored = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(parallel.getId(), category.getId());
+        assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(winnerId); assertThat(r.getPlace()).isEqualTo(1); assertThat(r.getPoints()).isEqualTo(100); });
+        assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(loserId); assertThat(r.getPlace()).isEqualTo(3); assertThat(r.getPoints()).isEqualTo(60); });
+        resultService.annul(other.getId(), heats.findById(other.getId()).orElseThrow().getVersion(), "Correction");
+        entityManager.flush(); entityManager.clear();
+        var reopened = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).stream().filter(h -> h.getRoundNumber() == 2).toList();
+        assertThat(reopened).allSatisfy(h -> { assertThat(h.isSlot1Resolved()).isTrue(); assertThat(h.isSlot2Resolved()).isFalse(); assertThat(h.winner()).isNull(); });
+    }
+
+    @Test
+    void withdrawalFromUnplayedFirstRoundAdvancesTheOpponentAsBye() {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(4).build());
+        var sprint = discipline(competition, category, DisciplineType.SPRINT);
+        var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        for (int n = 1; n <= 4; n++)
+            results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew(category, n)).place(n).status(CalculatedResultStatus.FINISHED).build());
+        var bracket = service.seed(parallel.getId(), category.getId(), null);
+        var semi = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).getFirst();
+        var withdrawing = semi.getCrew1();
+        var opponent = semi.getCrew2();
+        eligibility.withdrawFromUnplayedBrackets(withdrawing.getId());
+        assertThat(semi.getCrew1()).isNull();
+        assertThat(semi.getWinnerSlot()).isEqualTo(2);
+        var destination = semi.getNextHeat();
+        assertThat(semi.getNextSlot() == 1 ? destination.getCrew1() : destination.getCrew2()).isEqualTo(opponent);
+    }
 
     @Test
     void seedsTiesAndByesWithoutAdvancingUnresolvedHeats() {
@@ -158,8 +227,16 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         var scored = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(parallel.getId(), category.getId());
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(semi1.getCrew2().getId()); assertThat(r.getPlace()).isEqualTo(3); assertThat(r.getPoints()).isEqualTo(180); });
         assertThat(scored).anySatisfy(r -> { assertThat(r.getCrewEntry().getId()).isEqualTo(semi2.getCrew2().getId()); assertThat(r.getPlace()).isEqualTo(4); assertThat(r.getPoints()).isEqualTo(170); });
-        assertThatThrownBy(() -> resultService.record(semi1.getId(), semi1.getVersion(), new ParallelSprintResultService.Result(finished, 300), new ParallelSprintResultService.Result(finished, 100)))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("already been played");
+        assertThatThrownBy(() -> resultService.annul(semi1.getId(), semi1.getVersion(), "Correction"))
+                .isInstanceOf(ParallelSprintResultService.DependentHeats.class)
+                .satisfies(ex -> assertThat(((ParallelSprintResultService.DependentHeats) ex).ids).contains(finalB.getId()));
+        resultService.annul(finalB.getId(), finalB.getVersion(), "Correction");
+        resultService.annul(semi1.getId(), semi1.getVersion(), "Correction");
+        assertThat(semi1.getStatus1()).isNull();
+        assertThat(semi2.getStatus1()).isEqualTo(finished);
+        assertThat(finalB.getCrew1()).isNull();
+        var savedCrewIds = jdbc.queryForList("SELECT crew_id FROM result_annulments WHERE discipline_id = ? AND reason = ?", Long.class, parallel.getId(), "Correction");
+        assertThat(savedCrewIds).containsExactlyInAnyOrder(semi1.getCrew1().getId(), semi1.getCrew2().getId(), semi1.getCrew2().getId(), semi2.getCrew2().getId());
     }
 
     @Test
@@ -276,6 +353,7 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
                 jdbc.update("delete from parallel_sprint_heats where bracket_id = ?", bracketId);
                 jdbc.update("delete from parallel_sprint_brackets where id = ?", bracketId);
                 jdbc.update("delete from calculated_discipline_results where discipline_id in (?, ?)", sprintId, parallelId);
+                jdbc.update("delete from crew_memberships where competition_category_id = ?", categoryId);
                 jdbc.update("delete from crew_entries where competition_category_id = ?", categoryId);
                 jdbc.update("delete from discipline_categories where discipline_id in (?, ?)", sprintId, parallelId);
                 jdbc.update("delete from disciplines where id in (?, ?)", sprintId, parallelId);
@@ -327,6 +405,12 @@ class ParallelSprintSeedingServiceIntegrationTest extends PostgreSqlIntegrationT
         return d;
     }
     private CrewEntry crew(CompetitionCategory category, int n) {
-        return crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + n).regionOrClub("Club").representative("Person").startNumber(n).build());
+        var crew = crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + n).regionOrClub("Club").representative("Person").startNumber(n).build());
+        for (int i = 1; i <= category.getCrewSize(); i++) {
+            var person = participants.save(Participant.builder().surname("Crew" + n).givenName("Person" + i).build());
+            memberships.save(CrewMembership.builder().crewEntry(crew).participant(person).position(i).build());
+        }
+        memberships.flush();
+        return crew;
     }
 }

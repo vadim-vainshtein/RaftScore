@@ -33,6 +33,28 @@ test('identifies both finals and explains older brackets', async () => {
   render(<ParallelSprint readOnly/>)
   expect(await screen.findByText(/created under the previous rules/)).toBeInTheDocument()
 })
+test('shows a resolved empty final slot as a bye', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket`
+    ? {id: 8, heats: [{...heat, round: 2, first: null, firstResolved: true, secondResolved: false}]}
+    : original(p))
+  render(<ParallelSprint readOnly/> )
+  expect(await screen.findByText(/Position 1:.*bye/i)).toBeInTheDocument()
+})
+test('annuls a played heat with a reason and shows dependent heats', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  const played = {...heat, firstStatus: 'FINISHED', secondStatus: 'FINISHED', firstTimeCentiseconds: 100, secondTimeCentiseconds: 120, winnerSlot: 1}
+  const final = {...played, id: 9, round: 2, number: 1}
+  vi.mocked(apiRequest).mockImplementation(async p => p === `${base}/bracket` ? {id: 8, heats: [played, final]} : original(p))
+  vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {code: 'parallel.dependent_heats', parameters: {heatIds: [9]}}))
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.spyOn(window, 'prompt').mockReturnValue('Timing error')
+  render(<ParallelSprint readOnly={false}/> )
+  const buttons = await screen.findAllByRole('button', {name: 'Annul heat result'})
+  fireEvent.click(buttons[0])
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/brackets/8/heats/7/annulment`, 'POST', {version: 5, reason: 'Timing error'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Annul these dependent heats first')
+})
 test('upgrades an unfinished legacy bracket only after confirmation', async () => {
   const original = vi.mocked(apiRequest).getMockImplementation()!
   const secondSemi = {...heat, id: 8, number: 2, first: {...heat.first, id: 6}, second: {...heat.second, id: 7}}

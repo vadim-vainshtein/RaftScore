@@ -21,6 +21,8 @@ class ParallelSprintRankingServiceIntegrationTest extends PostgreSqlIntegrationT
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired ParallelSprintBracketRepository brackets;
     @Autowired ParallelSprintHeatRepository heats;
     @Autowired ParallelSprintRankingService ranking;
@@ -45,6 +47,12 @@ class ParallelSprintRankingServiceIntegrationTest extends PostgreSqlIntegrationT
     }
 
     private CrewEntry crew(CompetitionCategory category, int number) {
-        return crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build());
+        var entry = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Person").startNumber(number).build());
+        for (int i = 1; i <= category.getCrewSize(); i++) {
+            var person = participants.save(Participant.builder().surname("Crew" + number).givenName("Person" + i).build());
+            memberships.save(CrewMembership.builder().crewEntry(entry).participant(person).position(i).build());
+        }
+        memberships.flush();
+        return entry;
     }
 }

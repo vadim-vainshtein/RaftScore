@@ -17,6 +17,8 @@ beforeEach(() => {
     if (path.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', status: disciplineStatus, categoryIds: [2]}]
     if (path.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
     if (path.endsWith('/private')) return [{id: 4, categoryId: 2, crewName: 'A', startNumber: 1, eligible: true}, {id: 5, categoryId: 2, crewName: 'B', startNumber: 2, eligible: true}]
+    if (path === `${base}/annulments`) return []
+    if (path === base.replace('/start-list', '/attempt-grid')) return {attempts: [{crewId: 4, attemptNumber: 1, version: 0, status: 'FINISHED', durationCentiseconds: 100}]}
     if (path === base && startEmpty) return {id: null, locked: false, slots: []}
     if (path === base) return {id: 7, locked, slots: [{crewId: 4, crewName: 'A', startNumber: 1, position: 1, plannedTime: null}, {crewId: 5, crewName: 'B', startNumber: 2, position: 2, plannedTime: null}]}
     throw new Error(path)
@@ -46,11 +48,27 @@ test('manual ordering submits UTC timing after confirmation', async () => {
 })
 test('locked list requires confirmation to clear results', async () => {
   locked = true; vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  vi.spyOn(window, 'prompt').mockReturnValue('Incorrect timing')
   render(<StartLists readOnly={false}/>); await selectCategory()
   expect(screen.getByText('Generate start list')).toBeDisabled()
-  fireEvent.click(screen.getByText('Clear results')); expect(csrfRequest).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByText('Clear results'))
-  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/source-results`, 'DELETE'))
+  fireEvent.mouseDown(screen.getByLabelText('Crew to annul')); fireEvent.click(await screen.findByRole('option', {name: 'A'}))
+  fireEvent.click(screen.getByText('Annul attempt')); await waitFor(() => expect(window.confirm).toHaveBeenCalled()); expect(csrfRequest).not.toHaveBeenCalled()
+  await waitFor(() => expect(screen.getByText('Annul attempt')).toBeEnabled())
+  fireEvent.click(screen.getByText('Annul attempt'))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/source-results`, 'DELETE', {crewId: 4, attemptNumber: 1, version: 0, reason: 'Incorrect timing'}))
+})
+test('offers an ineligible crew with a recorded attempt for annulment', async () => {
+  locked = true
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path.endsWith('/private')) return [{id: 4, categoryId: 2, crewName: 'A', startNumber: 1, eligible: false}, {id: 5, categoryId: 2, crewName: 'B', startNumber: 2, eligible: true}]
+    if (path === base) return {id: 7, locked: true, slots: [{crewId: 5, crewName: 'B', startNumber: 2, position: 2, plannedTime: null}]}
+    return original(path)
+  })
+  render(<StartLists readOnly={false}/>); await selectCategory()
+  expect(screen.queryByRole('cell', {name: 'A'})).not.toBeInTheDocument()
+  fireEvent.mouseDown(screen.getByLabelText('Crew to annul'))
+  expect(await screen.findByRole('option', {name: 'A'})).toBeInTheDocument()
 })
 test('a concurrent results conflict locks the controls and refreshes the list', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)

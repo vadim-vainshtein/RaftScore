@@ -31,10 +31,32 @@ class ParallelSprintBracketController {
     record Heat(long id, long version, int round, int number, Crew first, Crew second,
                 AttemptResultStatus firstStatus, Integer firstTimeCentiseconds,
                 AttemptResultStatus secondStatus, Integer secondTimeCentiseconds,
-                Integer winnerSlot, boolean winnerOverridden, Long nextHeatId, Integer nextSlot) { }
+                Integer winnerSlot, boolean winnerOverridden, Long nextHeatId, Integer nextSlot,
+                boolean firstResolved, boolean secondResolved) { }
     record ResultInput(@NotNull AttemptResultStatus status, @DecimalMin("0") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal timeCentiseconds) { }
     record ResultRequest(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version, @NotNull @Valid ResultInput first,
                          @NotNull @Valid ResultInput second, @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal winnerCrewId, Boolean confirmed) { }
+    @io.swagger.v3.oas.annotations.media.Schema(name = "HeatAnnulRequest")
+    record AnnulRequest(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version,
+                        @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 2000)
+                        @jakarta.validation.constraints.Pattern(regexp = "[^\\x00]*") String reason) { }
+
+    @ExceptionHandler(ParallelSprintResultService.DependentHeats.class)
+    org.springframework.http.ResponseEntity<kz.vainshtein.raftscore.api.ApiError> dependent(ParallelSprintResultService.DependentHeats ex) {
+        return org.springframework.http.ResponseEntity.status(HttpStatus.CONFLICT).body(new kz.vainshtein.raftscore.api.ApiError("parallel.dependent_heats", java.util.Map.of("heatIds", ex.ids), List.of()));
+    }
+
+    @PostMapping("/heats/{heatId}/annulment")
+    @Transactional
+    Heat annul(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
+               @PathVariable long bracketId, @PathVariable long heatId, @Valid @RequestBody AnnulRequest request) {
+        lifecycle.requireStarted(competitionId);
+        checkScope(competitionId, disciplineId, categoryId, bracketId);
+        var heat = heats.findById(heatId).filter(h -> h.getBracket().getId().equals(bracketId)).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        try { results.annul(heatId, request.version().longValueExact(), request.reason()); }
+        catch (IllegalStateException ex) { throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex); }
+        return view(heat);
+    }
 
     @GetMapping
     @Transactional(readOnly = true)
@@ -80,7 +102,8 @@ class ParallelSprintBracketController {
         return new Heat(heat.getId(), heat.getVersion(), heat.getRoundNumber(), heat.getHeatNumber(),
                 crew(heat.getCrew1()), crew(heat.getCrew2()), heat.getStatus1(), heat.getTime1Centiseconds(),
                 heat.getStatus2(), heat.getTime2Centiseconds(), heat.getWinnerSlot(), heat.isWinnerOverridden(),
-                heat.getNextHeat() == null ? null : heat.getNextHeat().getId(), heat.getNextSlot());
+                heat.getNextHeat() == null ? null : heat.getNextHeat().getId(), heat.getNextSlot(),
+                heat.isSlot1Resolved(), heat.isSlot2Resolved());
     }
     private static Crew crew(CrewEntry crew) {
         return crew == null ? null : new Crew(crew.getId(), crew.getCrewName(), crew.getStartNumber());

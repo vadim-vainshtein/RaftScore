@@ -15,6 +15,7 @@ public class SprintRankingService {
     private final StartListRepository startLists;
     private final StartSlotRepository startSlots;
     private final AttemptResultRepository attempts;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityPolicy eligibility;
 
     @Transactional(readOnly = true)
     public List<SprintRanking.Result> rank(Long startListId) {
@@ -22,8 +23,9 @@ public class SprintRankingService {
         if (list.getDiscipline().getType() != DisciplineType.SPRINT) {
             throw new IllegalArgumentException("start list must belong to a sprint");
         }
+        var eligible = eligibility.eligibleIds(list.getCategory().getId());
         return SprintRanking.rank(startSlots.findByStartListIdOrderByPositionAsc(startListId),
                 attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(
-                        list.getDiscipline().getId(), list.getCategory().getId()));
+                        list.getDiscipline().getId(), list.getCategory().getId()).stream().filter(a -> eligible.contains(a.getCrewEntry().getId())).toList());
     }
 }

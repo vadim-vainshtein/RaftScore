@@ -26,6 +26,8 @@ class AttemptRecalculationIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired StartListRepository lists;
     @Autowired StartSlotRepository slots;
     @Autowired SlalomConfigurationRepository configurations;
@@ -48,6 +50,11 @@ class AttemptRecalculationIntegrationTest extends PostgreSqlIntegrationTest {
             disciplines.saveAndFlush(discipline);
             configurations.saveAndFlush(new SlalomConfiguration(discipline, 1));
             var crew = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew").regionOrClub("Club").representative("Coach").startNumber(1).build());
+            for (int i = 1; i <= category.getCrewSize(); i++) {
+                var person = participants.save(Participant.builder().surname("Racer").givenName("Person" + i).build());
+                memberships.save(CrewMembership.builder().crewEntry(crew).participant(person).position(i).build());
+            }
+            memberships.flush();
             var list = lists.saveAndFlush(StartList.builder().discipline(discipline).category(category).build());
             slots.saveAndFlush(StartSlot.builder().startList(list).crew(crew).position(1).build());
             var mvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
@@ -84,6 +91,7 @@ class AttemptRecalculationIntegrationTest extends PostgreSqlIntegrationTest {
             jdbc.update("delete from start_slots where start_list_id in (" + lists + ")", competitionId);
             jdbc.update("delete from start_lists where id in (" + lists + ")", competitionId);
             jdbc.update("delete from slalom_configurations where discipline_id in (" + disciplines + ")", competitionId);
+            jdbc.update("delete from crew_memberships where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
             jdbc.update("delete from crew_entries where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
             jdbc.update("delete from discipline_categories where discipline_id in (" + disciplines + ")", competitionId);
             jdbc.update("delete from disciplines where competition_id = ?", competitionId);

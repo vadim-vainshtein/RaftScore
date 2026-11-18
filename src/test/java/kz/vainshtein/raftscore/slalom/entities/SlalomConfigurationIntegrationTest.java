@@ -25,6 +25,8 @@ class SlalomConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired AttemptResultRepository attempts;
     @Autowired SlalomConfigurationRepository configurations;
     @Autowired SlalomGatePenaltyRepository penalties;
@@ -119,6 +121,11 @@ class SlalomConfigurationIntegrationTest extends PostgreSqlIntegrationTest {
         var fixture = fixture();
         var discipline = fixture.discipline();
         var crew = fixture.attempt().getCrewEntry();
+        for (int position = 1; position <= crew.getCompetitionCategory().getCrewSize(); position++) {
+            var person = participants.save(Participant.builder().surname("Racer").givenName("Person" + position).build());
+            memberships.save(CrewMembership.builder().crewEntry(crew).participant(person).position(position).build());
+        }
+        memberships.flush();
         var list = startLists.saveAndFlush(StartList.builder().discipline(discipline).category(crew.getCompetitionCategory()).build());
         startSlots.saveAndFlush(StartSlot.builder().startList(list).crew(crew).position(1).build());
         var config = configurations.saveAndFlush(new SlalomConfiguration(discipline, 1));

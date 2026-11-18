@@ -194,6 +194,7 @@ class CrewEntryController {
         lifecycle.requireEditable(competitionId);
         entityManager.refresh(competition, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         if (!competition.isAdmissionConfirmationRequired()) throw new AdmissionNotRequired();
+        if (!request.admitted()) { eligibility.requireNoRecordedResults(entryId); eligibility.withdrawFromUnplayedBrackets(entryId); }
         var updated = entityManager.createNativeQuery("update crew_entries set admission_decision = :decision, version = version + 1 where id = :id and version = :version")
                 .setParameter("decision", request.admitted()).setParameter("id", entryId)
                 .setParameter("version", request.version().longValueExact()).executeUpdate();
@@ -205,6 +206,8 @@ class CrewEntryController {
     @ExceptionHandler(AdmissionNotRequired.class)
     ResponseEntity<ApiError> admissionNotRequired() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.admission_not_required")); }
     private static class AdmissionNotRequired extends RuntimeException { }
+    @ExceptionHandler(CrewEligibilityService.RecordedResults.class)
+    ResponseEntity<ApiError> recordedResults() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.recorded_results")); }
     @Operation(summary = "Create a crew entry", description = "Requires FULL_ACCESS and a CSRF token.")
     @ApiResponse(responseCode = "201", description = "Created", content = @Content(schema = @Schema(implementation = EntryResponse.class)))
     @ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(schema = @Schema(implementation = ApiError.class)))
@@ -264,6 +267,7 @@ class CrewEntryController {
             if (request.roster() != null) roster = replaceRoster(entry, request.roster());
             replaceAnswers(entry, request.requirementAnswers());
         }
+        if (!eligibility.isEligible(entry)) { eligibility.requireNoRecordedResults(entryId); eligibility.withdrawFromUnplayedBrackets(entryId); }
         if (request.representativePosition() != null) validateSelectedRepresentative(position, request.representative(), roster);
         return EntryResponse.from(entry, roster, eligibility.isEligible(entry), requirementValues.findByCrewEntryId(entry.getId()));
     }

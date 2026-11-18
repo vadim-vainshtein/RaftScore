@@ -12,10 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class ParallelSprintRankingService {
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityPolicy eligibility;
 
     @Transactional(readOnly = true)
     public List<ParallelSprintRanking.Result> rank(long bracketId) {
-        brackets.findById(bracketId).orElseThrow();
-        return ParallelSprintRanking.rank(heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracketId));
+        var bracket = brackets.findById(bracketId).orElseThrow();
+        var eligible = eligibility.eligibleIds(bracket.getCategory().getId());
+        return ParallelSprintRanking.rank(heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracketId),
+                crew -> eligible.contains(crew.getId()));
     }
 }

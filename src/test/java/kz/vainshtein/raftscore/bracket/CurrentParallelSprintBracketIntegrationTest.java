@@ -27,6 +27,8 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired CalculatedDisciplineResultRepository results;
     @Autowired ParallelSprintBracketRepository brackets;
     @Autowired ParallelSprintHeatRepository heats;
@@ -43,6 +45,10 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
         for (int n = 1; n <= 4; n++) {
             var crew = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + n).regionOrClub("Club").representative("Coach").startNumber(n).build());
+            for (int i = 1; i <= category.getCrewSize(); i++) {
+                var person = participants.save(Participant.builder().surname("Crew" + n).givenName("Person" + i).build());
+                memberships.save(CrewMembership.builder().crewEntry(crew).participant(person).position(i).build());
+            }
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew).place(n).status(CalculatedResultStatus.FINISHED).build());
         }
         em.flush();
@@ -53,7 +59,7 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
         mvc.perform(get(url)).andExpect(status().isUnauthorized());
         mvc.perform(get(url).with(reader)).andExpect(status().isOk()).andExpect(jsonPath("$.heats.length()").value(0));
         mvc.perform(post(url).with(reader).with(csrf())).andExpect(status().isForbidden());
-        mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isOk()).andExpect(jsonPath("$.heats.length()").value(3));
+        mvc.perform(post(url).with(admin).with(csrf())).andExpect(status().isOk()).andExpect(jsonPath("$.heats.length()").value(4));
         em.flush(); em.clear();
         var bracket = brackets.findByDisciplineIdAndCategoryId(parallel.getId(), category.getId()).orElseThrow();
         var opening = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(bracket.getId()).getFirst();

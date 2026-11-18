@@ -12,6 +12,7 @@ const codes = {
   'category_template.archived': 'conflict', 'category_template.not_found': 'notFound',
   'competition_category.not_found': 'notFound', 'competition.not_found': 'notFound',
   'crew_entry.not_found': 'notFound', 'crew_entry.admission_not_required': 'validation',
+  'crew_entry.recorded_results': 'recordedResults',
   'discipline.delete_blocked': 'disciplineDeleteBlocked', 'discipline.qualification_in_use': 'disciplineQualificationInUse',
   'discipline_or_points_table.not_found': 'notFound', 'discipline.points_table_assigned': 'conflict',
 } as const

@@ -49,6 +49,11 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 class CompetitionController {
     private final CompetitionRepository repository;
     private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
+    private final kz.vainshtein.raftscore.entry.entities.CrewEntryRepository entries;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
+
+    @ExceptionHandler(kz.vainshtein.raftscore.entry.services.CrewEligibilityService.RecordedResults.class)
+    ResponseEntity<ApiError> recordedResults() { return ResponseEntity.status(409).body(ApiError.of("crew_entry.recorded_results")); }
 
     @Operation(summary = "List competitions", description = "Authenticated users can search titles and sort by start date.")
     @ApiResponse(responseCode = "200", description = "Page of competitions", content = @Content(schema = @Schema(implementation = CompetitionPage.class)))
@@ -111,6 +116,9 @@ class CompetitionController {
         }
         competition.updateDetails(details.title(), details.startDate(), details.endDate(), details.location(),
                 details.timeZone(), details.description(), details.admissionConfirmationRequired());
+        for (var crew : entries.findByCompetitionCategoryCompetitionId(id)) {
+            if (!eligibility.isEligible(crew)) { eligibility.requireNoRecordedResults(crew.getId()); eligibility.withdrawFromUnplayedBrackets(crew.getId()); }
+        }
         competition.setRepresentativeFields(request.representativeFields());
         repository.flush();
         return CompetitionResponse.from(competition);

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0107-parallel-resolved-slots" author="raftscore">
+        <addColumn tableName="parallel_sprint_heats">
+            <column name="slot_1_resolved" type="BOOLEAN" defaultValueBoolean="false"><constraints nullable="false"/></column>
+            <column name="slot_2_resolved" type="BOOLEAN" defaultValueBoolean="false"><constraints nullable="false"/></column>
+        </addColumn>
+        <sql>UPDATE parallel_sprint_heats SET slot_1_resolved = (round_number = 1 OR crew_1_id IS NOT NULL), slot_2_resolved = (round_number = 1 OR crew_2_id IS NOT NULL)</sql>
+        <sql>
+            UPDATE parallel_sprint_heats bronze SET slot_1_resolved = true
+            WHERE bronze.heat_number = 2 AND EXISTS (
+                SELECT 1 FROM parallel_sprint_heats semi JOIN parallel_sprint_heats final_a ON final_a.id = semi.next_heat_id
+                WHERE semi.bracket_id = bronze.bracket_id AND semi.next_slot = 1 AND semi.winner_slot IS NOT NULL
+                  AND final_a.round_number = bronze.round_number AND final_a.heat_number = 1 AND final_a.next_heat_id IS NULL)
+        </sql>
+        <sql>
+            UPDATE parallel_sprint_heats bronze SET slot_2_resolved = true
+            WHERE bronze.heat_number = 2 AND EXISTS (
+                SELECT 1 FROM parallel_sprint_heats semi JOIN parallel_sprint_heats final_a ON final_a.id = semi.next_heat_id
+                WHERE semi.bracket_id = bronze.bracket_id AND semi.next_slot = 2 AND semi.winner_slot IS NOT NULL
+                  AND final_a.round_number = bronze.round_number AND final_a.heat_number = 1 AND final_a.next_heat_id IS NULL)
+        </sql>
+    </changeSet>
+</databaseChangeLog>

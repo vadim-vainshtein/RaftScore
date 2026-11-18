@@ -22,6 +22,8 @@ class RecalculationServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired StartListRepository lists;
     @Autowired StartSlotRepository slots;
     @Autowired AttemptResultRepository attempts;
@@ -29,7 +31,32 @@ class RecalculationServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired CalculatedDisciplineResultRepository results;
     @Autowired RecalculationService recalculation;
     @Autowired EntityManager em;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired org.springframework.web.context.WebApplicationContext context;
+
+    @Test @Transactional
+    void legacyRevokedFinisherIsExcludedBeforeRankingAndPoints() {
+        var competition = competitions.saveAndFlush(Competition.builder().title("Legacy admission").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").admissionConfirmationRequired(true).build());
+        var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
+        var discipline = disciplines.saveAndFlush(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        discipline.replaceCategories(List.of(category));
+        discipline.setPointsTable(tables.saveAndFlush(new PlacementPointsTable(competition, "Points", TiePointsPolicy.SHARED_PLACE_SAME_POINTS, List.of(new PlacementPointsRow(1, 100), new PlacementPointsRow(2, 50)))));
+        var list = lists.saveAndFlush(StartList.builder().discipline(discipline).category(category).build());
+        var revoked = crew(category, 1); var eligible = crew(category, 2);
+        jdbc.update("update crew_entries set admission_decision = true where id = ?", eligible.getId());
+        jdbc.update("update crew_entries set admission_decision = false where id = ?", revoked.getId());
+        slots.save(StartSlot.builder().startList(list).crew(revoked).position(1).build());
+        slots.save(StartSlot.builder().startList(list).crew(eligible).position(2).build());
+        attempts.save(AttemptResult.builder().discipline(discipline).crewEntry(revoked).attemptNumber(1).durationCentiseconds(90).status(AttemptResultStatus.FINISHED).build());
+        attempts.save(AttemptResult.builder().discipline(discipline).crewEntry(eligible).attemptNumber(1).durationCentiseconds(100).status(AttemptResultStatus.FINISHED).build());
+        em.flush(); em.clear();
+        recalculation.recalculateCompetition(competition.getId());
+        em.flush(); em.clear();
+        assertThat(results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(discipline.getId(), category.getId()))
+                .extracting(r -> r.getCrewEntry().getId(), CalculatedDisciplineResult::getPlace, CalculatedDisciplineResult::getPoints)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(eligible.getId(), 1, 100));
+        assertThat(attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(discipline.getId(), revoked.getId(), 1)).isPresent();
+    }
 
     @Test @Transactional
     void correctionUpdatesPlacementsPointsAndRemovesStaleRows() {
@@ -86,6 +113,12 @@ class RecalculationServiceIntegrationTest extends PostgreSqlIntegrationTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
     }
     private CrewEntry crew(CompetitionCategory category, int number) {
-        return crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Coach").startNumber(number).build());
+        var entry = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + number).regionOrClub("Club").representative("Coach").startNumber(number).build());
+        for (int i = 1; i <= category.getCrewSize(); i++) {
+            var person = participants.save(Participant.builder().surname("Crew" + number).givenName("Person" + i).build());
+            memberships.save(CrewMembership.builder().crewEntry(entry).participant(person).position(i).build());
+        }
+        memberships.flush();
+        return entry;
     }
 }

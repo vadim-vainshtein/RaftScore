@@ -29,6 +29,8 @@ public class ParallelSprintHeat extends VersionedEntity {
     @Column(name = "next_slot") private Integer nextSlot;
     @Column(name = "winner_slot") private Integer winnerSlot;
     @Column(name = "winner_overridden", nullable = false) private boolean winnerOverridden;
+    @Column(name = "slot_1_resolved", nullable = false) private boolean slot1Resolved;
+    @Column(name = "slot_2_resolved", nullable = false) private boolean slot2Resolved;
 
     @Builder
     private ParallelSprintHeat(ParallelSprintBracket bracket, int roundNumber, int heatNumber, CrewEntry crew1, CrewEntry crew2,
@@ -41,6 +43,8 @@ public class ParallelSprintHeat extends VersionedEntity {
         this.heatNumber = heatNumber;
         this.crew1 = crew1;
         this.crew2 = crew2;
+        this.slot1Resolved = roundNumber == 1 || crew1 != null;
+        this.slot2Resolved = roundNumber == 1 || crew2 != null;
         this.time1Centiseconds = time1Centiseconds;
         this.time2Centiseconds = time2Centiseconds;
         this.status1 = status1;
@@ -62,14 +66,33 @@ public class ParallelSprintHeat extends VersionedEntity {
         this.winnerOverridden = overridden;
     }
 
-    /** Changes only the feeder's own slot, before this heat has been played. */
-    public void advance(int slot, CrewEntry previousWinner, CrewEntry winner) {
-        if (winnerSlot != null || status1 != null || status2 != null || time1Centiseconds != null || time2Centiseconds != null)
-            throw new IllegalStateException("downstream heat has already been played");
-        var existing = slot == 1 ? crew1 : crew2;
-        if (slot != 1 && slot != 2) throw new IllegalArgumentException("invalid destination slot");
-        if (existing != null && (previousWinner == null || !existing.getId().equals(previousWinner.getId())))
+    /** Removes a withdrawn first-round crew and treats the remaining crew as a bye. */
+    public void withdrawFirstRound(long crewId) {
+        if (roundNumber != 1 || status1 != null || status2 != null || winnerOverridden)
+            throw new IllegalStateException("heat cannot be converted to a bye");
+        if (crew1 != null && crew1.getId().equals(crewId)) crew1 = null;
+        else if (crew2 != null && crew2.getId().equals(crewId)) crew2 = null;
+        else throw new IllegalArgumentException("crew is not in heat");
+        if (crew1 != null) winnerSlot = 1;
+        else if (crew2 != null) winnerSlot = 2;
+        else winnerSlot = null;
+    }
+
+    public CrewEntry winner() { return winnerSlot == null ? null : winnerSlot == 1 ? crew1 : crew2; }
+    public boolean outcomeResolved() {
+        return winnerSlot != null || (slot1Resolved && slot2Resolved && crew1 == null && crew2 == null);
+    }
+
+    /** Updates an unplayed feeder and propagates a known empty slot as a bye. */
+    public void replaceWithdrawnFeeder(int slot, CrewEntry previous, CrewEntry replacement, boolean resolved) {
+        if (status1 != null || status2 != null || time1Centiseconds != null || time2Centiseconds != null
+                || winnerOverridden || (slot != 1 && slot != 2))
+            throw new IllegalStateException("dependent heat has already been played");
+        var current = slot == 1 ? crew1 : crew2;
+        if (!Objects.equals(current == null ? null : current.getId(), previous == null ? null : previous.getId()))
             throw new IllegalStateException("downstream slot is already occupied");
-        if (slot == 1) crew1 = winner; else crew2 = winner;
+        if (slot == 1) { crew1 = replacement; slot1Resolved = resolved; }
+        else { crew2 = replacement; slot2Resolved = resolved; }
+        winnerSlot = slot1Resolved && slot2Resolved && (crew1 == null ^ crew2 == null) ? (crew1 != null ? 1 : 2) : null;
     }
 }

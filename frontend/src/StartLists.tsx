@@ -13,6 +13,8 @@ type Category = {id: number, displayName: string}
 type Crew = {id: number, categoryId: number, crewName: string, startNumber: number, eligible: boolean}
 type Slot = {crewId: number, crewName: string, startNumber: number, position: number, plannedTime: string | null}
 type StartList = {id: number | null, slots: Slot[], locked: boolean}
+type Annulment = {crewId: number, reason: string, annulledAt: string}
+type RecordedAttempt = {crewId: number, attemptNumber: number, version: number, status: string, durationCentiseconds: number | null}
 export default function StartLists({readOnly, fixedCompetition, onReadinessChange}: {readOnly: boolean, fixedCompetition?: string, onReadinessChange?: () => void}) {
   const {t, i18n} = useTranslation()
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
@@ -41,6 +43,10 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const [timing, setTiming] = useState<{key: string, date: string, time: string, interval: string} | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [annulCrew, setAnnulCrew] = useState('')
+  const [annulAttempt, setAnnulAttempt] = useState('1')
+  const [annulments, setAnnulments] = useState<Annulment[]>([])
+  const [recordedAttempts, setRecordedAttempts] = useState<RecordedAttempt[]>([])
 
   const [drag, setDrag] = useState<number | null>(null)
   const base = `/api/competitions/${competition}/disciplines/${discipline}/categories/${category}/start-list`
@@ -75,8 +81,18 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     if (!competition || !discipline || !category) return
     let active = true
     apiRequest<StartList>(base).then(value => {if (active) setList(value)}).catch(e => {if (active) setError(apiErrorKey(e))})
+    if (!readOnly) apiRequest<Annulment[]>(`${base}/annulments`).then(value => {if (active) setAnnulments(value)}).catch(e => {if (active) setError(apiErrorKey(e))})
     return () => {active = false}
-  }, [base, competition, discipline, category])
+  }, [base, competition, discipline, category, readOnly])
+  useEffect(() => {
+    setRecordedAttempts([]); setAnnulCrew('')
+    if (readOnly || !list?.locked || disciplines.find(d => String(d.id) === discipline)?.type === 'PARALLEL_SPRINT') return
+    let active = true
+    apiRequest<{attempts: RecordedAttempt[]}>(`${base.replace(/\/start-list$/, '')}/attempt-grid`)
+      .then(grid => {if (active) setRecordedAttempts(grid.attempts)})
+      .catch(e => {if (active) setError(apiErrorKey(e))})
+    return () => {active = false}
+  }, [base, discipline, disciplines, list?.locked, readOnly])
   const eligible = crews.filter(c => c.categoryId === Number(category) && c.eligible)
   const ids = eligible.map(c => c.id)
   const existing = list?.slots.map(s => s.crewId).filter(id => ids.includes(id)) ?? []
@@ -120,11 +136,20 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
     } finally {setBusy(false)}
   }
   const clear = async () => {
-    if (!canClear || busy || !window.confirm(t('startList.confirmClear'))) return
+    if (!canClear || busy || !annulCrew || !/^[1-9]\d*$/.test(annulAttempt) || !Number.isSafeInteger(Number(annulAttempt))) return
     setBusy(true); setError('')
     try {
-      await csrfRequest(`${base}/source-results`, 'DELETE')
+      const grid = await apiRequest<{attempts: RecordedAttempt[]}>(`${base.replace(/\/start-list$/, '')}/attempt-grid`)
+      const attempt = grid.attempts.find(item => item.crewId === Number(annulCrew) && item.attemptNumber === Number(annulAttempt))
+      if (!attempt) {setError('invalid'); return}
+      if (!window.confirm(t('startList.confirmClear', {status: attempt.status, time: attempt.durationCentiseconds ?? '—'}))) return
+      const reason = window.prompt(t('startList.annulReason'))?.trim()
+      if (!reason) return
+      await csrfRequest(`${base}/source-results`, 'DELETE', {crewId: Number(annulCrew), attemptNumber: Number(annulAttempt), version: attempt.version, reason})
       setList(await apiRequest<StartList>(base))
+      setAnnulments(await apiRequest<Annulment[]>(`${base}/annulments`))
+      setRecordedAttempts((await apiRequest<{attempts: RecordedAttempt[]}>(`${base.replace(/\/start-list$/, '')}/attempt-grid`)).attempts)
+      setAnnulCrew('')
     }
     catch (error) {setError(apiErrorKey(error))} finally {setBusy(false)}
   }
@@ -157,7 +182,13 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
           <td>{slot.plannedTime ? formatDate(new Date(slot.plannedTime), locale, zone ?? 'UTC', {dateStyle: 'medium', timeStyle: 'medium'}) : '—'}</td></tr>)}</tbody>
       </Box></Box>}
       {!readOnly && <>
-        {list.locked && canClear && <Button disabled={busy} onClick={() => void clear()}>{t('startList.clear')}</Button>}
+        {annulments.map((item, index) => <Typography key={`${item.crewId}-${item.annulledAt}-${index}`}>
+          {t('startList.annulled')}: {crews.find(crew => crew.id === item.crewId)?.crewName ?? list.slots.find(slot => slot.crewId === item.crewId)?.crewName ?? item.crewId} — {item.reason}
+        </Typography>)}
+        {list.locked && canClear && selected?.type !== 'PARALLEL_SPRINT' && <><TextField select label={t('startList.annulCrew')} value={annulCrew} onChange={e => setAnnulCrew(e.target.value)}>
+          {[...new Set(recordedAttempts.map(attempt => attempt.crewId))].map(id => <MenuItem key={id} value={String(id)}>{crews.find(crew => crew.id === id)?.crewName ?? String(id)}</MenuItem>)}
+        </TextField><TextField label={t('startList.annulAttempt')} type="number" value={annulAttempt} onChange={e => setAnnulAttempt(e.target.value)} />
+        <Button disabled={busy || !annulCrew || !/^[1-9]\d*$/.test(annulAttempt) || !Number.isSafeInteger(Number(annulAttempt)) || Number(annulAttempt) > 2147483647} onClick={() => void clear()}>{t('startList.clear')}</Button></>}
         <TextField select label={t('startList.mode')} value={mode} disabled={busy || list.locked} onChange={e => setMode(e.target.value)}>
       <MenuItem value="random">{t('startList.random')}</MenuItem>
       <MenuItem value="manual">{t('startList.manual')}</MenuItem>

@@ -13,9 +13,48 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ParallelSprintResultService {
     private final ParallelSprintHeatRepository heats;
+    private final kz.vainshtein.raftscore.entry.services.CrewEligibilityService eligibility;
     private final EntityManager entityManager;
     private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
     private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final ParallelSprintProgressionService progression;
+
+    public static class DependentHeats extends RuntimeException {
+        public final java.util.List<Long> ids;
+        public DependentHeats(java.util.List<Long> ids) { this.ids = ids; }
+    }
+
+    @Transactional
+    public void annul(long heatId, long expectedVersion, String reason) {
+        var heat = heats.findById(heatId).orElseThrow();
+        var discipline = disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
+        discipline.requireStarted();
+        entityManager.refresh(heat);
+        if (heat.getVersion() != expectedVersion) throw new IllegalStateException("heat has changed");
+        if (heat.getStatus1() == null && heat.getStatus2() == null) throw new IllegalStateException("heat has no recorded result");
+        var next = heat.getNextHeat();
+        var bronze = next != null && next.getNextHeat() == null && next.getHeatNumber() == 1
+                ? heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(heat.getBracket().getId()).stream()
+                    .filter(h -> h.getRoundNumber() == next.getRoundNumber() && h.getHeatNumber() == 2).findFirst().orElse(null)
+                : null;
+        var dependent = java.util.stream.Stream.of(next, bronze).filter(java.util.Objects::nonNull)
+                .filter(h -> h.getStatus1() != null || h.getStatus2() != null || h.isWinnerOverridden())
+                .map(h -> h.getId()).toList();
+        if (!dependent.isEmpty()) throw new DependentHeats(dependent);
+        jdbc.update("""
+                INSERT INTO result_annulments (competition_id, discipline_id, category_id, crew_id, result_snapshot, reason, annulled_at)
+                SELECT ?, ?, ?, participant.crew_id, to_jsonb(h)::text, ?, CURRENT_TIMESTAMP
+                FROM parallel_sprint_heats h
+                CROSS JOIN LATERAL (VALUES (h.crew_1_id), (h.crew_2_id)) AS participant(crew_id)
+                WHERE h.id = ? AND participant.crew_id IS NOT NULL
+                """, discipline.getCompetition().getId(), discipline.getId(), heat.getBracket().getCategory().getId(), reason.trim(), heatId);
+        var before = progression.outcome(heat);
+        heat.record(null, null, null, null, null, false);
+        progression.propagate(heat, before);
+        heats.flush();
+        recalculation.recalculateLocked(discipline, heat.getBracket().getCategory().getId());
+    }
 
     public record Result(AttemptResultStatus status, Integer timeCentiseconds) {
         public Result {
@@ -49,32 +88,17 @@ public class ParallelSprintResultService {
         }
         if (heat.getCrew1() == null || heat.getCrew2() == null)
             throw new IllegalStateException("heat must have two crews; seeded byes cannot be edited");
+        eligibility.requireEligible(heat.getCrew1());
+        eligibility.requireEligible(heat.getCrew2());
         Integer winner = winnerCrewId == null ? winner(first, second) : overrideSlot(heat, winnerCrewId);
         if (winnerCrewId != null) {
             var status = winner == 1 ? first.status() : second.status();
             if (status == AttemptResultStatus.DSQ_DISCIPLINE || status == AttemptResultStatus.DSQ_COMPETITION)
                 throw new IllegalArgumentException("disqualified crew cannot win");
         }
-        var oldWinner = heat.getWinnerSlot() == null ? null :
-                heat.getWinnerSlot() == 1 ? heat.getCrew1() : heat.getCrew2();
-        var next = heat.getNextHeat();
-        if (next != null && !java.util.Objects.equals(heat.getWinnerSlot(), winner)) {
-            entityManager.lock(next, LockModeType.OPTIMISTIC);
-            next.advance(heat.getNextSlot(), oldWinner, winner == null ? null : winner == 1 ? heat.getCrew1() : heat.getCrew2());
-        }
-        if (next != null && next.getNextHeat() == null && next.getHeatNumber() == 1
-                && !java.util.Objects.equals(heat.getWinnerSlot(), winner)) {
-            var bronze = heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(heat.getBracket().getId()).stream()
-                    .filter(h -> h.getRoundNumber() == next.getRoundNumber() && h.getHeatNumber() == 2)
-                    .findFirst().orElse(null);
-            if (bronze != null) {
-                entityManager.lock(bronze, LockModeType.OPTIMISTIC);
-                var oldLoser = heat.getWinnerSlot() == null ? null : heat.getWinnerSlot() == 1 ? heat.getCrew2() : heat.getCrew1();
-                var loser = winner == null ? null : winner == 1 ? heat.getCrew2() : heat.getCrew1();
-                bronze.advance(heat.getNextSlot(), oldLoser, loser);
-            }
-        }
+        var before = progression.outcome(heat);
         heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
+        progression.propagate(heat, before);
         heats.flush();
         if (heat.getVersion() == expectedVersion) entityManager.lock(heat, LockModeType.PESSIMISTIC_FORCE_INCREMENT);
         recalculation.recalculateLocked(heat.getBracket().getDiscipline(), heat.getBracket().getCategory().getId());

@@ -24,6 +24,8 @@ class RecalculationPerformanceIntegrationTest extends PostgreSqlIntegrationTest 
     @Autowired CompetitionCategoryRepository categories;
     @Autowired DisciplineRepository disciplines;
     @Autowired CrewEntryRepository crews;
+    @Autowired ParticipantRepository participants;
+    @Autowired CrewMembershipRepository memberships;
     @Autowired StartListRepository lists;
     @Autowired StartSlotRepository slots;
     @Autowired AttemptResultRepository attempts;
@@ -65,7 +67,14 @@ class RecalculationPerformanceIntegrationTest extends PostgreSqlIntegrationTest 
         var competition = competitions.save(Competition.builder().title("Performance race").startDate(LocalDate.of(2026, 7, 1)).location("River").timeZone("UTC").build());
         var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         var entries = new ArrayList<CrewEntry>();
-        for (int i = 1; i <= CREWS; i++) entries.add(crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + i).regionOrClub("Club").representative("Coach").startNumber(i).build()));
+        for (int i = 1; i <= CREWS; i++) {
+            var entry = crews.save(CrewEntry.builder().competitionCategory(category).crewName("Crew " + i).regionOrClub("Club").representative("Coach").startNumber(i).build());
+            entries.add(entry);
+            for (int position = 1; position <= category.getCrewSize(); position++) {
+                var person = participants.save(Participant.builder().surname("Crew" + i).givenName("Person" + position).build());
+                memberships.save(CrewMembership.builder().crewEntry(entry).participant(person).position(position).build());
+            }
+        }
         for (var type : List.of(DisciplineType.SPRINT, DisciplineType.LONG_RACE)) {
             var discipline = disciplines.save(Discipline.builder().competition(competition).name(type.name()).type(type).build());
             discipline.replaceCategories(List.of(category));
@@ -87,10 +96,13 @@ class RecalculationPerformanceIntegrationTest extends PostgreSqlIntegrationTest 
         transactions.executeWithoutResult(status -> {
             var disciplineIds = "select id from disciplines where competition_id = ?";
             var listIds = "select id from start_lists where discipline_id in (" + disciplineIds + ")";
+            var personIds = jdbc.queryForList("select participant_id from crew_memberships where competition_category_id in (select id from competition_categories where competition_id = ?)", Long.class, competitionId);
             jdbc.update("delete from calculated_discipline_results where discipline_id in (" + disciplineIds + ")", competitionId);
             jdbc.update("delete from attempt_results where discipline_id in (" + disciplineIds + ")", competitionId);
             jdbc.update("delete from start_slots where start_list_id in (" + listIds + ")", competitionId);
             jdbc.update("delete from start_lists where id in (" + listIds + ")", competitionId);
+            jdbc.update("delete from crew_memberships where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
+            for (var personId : personIds) jdbc.update("delete from participants where id = ? and not exists (select 1 from crew_memberships where participant_id = ?)", personId, personId);
             jdbc.update("delete from crew_entries where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
             jdbc.update("delete from discipline_categories where discipline_id in (" + disciplineIds + ")", competitionId);
             jdbc.update("delete from disciplines where competition_id = ?", competitionId);

@@ -33,6 +33,64 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
     @Autowired kz.vainshtein.raftscore.slalom.entities.SlalomGatePenaltyRepository penalties;
     @Autowired kz.vainshtein.raftscore.scoring.entities.CalculatedDisciplineResultRepository calculated;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired jakarta.persistence.EntityManager entityManager;
+
+    @Test
+    void lockedListHidesWithdrawnCrewWithoutChangingOtherSlot() {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").admissionConfirmationRequired(true).build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var discipline = disciplines.save(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        discipline.replaceCategories(List.of(category)); disciplines.flush();
+        var withdrawn = crew(category, 1, true);
+        var remaining = crew(category, 2, true);
+        memberships.flush();
+        jdbc.update("UPDATE crew_entries SET admission_decision = true WHERE id IN (?, ?)", withdrawn.getId(), remaining.getId());
+        entityManager.clear();
+        var first = Instant.parse("2026-01-01T10:00:00Z");
+        service.replace(competition.getId(), discipline.getId(), category.getId(), List.of(withdrawn.getId(), remaining.getId()), false, first, 60L);
+        var persistedDiscipline = disciplines.findById(discipline.getId()).orElseThrow();
+        var persistedRemaining = crews.findById(remaining.getId()).orElseThrow();
+        attempts.saveAndFlush(kz.vainshtein.raftscore.timing.entities.AttemptResult.builder().discipline(persistedDiscipline).crewEntry(persistedRemaining).attemptNumber(1)
+                .status(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED).durationCentiseconds(100).build());
+        jdbc.update("UPDATE crew_entries SET admission_decision = false WHERE id = ?", withdrawn.getId());
+        entityManager.clear();
+        var view = service.read(competition.getId(), discipline.getId(), category.getId());
+        assertThat(view.locked()).isTrue();
+        assertThat(view.slots()).singleElement().satisfies(slot -> {
+            assertThat(slot.crewId()).isEqualTo(remaining.getId());
+            assertThat(slot.position()).isEqualTo(2);
+            assertThat(slot.plannedTime()).isEqualTo(first.plusSeconds(60));
+        });
+    }
+
+    @Test
+    void annullingOneCrewKeepsOtherFinishAndRecalculatesPlace() {
+        var competition = competitions.save(Competition.builder().title("Race").startDate(LocalDate.of(2026, 1, 1)).location("River").timeZone("UTC").build());
+        var category = categories.save(CompetitionCategory.builder().competition(competition).classLabel("Open").scoringGroupLabel("Open").crewSize(1).build());
+        var discipline = disciplines.save(Discipline.builder().competition(competition).name("Sprint").type(DisciplineType.SPRINT).build());
+        discipline.transitionTo(DisciplineStatus.STARTED);
+        discipline.replaceCategories(List.of(category));
+        disciplines.flush();
+        var first = crew(category, 1, true);
+        var second = crew(category, 2, true);
+        service.replace(competition.getId(), discipline.getId(), category.getId(), List.of(first.getId(), second.getId()), false, null, null);
+        for (var crew : List.of(first, second)) {
+            attempts.saveAndFlush(kz.vainshtein.raftscore.timing.entities.AttemptResult.builder().discipline(discipline).crewEntry(crew).attemptNumber(1)
+                    .status(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.FINISHED)
+                    .durationCentiseconds(crew == first ? 100 : 120).build());
+        }
+        assertThatThrownBy(() -> service.clearResults(competition.getId(), discipline.getId(), category.getId(), first.getId(), 1, 9, "Incorrect timing"))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(service.annulments(competition.getId(), discipline.getId(), category.getId())).isEmpty();
+        service.clearResults(competition.getId(), discipline.getId(), category.getId(), first.getId(), 1, 0, "Incorrect timing");
+        assertThat(attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(discipline.getId(), first.getId(), 1)).isEmpty();
+        assertThat(attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(discipline.getId(), second.getId(), 1)).get()
+                .extracting(kz.vainshtein.raftscore.timing.entities.AttemptResult::getDurationCentiseconds).isEqualTo(120);
+        assertThat(calculated.findByDisciplineIdAndCrewEntryCompetitionCategoryId(discipline.getId(), category.getId()))
+                .anySatisfy(result -> { assertThat(result.getCrewEntry().getId()).isEqualTo(second.getId()); assertThat(result.getPlace()).isEqualTo(1); });
+        assertThat(service.annulments(competition.getId(), discipline.getId(), category.getId())).singleElement()
+                .satisfies(a -> { assertThat(a.crewId()).isEqualTo(first.getId()); assertThat(a.reason()).isEqualTo("Incorrect timing"); assertThat(a.result()).contains("100"); });
+    }
 
     @Test
     void generatesAndReplacesExactEligibleOrder() {
@@ -78,7 +136,7 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
             assertThat(locked.locked()).isTrue();
             assertThat(locked.slots()).isEqualTo(original.slots());
             service.replace(competition.getId(), discipline.getId(), other.getId(), List.of(), false, null, null);
-            service.clearResults(competition.getId(), discipline.getId(), category.getId());
+            service.clearResults(competition.getId(), discipline.getId(), category.getId(), a.getId(), 1, 0, "Incorrect timing");
         }
         assertThat(service.replace(competition.getId(), discipline.getId(), category.getId(), List.of(b.getId(), a.getId()), false, null, null).slots())
                 .extracting(StartListService.Slot::crewId).containsExactly(b.getId(), a.getId());
@@ -100,9 +158,8 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         var dns = new kz.vainshtein.raftscore.bracket.ParallelSprintResultService.Result(kz.vainshtein.raftscore.timing.entities.AttemptResultStatus.DNS, null);
         heatResults.record(heat.getId(), heat.getVersion(), finished, dns);
         assertThatThrownBy(() -> service.replace(competition.getId(), discipline.getId(), category.getId(), null, true, null, null)).isInstanceOf(ResponseStatusException.class);
-        service.clearResults(competition.getId(), discipline.getId(), category.getId());
-        assertThat(service.replace(competition.getId(), discipline.getId(), category.getId(), List.of(b.getId(), a.getId()), false, null, null).slots())
-                .extracting(StartListService.Slot::crewId).containsExactly(b.getId(), a.getId());
+        assertThatThrownBy(() -> service.clearResults(competition.getId(), discipline.getId(), category.getId(), a.getId(), 1, 0, "Incorrect timing")).isInstanceOf(ResponseStatusException.class);
+        assertThat(service.read(competition.getId(), discipline.getId(), category.getId()).locked()).isTrue();
     }
     @Test
     void clearEndpointDeletesSlalomDependenciesOnlyForSelectedCategory() throws Exception {
@@ -129,14 +186,14 @@ class StartListServiceIntegrationTest extends PostgreSqlIntegrationTest {
         var url = "/api/competitions/" + competition.getId() + "/disciplines/" + discipline.getId() + "/categories/" + category.getId() + "/start-list/source-results";
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(url)
                 .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("FULL_ACCESS"))
-                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()).contentType(org.springframework.http.MediaType.APPLICATION_JSON).content("{\"crewId\":" + selectedCrew.getId() + ",\"attemptNumber\":1,\"version\":0,\"reason\":\"Incorrect timing\"}"))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNoContent());
         assertThat(jdbc.queryForObject("SELECT crew_entry_id FROM attempt_results WHERE discipline_id = ?", Long.class, discipline.getId())).isEqualTo(otherCrew.getId());
         assertThat(jdbc.queryForObject("SELECT attempt_result_id FROM slalom_gate_penalties WHERE configuration_id = ?", Long.class, config.getId())).isEqualTo(otherAttempt.getId());
         assertThat(jdbc.queryForObject("SELECT crew_entry_id FROM calculated_discipline_results WHERE discipline_id = ?", Long.class, discipline.getId())).isEqualTo(otherCrew.getId());
         discipline.transitionTo(DisciplineStatus.COMPLETED);
         disciplines.flush();
-        assertThatThrownBy(() -> service.clearResults(competition.getId(), discipline.getId(), other.getId()))
+        assertThatThrownBy(() -> service.clearResults(competition.getId(), discipline.getId(), other.getId(), otherCrew.getId(), 1, 0, "Incorrect timing"))
                 .isInstanceOf(ResponseStatusException.class);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM attempt_results WHERE id = ?", Long.class, otherAttempt.getId())).isEqualTo(1L);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM slalom_gate_penalties WHERE attempt_result_id = ?", Long.class, otherAttempt.getId())).isEqualTo(1L);

@@ -1,7 +1,5 @@
 package kz.vainshtein.raftscore.entry.services;
 
-import java.util.stream.IntStream;
-import kz.vainshtein.raftscore.competition.entities.EntryRequirementRepository;
 import kz.vainshtein.raftscore.entry.entities.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -11,22 +9,54 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class CrewEligibilityService {
-    private final CrewMembershipRepository memberships;
-    private final EntryRequirementRepository requirements;
-    private final CrewRequirementValueRepository values;
+    private final CrewEligibilityPolicy policy;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private final kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeatRepository heats;
+    private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
+    private final kz.vainshtein.raftscore.scoring.RecalculationService recalculation;
+    private final kz.vainshtein.raftscore.bracket.ParallelSprintProgressionService progression;
+
+    public void requireNoRecordedResults(long crewId) {
+        var recorded = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM attempt_results WHERE crew_entry_id = ?)
+                    OR EXISTS (SELECT 1 FROM parallel_sprint_heats
+                               WHERE (crew_1_id = ? OR crew_2_id = ?)
+                                 AND (status_1 IS NOT NULL OR status_2 IS NOT NULL OR winner_overridden))
+                """, Boolean.class, crewId, crewId, crewId);
+        if (Boolean.TRUE.equals(recorded)) throw new RecordedResults();
+    }
+
+    public static class RecordedResults extends RuntimeException { }
+
+    public void withdrawFromUnplayedBrackets(long crewId) {
+        var ids = jdbc.queryForList("""
+                SELECT h.id FROM parallel_sprint_heats h JOIN parallel_sprint_brackets b ON b.id = h.bracket_id
+                WHERE h.crew_1_id = ? OR h.crew_2_id = ? ORDER BY b.discipline_id, h.round_number, h.id
+                """, Long.class, crewId, crewId);
+        var all = ids.stream().map(id -> heats.findById(id).orElseThrow()).toList();
+        for (var heat : all) disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
+        for (var heat : all) {
+            if (heat.getRoundNumber() != 1) continue;
+            var before = progression.outcome(heat);
+            try {
+                heat.withdrawFirstRound(crewId);
+                progression.propagate(heat, before);
+            } catch (IllegalStateException ex) { throw new RecordedResults(); }
+        }
+        if (all.stream().anyMatch(h -> (h.getCrew1() != null && h.getCrew1().getId().equals(crewId))
+                || (h.getCrew2() != null && h.getCrew2().getId().equals(crewId)))) throw new RecordedResults();
+        heats.flush();
+        for (var heat : all.stream().filter(h -> h.getRoundNumber() == 1).toList())
+            recalculation.recalculateLocked(heat.getBracket().getDiscipline(), heat.getCategory().getId());
+    }
+
+    public void requireEligible(CrewEntry entry) {
+        if (!isEligible(entry)) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, "crew is not eligible");
+    }
 
     @Transactional(readOnly = true)
     public boolean isEligible(CrewEntry entry) {
-        var category = entry.getCompetitionCategory();
-        var competition = category.getCompetition();
-        if (competition.isAdmissionConfirmationRequired() && !Boolean.TRUE.equals(entry.getAdmissionDecision())) return false;
-        var roster = memberships.findByCrewEntryIdOrderByPositionAsc(entry.getId());
-        if (roster.size() != category.getCrewSize()
-                || !IntStream.range(0, roster.size()).allMatch(i -> roster.get(i).getPosition() == i + 1)
-                || roster.stream().map(m -> m.getParticipant().getId()).distinct().count() != roster.size()) return false;
-        var answers = values.findByCrewEntryId(entry.getId());
-        return requirements.findByCompetitionId(competition.getId()).stream().filter(r -> r.isRequired())
-                .allMatch(r -> answers.stream().anyMatch(a -> a.getRequirement().getId().equals(r.getId())
-                        && a.getValueType() == r.getValueType()));
+        return policy.isEligible(entry);
     }
 }
