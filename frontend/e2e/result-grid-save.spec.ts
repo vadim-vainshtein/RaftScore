@@ -69,12 +69,14 @@ function time(page: Page, crew: Crew) {
 async function openGrid(page: Page, route: string, first: Crew) {
   await page.goto(route)
   const username = page.getByLabel('Username')
-  await expect(username.or(time(page, first))).toBeVisible()
+  const tableEntry = page.getByText('Table entry', {exact: true})
+  await expect(username.or(tableEntry)).toBeVisible()
   if (await username.isVisible()) {
     await username.fill(admin.username)
     await page.getByLabel('Password').fill(admin.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
   }
+  await tableEntry.click()
   await expect(time(page, first)).toBeEnabled()
 }
 
@@ -110,6 +112,7 @@ test('completes from overview and retains the protocol filters', async ({page}) 
   await expect(page).toHaveURL(new RegExp(`/workspace/${competitionId}/results\\?`))
   await expect(page).toHaveURL(new RegExp(`discipline=${disciplineId}`))
   await expect(page).toHaveURL(new RegExp(`category=${categoryId}`))
+  await page.locator('summary').filter({hasText: /Wave 1$/}).click()
   await expect(page.getByText(/01:14\.01/).first()).toBeVisible()
 })
 
@@ -371,7 +374,8 @@ test.describe('parallel sprint on a phone', () => {
     const {first, second} = firstHeat
     expect(first).toBeTruthy()
     expect(second).toBeTruthy()
-    await page.getByText('Open heat 1 form', {exact: true}).tap()
+    const firstRound = page.getByRole('heading', {name: 'Round 1', exact: true}).locator('..')
+    await firstRound.getByRole('button', {name: 'Open heat 1 form', exact: true}).tap()
     const firstTime = page.getByRole('textbox', {name: `Time Position 1 — ${first!.name}`, exact: true})
     const secondTime = page.getByRole('textbox', {name: `Time Position 2 — ${second!.name}`, exact: true})
     await firstTime.fill('1:10.00')
@@ -390,14 +394,12 @@ test.describe('parallel sprint on a phone', () => {
     await page.getByRole('button', {name: 'Save heat', exact: true}).tap()
     const saveResponse = await save
     expect(saveResponse.ok(), await saveResponse.text()).toBeTruthy()
-    await expect(page.getByText(new RegExp(`Winner.*${second!.name}.*manual`, 'i'))).toBeVisible()
+    await expect(firstRound.getByText(new RegExp(`Winner.*${second!.name}.*manual`, 'i')).first()).toBeVisible()
     const updated = await read<{heats: Heat[]}>(page.request, `${parallelBase}/bracket`)
     expect(updated.heats.find(item => item.id === firstHeat.id)).toMatchObject({winnerSlot: 2, winnerOverridden: true})
     expect(updated.heats.find(item => item.round === 2)?.first?.id).toBe(second!.id)
-    await page.getByRole('combobox', {name: 'Choose round'}).tap()
-    await page.getByRole('option', {name: 'Round 2', exact: true}).tap()
-    await expect(page.getByRole('heading', {name: 'Round 2', exact: true})).toBeVisible()
-    await expect(page.getByText(new RegExp(`^Position 1: .*${second!.name}`))).toBeVisible()
+    const nextRound = page.getByRole('heading', {name: 'Round 2', exact: true}).locator('..')
+    await expect(nextRound.getByText(new RegExp(`^Position 1: .*${second!.name}`))).toBeVisible()
 
     await page.setViewportSize({width: 1440, height: 900})
     const roundOne = page.getByRole('heading', {name: 'Round 1', exact: true})

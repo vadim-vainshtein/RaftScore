@@ -43,9 +43,12 @@ class CompletionCheckTest {
             assertThat(issue.crewId()).isEqualTo(12L);
             assertThat(issue.code()).isEqualTo("missingAttempt"); assertThat(issue.attempt()).isEqualTo(1);
         });
+        when(disciplines.findByCompetitionIdOrderByDisplayOrderAscIdAsc(44L)).thenReturn(List.of(d));
+        assertThat(check.progress(44L)).containsExactly(new CompletionCheck.Progress(1L, 1, 2));
         var b = attempt(second, 1, AttemptResultStatus.DNF);
         when(attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(1L, 2L)).thenReturn(List.of(a, b));
         assertThat(check.discipline(d)).isEmpty();
+        assertThat(check.progress(44L)).containsExactly(new CompletionCheck.Progress(1L, 2, 2));
     }
 
     @Test
@@ -80,6 +83,8 @@ class CompletionCheckTest {
         when(semi1.getWinnerSlot()).thenReturn(1); when(semi2.getWinnerSlot()).thenReturn(1); when(finalA.getWinnerSlot()).thenReturn(null);
         when(heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(5L)).thenReturn(List.of(semi1, semi2, finalA));
         assertThat(check.discipline(d)).extracting(CompletionCheck.Issue::code).contains("missingBronze", "unfinishedHeat");
+        when(disciplines.findByCompetitionIdOrderByDisplayOrderAscIdAsc(44L)).thenReturn(List.of(d));
+        assertThat(check.overview(44L).stages()).contains(new CompletionCheck.Stage(1L, 2L, 2, 1, "finalA"));
     }
 
     @Test

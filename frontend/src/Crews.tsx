@@ -42,6 +42,7 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const [categories, setCategories] = useState<Category[]>([]), [requirements, setRequirements] = useState<Requirement[]>([]), [crews, setCrews] = useState<Summary[]>([])
   const [loadedCompetitionId, setLoadedCompetitionId] = useState<number | null>(null)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [selectedCrew, setSelectedCrew] = useState<number | null>(null)
   const [category, setCategory] = useState(() => fixedCompetition ? new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('category') ?? '' : ''), [search, setSearch] = useState(''), [admission, setAdmission] = useState('all'), [draft, setDraft] = useState<Draft | null>(null)
   useEffect(() => {
     if (!fixedCompetition) return
@@ -74,7 +75,7 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
     let active = true
     Promise.all([apiRequest<Category[]>(`/api/competitions/${competition.id}/categories`), readOnly ? Promise.resolve([] as Requirement[]) : apiRequest<Requirement[]>(`${base}/requirements`), apiRequest<Summary[]>(readOnly ? base : `${base}/private`)])
       .then(([cats, reqs, list]) => {
-        if (active) { setCategories(cats); setCategory(current => current && !cats.some(c => String(c.id) === current) ? '' : current); setRequirements(reqs); setLoadedCompetitionId(competition.id); setCrews(readOnly ? list.map(c => ({...c, roster: [], admissionDecision: null, version: 0, eligible: false})) : list) }
+        if (active) { setCategories(cats); setCategory(current => current && cats.some(c => String(c.id) === current) ? current : cats.length === 1 ? String(cats[0].id) : ''); setRequirements(reqs); setLoadedCompetitionId(competition.id); setCrews(readOnly ? list.map(c => ({...c, roster: [], admissionDecision: null, version: 0, eligible: false})) : list) }
       }).catch(e => { if (active) fail(e) })
     return () => { active = false }
   }, [base, competition, revision, readOnly])
@@ -124,6 +125,7 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
   const hasConflict = draft?.roster.some(m => !!conflict(m)) ?? false
   const people = Array.from(new Map([...crews.flatMap(c => c.roster), ...(draft?.roster ?? [])].filter(m => m.participantId).map(m => [m.participantId, m])).values())
   const visible = crews.filter(c => (!category || String(c.categoryId) === category) && (admission === 'all' || String(c.admissionDecision) === admission))
+  const visibleSelection = visible.some(c => c.id === selectedCrew) ? selectedCrew : visible[0]?.id
   const policies = competition?.representativeFields ?? {representative: 'REQUIRED', phone: 'OPTIONAL', whatsapp: 'OPTIONAL', telegram: 'OPTIONAL', email: 'OPTIONAL'}
   const searchTarget = (item: SearchResult) => {
     const compatible = categories.filter(c => c.crewSize === item.roster?.length)
@@ -186,17 +188,17 @@ export default function Crews({readOnly = false, canEdit = !readOnly, fixedCompe
         {draft.roster.length !== 1 && (['phone', 'whatsapp', 'telegram', 'email'] as const).filter(key => policies[key] !== 'HIDDEN').map(key => <TextField key={key} required={policies[key] === 'REQUIRED'} label={t(`crew.${key}`)} value={draft.contacts[key] ?? ''} onChange={e => setDraft({...draft, contacts: {...draft.contacts, [key]: e.target.value}})}/>)}
         <Box sx={{position: 'sticky', bottom: 0, backgroundColor: 'background.paper', py: 1, zIndex: 4}}><Button type="submit" disabled={busy || hasConflict}>{t('crew.save')}</Button><Button disabled={busy} onClick={() => { if (!canDiscard()) return; editSelection.current++; setDraft(null) }}>{t('crew.cancel')}</Button></Box>
       </Box>}
-      {visible.map(c => <Box key={c.id}>
-        <Typography>{[String(c.startNumber), c.crewName, c.regionOrClub?.trim(), categories.find(category => category.id === c.categoryId)?.displayName].filter(Boolean).join(' — ')}</Typography>
-        {!readOnly && <>
-          <Typography>{c.roster.map(m => [m.surname, m.givenName, m.patronymic].filter(Boolean).join(' ')).join(', ')}</Typography>
-          {competition.admissionConfirmationRequired && <Typography component="span">{t(c.admissionDecision === null ? 'crew.pending' : c.admissionDecision ? 'crew.admitted' : 'crew.rejected')}</Typography>}
-        </>}
-        {editable && <>
-          <Button disabled={busy} onClick={() => openCrew(c.id)}>{t('crew.edit')}</Button>
-          {competition.admissionConfirmationRequired && <><Button disabled={busy} onClick={() => void decide(c, true)}>{t('crew.admit')}</Button><Button disabled={busy} onClick={() => void decide(c, false)}>{t('crew.reject')}</Button></>}
-        </>}
-      </Box>)}
+      <Box sx={{display: 'grid', gridTemplateColumns: {xs: '1fr', md: '1fr 1fr'}, gap: 2, alignItems: 'start'}}>
+        <Box>{visible.map(c => <Button key={c.id} fullWidth aria-pressed={visibleSelection === c.id} onClick={() => setSelectedCrew(c.id)} sx={{justifyContent: 'space-between', textAlign: 'left', borderBottom: 1, borderColor: 'divider', '&[aria-pressed="true"]': {backgroundColor: 'action.selected', borderLeft: 4, borderLeftColor: 'primary.main', fontWeight: 'bold'}}}><span>{c.startNumber}. {c.crewName}</span>{!readOnly && <span>{t(competition.admissionConfirmationRequired ? (c.admissionDecision === null ? 'crew.pending' : c.admissionDecision ? 'crew.admitted' : 'crew.rejected') : c.eligible ? 'crew.admitted' : 'crew.pending')}</span>}</Button>)}</Box>
+        {visible.filter(c => c.id === visibleSelection).map(c => <Box key={c.id} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2}}>
+          <Typography variant="h6">{c.startNumber}. {c.crewName}</Typography>
+          <Typography>{categories.find(item => item.id === c.categoryId)?.displayName} · {c.regionOrClub || '—'}</Typography>
+          {!readOnly && <Typography>{t(competition.admissionConfirmationRequired ? (c.admissionDecision === null ? 'crew.pending' : c.admissionDecision ? 'crew.admitted' : 'crew.rejected') : c.eligible ? 'crew.admitted' : 'crew.pending')}</Typography>}
+          {!readOnly && <Typography>{c.roster.map(m => [m.surname, m.givenName, m.patronymic].filter(Boolean).join(' ')).join(', ')}</Typography>}
+          {editable && <><Button disabled={busy} onClick={() => openCrew(c.id)}>{t('crew.edit')}</Button>{competition.admissionConfirmationRequired && <>{c.admissionDecision !== true && <Button disabled={busy} onClick={() => void decide(c, true)}>{t('crew.admit')}</Button>}{c.admissionDecision !== false && <Button disabled={busy} onClick={() => void decide(c, false)}>{t('crew.reject')}</Button>}</>}</>}
+        </Box>)}
+      </Box>
+
 
       </>}
   </Box>

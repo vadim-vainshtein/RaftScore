@@ -199,3 +199,12 @@ test.each([
   await waitFor(() => expect(screen.getByLabelText('Category')).toHaveTextContent(expectedCategory))
   expect(window.location.hash).toContain(`category=${expectedId}`)
 })
+
+test('focuses the missing crew in manual order from an overview link', async () => {
+  window.location.hash = '#/start-lists?competition=1&discipline=3&category=2&crew=5'
+  startEmpty = true
+  render(<StartLists readOnly={false}/>)
+  const row = await screen.findByRole('listitem', {current: true})
+  expect(row).toHaveTextContent('B')
+  await waitFor(() => expect(row).toHaveFocus())
+})

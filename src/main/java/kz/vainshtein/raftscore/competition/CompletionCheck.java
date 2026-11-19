@@ -29,6 +29,54 @@ public class CompletionCheck {
     private final kz.vainshtein.raftscore.scoring.entities.CalculatedDisciplineResultRepository calculated;
 
     public record Issue(Long disciplineId, String discipline, Long categoryId, String category, Long crewId, String crew, String code, Integer attempt, Integer round, Integer heat) { }
+    public record Progress(Long disciplineId, int completed, int expected) { }
+    public record Stage(Long disciplineId, Long categoryId, Integer round, Integer heat, String name) { }
+    public record Overview(List<Issue> issues, List<Progress> progress, List<Stage> stages) { }
+
+    public List<Progress> progress(long competitionId) {
+        return progress(competitionId, competition(competitionId), new ArrayList<>());
+    }
+
+    public Overview overview(long competitionId) {
+        var issues = competition(competitionId);
+        var stages = new ArrayList<Stage>();
+        var progress = progress(competitionId, issues, stages);
+        return new Overview(issues, progress, List.copyOf(stages));
+    }
+
+    private List<Progress> progress(long competitionId, List<Issue> allIssues, List<Stage> stages) {
+        return disciplines.findByCompetitionIdOrderByDisplayOrderAscIdAsc(competitionId).stream().map(d -> {
+            int expected = 0;
+            int missing = 0;
+            for (var category : d.getCategories()) {
+                var categoryIssues = allIssues.stream().filter(i -> d.getId().equals(i.disciplineId()) && category.getId().equals(i.categoryId())).toList();
+                if (d.getType() == DisciplineType.PARALLEL_SPRINT) {
+                    var bracket = brackets.findByDisciplineIdAndCategoryId(d.getId(), category.getId());
+                    var bracketHeats = bracket.map(b -> heats.findByBracketIdOrderByRoundNumberAscHeatNumberAsc(b.getId())).orElseGet(List::of);
+                    int count = bracketHeats.size();
+                    int finalRound = bracketHeats.stream().mapToInt(ParallelSprintHeat::getRoundNumber).max().orElse(0);
+                    for (var heat : bracketHeats) {
+                        String name = heat.getRoundNumber() == finalRound ? (heat.getHeatNumber() == 2 ? "finalB" : "finalA") : heat.getRoundNumber() == finalRound - 1 ? "semifinal" : null;
+                        if (name != null) stages.add(new Stage(d.getId(), category.getId(), heat.getRoundNumber(), heat.getHeatNumber(), name));
+                    }
+                    expected += count + (categoryIssues.stream().anyMatch(i -> i.code().equals("missingBronze")) ? 1 : 0);
+                    missing += (int) categoryIssues.stream().filter(i -> i.code().equals("unfinishedHeat") || i.code().equals("missingBronze")).count();
+                } else {
+                    int count = d.getType() == DisciplineType.SLALOM ? slalom.findByDisciplineId(d.getId()).orElseThrow().getAttemptCount() : 1;
+                    var entrants = crews.findByCompetitionCategoryId(category.getId()).stream().filter(eligibility::isEligible).toList();
+                    var results = attempts.findByDisciplineIdAndCrewEntryCompetitionCategoryId(d.getId(), category.getId());
+                    for (var crew : entrants) {
+                        boolean disqualified = results.stream().anyMatch(a -> a.getCrewEntry().getId().equals(crew.getId()) && (a.getStatus() == AttemptResultStatus.DSQ_DISCIPLINE || a.getStatus() == AttemptResultStatus.DSQ_COMPETITION));
+                        int crewExpected = disqualified ? 1 : count;
+                        expected += crewExpected;
+                        var ownIssues = categoryIssues.stream().filter(i -> crew.getId().equals(i.crewId())).toList();
+                        missing += ownIssues.stream().anyMatch(i -> i.code().equals("missingStart")) ? crewExpected : (int) ownIssues.stream().filter(i -> i.code().equals("missingAttempt") || i.code().equals("missingGates")).count();
+                    }
+                }
+            }
+            return new Progress(d.getId(), Math.max(0, expected - missing), expected);
+        }).toList();
+    }
 
     public List<Issue> competition(long competitionId) {
         var configured = disciplines.findByCompetitionIdOrderByDisplayOrderAscIdAsc(competitionId);

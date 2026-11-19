@@ -32,16 +32,16 @@ test.each([false, true])('completed workspace keeps admin roster access separate
   })
   vi.mocked(csrfRequest).mockClear()
   render(<CompetitionWorkspace path="/workspace/1/crews?category=2" readOnly={readOnly}/>)
-  expect(await screen.findByText(/7 — River/)).toBeInTheDocument()
+  expect(await screen.findByRole('heading', {name: '7. River'})).toBeInTheDocument()
   if (readOnly) {
     expect(screen.queryByText('Smith Sam')).not.toBeInTheDocument()
     expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.endsWith('/entries/private'))).toBe(false)
   } else {
     expect(screen.getByText('Smith Sam')).toBeInTheDocument()
-    expect(screen.getByText('Admitted')).toBeInTheDocument()
+    expect(screen.getByRole('button', {name: /7\. River.*Admitted/})).toBeInTheDocument()
     expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.endsWith('/entries/private'))).toBe(true)
   }
-  expect(screen.queryByRole('button', {name: /Create crew|Edit|Admit|Reject/})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: /^(Create crew|Edit|Admit|Reject)$/})).not.toBeInTheDocument()
   expect(csrfRequest).not.toHaveBeenCalled()
 })
 
@@ -127,6 +127,7 @@ test('refreshes the competition version after deleting its tiebreak before start
   })
   const view = render(<CompetitionWorkspace path="/workspace/1/disciplines?editDisciplines=1" readOnly={false}/>)
   fireEvent.click(await screen.findByRole('button', {name: 'Delete'}))
+  await waitFor(() => expect(csrfRequest).toHaveBeenCalled())
   finishDelete()
   await waitFor(() => expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument())
   view.rerender(<CompetitionWorkspace path="/workspace/1" readOnly={false}/>)
@@ -223,9 +224,23 @@ test.each([false, true])('completed workspace separates protocol authority from 
     throw new Error(path)
   })
   render(<CompetitionWorkspace path="/workspace/1/results?category=2" readOnly={readOnly}/> )
-  await screen.findByText('Issued protocols')
+  fireEvent.click(await screen.findByRole('button', {name: 'Issued protocols'}))
   if (readOnly) expect(screen.queryByRole('button', {name: 'Issue protocol'})).not.toBeInTheDocument()
   else expect(screen.getByRole('button', {name: 'Issue protocol'})).toBeInTheDocument()
   expect(screen.queryByRole('button', {name: 'Recalculate'})).not.toBeInTheDocument()
   expect(screen.queryByRole('link', {name: 'Edit result'})).not.toBeInTheDocument()
+})
+
+test('overview reports server progress and links directly to the missing attempt', async () => {
+  window.location.hash = '#/workspace/1'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 1, status: 'STARTED'}
+    if (path.endsWith('/disciplines')) return [{id: 3, name: 'Long race', type: 'LONG_RACE'}]
+    if (path.endsWith('/completion-issues')) return [{disciplineId: 3, discipline: 'Long race', categoryId: 2, category: 'Open', crewId: 4, crew: 'River', code: 'missingAttempt', attempt: 1, round: null, heat: null}]
+    if (path.endsWith('/completion-overview')) return {issues: [{disciplineId: 3, discipline: 'Long race', categoryId: 2, category: 'Open', crewId: 4, crew: 'River', code: 'missingAttempt', attempt: 1, round: null, heat: null}], progress: [{disciplineId: 3, completed: 0, expected: 5}]}
+    return []
+  })
+  render(<CompetitionWorkspace path="/workspace/1" readOnly={false}/>)
+  expect(await screen.findByRole('heading', {name: /Long race · 0 \/ 5/})).toBeInTheDocument()
+  expect(screen.getByRole('link', {name: /Open — River — Missing result/})).toHaveAttribute('href', '#/workspace/1/result-grid?discipline=3&category=2&crew=4&attempt=1')
 })

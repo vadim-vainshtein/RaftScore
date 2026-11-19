@@ -21,22 +21,18 @@ beforeEach(() => {
 afterEach(() => {cleanup(); vi.restoreAllMocks(); window.location.hash = ''})
 test('shows category results from the public projection', async () => {
   render(<Results readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
-  expect(await screen.findByText('1 — Crew A')).toBeInTheDocument()
+  expect(await screen.findByText('1. Crew A')).toBeInTheDocument()
   expect(screen.getByText('Time: 01:14.25')).toBeInTheDocument()
   expect(vi.mocked(apiRequest).mock.calls.some(([p]) => p.includes('private') || p.includes('attempt-grid'))).toBe(false)
 })
 test('keeps the last results when refresh fails', async () => {
   const interval = vi.spyOn(window, 'setInterval')
   render(<Results readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
-  await screen.findByText('1 — Crew A')
+  await screen.findByText('1. Crew A')
   vi.mocked(apiRequest).mockRejectedValue(new Error('offline'))
   await act(async () => { (interval.mock.calls.find(call => call[1] === 2000)?.[0] as () => void)(); await Promise.resolve() })
   await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0))
-  expect(screen.getByText('1 — Crew A')).toBeInTheDocument()
+  expect(screen.getByText('1. Crew A')).toBeInTheDocument()
 })
 
 
@@ -44,9 +40,7 @@ test('keeps the last results when refresh fails', async () => {
 test('full access can edit the selected category and recalculate', async () => {
   vi.mocked(csrfRequest).mockResolvedValue(undefined)
   render(<Results readOnly={false}/> )
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
-  await screen.findByText('1 — Crew A')
+  await screen.findByText('1. Crew A')
   expect(screen.getByRole('link', {name: 'Edit result'})).toHaveAttribute('href', '#/result-grid?competition=1&discipline=3&category=2')
   fireEvent.click(screen.getByRole('button', {name: 'Recalculate'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/recalculate', 'POST'))
@@ -56,8 +50,6 @@ test('warns when a start-list crew has no calculated result', async () => {
   const original = vi.mocked(apiRequest).getMockImplementation()!
   vi.mocked(apiRequest).mockImplementation(async p => p.endsWith('/start-list') ? {slots: [{crewId: 4}, {crewId: 5}]} : original(p))
   render(<Results readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   expect(await screen.findByText(/Standings use available calculated results/)).toBeInTheDocument()
 })
 
@@ -65,9 +57,7 @@ test('shows successful results even when the start list request fails', async ()
   const original = vi.mocked(apiRequest).getMockImplementation()!
   vi.mocked(apiRequest).mockImplementation(async p => {if (p.endsWith('/start-list')) throw new Error('offline'); return original(p)})
   render(<Results readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
-  expect(await screen.findByText('1 — Crew A')).toBeInTheDocument()
+  expect(await screen.findByText('1. Crew A')).toBeInTheDocument()
   expect(await screen.findByRole('alert')).toBeInTheDocument()
 })
 test('only displays an applied tiebreak in overall results', async () => {
@@ -103,11 +93,9 @@ test('shows a compact desktop protocol table with details', async () => {
   vi.stubGlobal('matchMedia', () => ({matches: true, addEventListener: () => {}, removeEventListener: () => {}}))
   try {
     render(<Results readOnly/>)
-    fireEvent.mouseDown(await screen.findByLabelText('Category'))
-    fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
     expect(await screen.findByRole('table')).toBeInTheDocument()
     expect(screen.getByRole('row', {name: /Crew A/})).toHaveTextContent('01:14.25')
-    expect(screen.getAllByText('Attempt and gate details')).toHaveLength(2)
+    expect(screen.getByText('Time: 01:14.25')).toBeInTheDocument()
   } finally {vi.unstubAllGlobals()}
 })
 
@@ -115,6 +103,7 @@ test('keeps result context visible when filters are hidden', async () => {
   window.location.hash = '#/results?competition=1&discipline=3&category=2'
   render(<Results readOnly/>)
   expect(await screen.findByText('Race · Sprint · R4')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Show filters'}))
   fireEvent.click(screen.getByRole('button', {name: 'Hide filters'}))
   expect(screen.getByText('Race · Sprint · R4')).toBeInTheDocument()
 })
@@ -176,8 +165,6 @@ test('retains a failed start list warning after a later successful result and cl
     return original(p)
   })
   render(<Results readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Category'))
-  fireEvent.click(await screen.findByRole('option', {name: 'R4'}))
   expect(await screen.findByRole('alert')).toHaveTextContent('Connection failed')
   await act(async () => {release([{crewId: 4, crewName: 'Crew A', startNumber: 1, place: 1, status: 'FINISHED', totalCentiseconds: 7425}]); await delayedResult})
   expect(await screen.findByText('Time: 01:14.25')).toBeInTheDocument()
@@ -186,4 +173,28 @@ test('retains a failed start list warning after a later successful result and cl
   const poll = interval.mock.calls.filter(call => call[1] === 2000).at(-1)?.[0] as () => void
   await act(async () => {poll(); await Promise.resolve()})
   await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+})
+
+
+test('browses saved editions independently of live standings', async () => {
+  window.location.hash = '#/results?competition=1&category=2'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  const edition = (number: number, points: number, stale: boolean) => ({edition: number, stale, issuedAt: '2026-11-19T00:00:00Z', changes: [], snapshot: {competition: 'Race', location: '', timeZone: 'UTC', categories: [{id: 2, name: 'R4', crews: [{id: 4, name: 'Crew A', number: 1, region: '', members: []}], disciplines: [], standings: [{crewId: 4, place: 3, totalPoints: points}]}]}})
+  vi.mocked(apiRequest).mockImplementation(async p => p.endsWith('/protocols') ? [edition(2, 260, false), edition(1, 220, true)] : p.endsWith('/standings') ? [{crewId: 4, crewName: 'Crew A', startNumber: 1, place: 3, totalPoints: 300}] : original(p))
+  render(<Results readOnly/>)
+  expect(await screen.findByText('300')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name: 'Issued protocols'}))
+  expect((await screen.findAllByText('260'))[0]).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Edition'), {target: {value: '1'}})
+  expect(screen.getAllByText('220')[0]).toBeInTheDocument()
+  expect(screen.queryByText('300')).not.toBeInTheDocument()
+})
+
+
+test('automatically chooses the first compatible category', async () => {
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => p.endsWith('/categories') ? [{id: 9, displayName: 'Other'}, {id: 2, displayName: 'R4'}] : original(p))
+  render(<Results readOnly/>)
+  expect(await screen.findByText('1. Crew A')).toBeInTheDocument()
+  expect(screen.getByRole('button', {name: 'Show filters'})).toBeInTheDocument()
 })
