@@ -26,6 +26,7 @@ class ParallelSprintBracketController {
     private final ParallelSprintBracketRepository brackets;
     private final ParallelSprintHeatRepository heats;
     private final ParallelSprintResultService results;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionRepository competitions;
 
     record Crew(long id, String name, int startNumber) { }
     record Heat(long id, long version, int round, int number, Crew first, Crew second,
@@ -36,6 +37,9 @@ class ParallelSprintBracketController {
     record ResultInput(@NotNull AttemptResultStatus status, @DecimalMin("0") @DecimalMax("2147483647") @Digits(integer = 10, fraction = 0) BigDecimal timeCentiseconds) { }
     record ResultRequest(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version, @NotNull @Valid ResultInput first,
                          @NotNull @Valid ResultInput second, @DecimalMin("1") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal winnerCrewId, Boolean confirmed) { }
+    record CorrectionRequest(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max=2000)
+                             @jakarta.validation.constraints.Pattern(regexp="[^\\x00]*") String reason,
+                             @NotNull @Valid ResultRequest result) { }
     @io.swagger.v3.oas.annotations.media.Schema(name = "HeatAnnulRequest")
     record AnnulRequest(@NotNull @DecimalMin("0") @DecimalMax("9223372036854775807") @Digits(integer = 19, fraction = 0) BigDecimal version,
                         @jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 2000)
@@ -79,6 +83,31 @@ class ParallelSprintBracketController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "winner override requires confirmation");
         try {
             results.record(heatId, request.version().longValueExact(), result(request.first()), result(request.second()), request.winnerCrewId() == null ? null : request.winnerCrewId().longValueExact());
+            return view(heat);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        } catch (IllegalStateException ex) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
+        }
+    }
+
+    @PutMapping("/heats/{heatId}/correction")
+    @Transactional
+    Heat correct(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
+                 @PathVariable long bracketId, @PathVariable long heatId, @Valid @RequestBody CorrectionRequest correction) {
+        var competition = competitions.findForDisciplineConfiguration(competitionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        if (competition.getStatus() != kz.vainshtein.raftscore.competition.entities.CompetitionStatus.COMPLETED)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Competition is not completed");
+        checkScope(competitionId, disciplineId, categoryId, bracketId);
+        var heat = heats.findById(heatId).filter(h -> h.getBracket().getId().equals(bracketId))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        var request = correction.result();
+        if (request.winnerCrewId() != null && !Boolean.TRUE.equals(request.confirmed()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "winner override requires confirmation");
+        try {
+            results.correct(heatId, request.version().longValueExact(), result(request.first()), result(request.second()),
+                    request.winnerCrewId() == null ? null : request.winnerCrewId().longValueExact(), correction.reason().trim());
             return view(heat);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

@@ -62,7 +62,7 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   const body = section === 'edit' ? <Competitions readOnly={readOnly} workspaceEditId={id}/>
     : section === 'crews' ? <Crews fixedCompetition={id} readOnly={readOnly} canEdit={!readOnly && competition.status !== 'COMPLETED'} onReadinessChange={() => setCrewRevision(value => value + 1)}/>
     : section === 'disciplines' ? <Disciplines onDeletionStateChange={setRefreshingCompetition} competitionStatus={competition.status} onDeleted={refreshCompetition} compositionEditing={new URLSearchParams(path.split('?')[1] ?? '').get('editDisciplines') === '1'} fixedCompetition={id} scoringAllowed={competition.status === 'STARTED'} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setDisciplineRevision(value => value + 1)}/>
-    : section === 'results' ? <Results fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'}/>
+    : section === 'results' ? <Results fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'} protocolReadOnly={readOnly || competition.status !== 'COMPLETED'}/>
     : section === 'start-lists' ? <StartLists fixedCompetition={id} readOnly={readOnly || competition.status === 'COMPLETED'} onReadinessChange={() => setStartRevision(value => value + 1)}/>
     : section === 'result-grid' && !readOnly && competition.status === 'STARTED' ? <ResultGrid fixedCompetition={id}/>
     : section === 'parallel-sprint' ? <ParallelSprint fixedCompetition={id} readOnly={readOnly || competition.status !== 'STARTED'}/> : null

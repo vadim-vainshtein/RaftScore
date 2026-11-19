@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-5.0.xsd">
+    <changeSet id="0109-issued-protocols" author="raftscore">
+        <createTable tableName="issued_protocols">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" nullable="false"/></column>
+            <column name="competition_id" type="BIGINT"><constraints nullable="false"/></column>
+            <column name="edition" type="INT"><constraints nullable="false"/></column>
+            <column name="issued_at" type="TIMESTAMP WITH TIME ZONE"><constraints nullable="false"/></column>
+            <column name="snapshot" type="TEXT"><constraints nullable="false"/></column>
+            <column name="changes" type="TEXT"><constraints nullable="false"/></column>
+            <column name="stale" type="BOOLEAN" defaultValueBoolean="false"><constraints nullable="false"/></column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="issued_protocols" baseColumnNames="competition_id" referencedTableName="competitions" referencedColumnNames="id" constraintName="issued_protocol_competition_fk"/>
+        <addUniqueConstraint tableName="issued_protocols" columnNames="competition_id, edition" constraintName="issued_protocol_edition_uq"/>
+        <sql>CREATE UNIQUE INDEX issued_protocol_current_uq ON issued_protocols (competition_id) WHERE NOT stale</sql>
+    </changeSet>
+</databaseChangeLog>
