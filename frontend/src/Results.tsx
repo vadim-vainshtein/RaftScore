@@ -1,6 +1,6 @@
 import IssuedProtocols from './IssuedProtocols'
 import {useEffect, useRef, useState} from 'react'
-import {Box, Button, MenuItem, TextField, Typography, useMediaQuery} from '@mui/material'
+import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, csrfRequest} from './api/client'
 import {apiErrorKey, type ApiErrorKey} from './api/errors'
@@ -19,7 +19,6 @@ const formatTime = (value: number | null | undefined) => value == null ? '—' :
 
 export default function Results({readOnly, fixedCompetition, protocolReadOnly = readOnly}: {readOnly: boolean, fixedCompetition?: string, protocolReadOnly?: boolean}) {
   const {t, i18n} = useTranslation()
-  const desktop = useMediaQuery('(min-width:900px)')
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
@@ -45,13 +44,12 @@ export default function Results({readOnly, fixedCompetition, protocolReadOnly = 
   const [refresh, setRefresh] = useState(0)
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null)
   const [busy, setBusy] = useState(false)
-  const [filtersVisible, setFiltersVisible] = useState(true)
+  const [filtersVisible, setFiltersVisible] = useState(!category)
   const [fullscreen, setFullscreen] = useState(false)
+  const [view, setView] = useState<'live' | 'issued'>('live')
   useEffect(() => {const update = () => setFullscreen(document.fullscreenElement === display.current); document.addEventListener('fullscreenchange', update); return () => document.removeEventListener('fullscreenchange', update)}, [])
   const display = useRef<HTMLDivElement>(null)
   const [incomplete, setIncomplete] = useState(false)
-  const number = (value: number | null | undefined) => value == null ? '—' : formatNumber(value, locale)
-  const time = formatTime
   useEffect(() => {
     let active = true
     const load = async () => {
@@ -70,6 +68,15 @@ export default function Results({readOnly, fixedCompetition, protocolReadOnly = 
       .then(([cs, ds]) => {if (active) {setCategories(cs); setDisciplines(ds)}}).catch(e => active && setError(apiErrorKey(e)))
     return () => {active = false}
   }, [competition])
+  useEffect(() => {
+    if (!competition || categories.length === 0 || (discipline && disciplines.length === 0)) return
+    const available = categories.filter(c => !discipline || disciplines.find(d => String(d.id) === discipline)?.categoryIds.includes(c.id))
+    if (available.length && !available.some(c => String(c.id) === category)) {
+      setRows(null)
+      setCategory(String(available[0].id))
+      setFiltersVisible(false)
+    }
+  }, [competition, categories, disciplines, discipline, category])
   useEffect(() => {
     if (!competition || !category) return
     let active = true
@@ -130,30 +137,36 @@ export default function Results({readOnly, fixedCompetition, protocolReadOnly = 
     {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}</Box>}
     {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{updatedAt && <Typography component="span">{t('results.updatedAt', {time: new Intl.DateTimeFormat(locale, {timeStyle: 'medium'}).format(updatedAt)})}</Typography>}{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/workspace/${competition}/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`${fixedCompetition ? `#/workspace/${competition}/result-grid` : '#/result-grid'}?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
-    {competition && category && <IssuedProtocols competition={competition} category={category} readOnly={protocolReadOnly} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))} crews={(rows ?? []).map(r => ({id: r.crewId, name: r.crewName}))}/>}
-    {rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
+    {readOnly && competition && category && <Box role="group"><Button variant={view === 'live' ? 'contained' : 'outlined'} aria-pressed={view === 'live'} onClick={() => setView('live')}>{t('results.liveView')}</Button><Button variant={view === 'issued' ? 'contained' : 'outlined'} aria-pressed={view === 'issued'} onClick={() => setView('issued')}>{t('results.issuedView')}</Button></Box>}
+    {competition && category && (!readOnly || view === 'issued') && <IssuedProtocols competition={competition} category={category} readOnly={protocolReadOnly} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))} crews={(rows ?? []).map(r => ({id: r.crewId, name: r.crewName}))}/>}
+    {(!readOnly || view === 'live') && <>{rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
     {error && <Typography role="alert">{t(error)}</Typography>}
     {resultError && <Typography role="alert">{t(resultError)}</Typography>}
     {listError && <Typography role="alert">{t(listError)}</Typography>}
     {category && !rows && !error && !resultError && <Typography>{t('results.loading')}</Typography>}
     {rows && rows.length === 0 && <Typography>{t('results.empty')}</Typography>}
-    {desktop && rows && rows.length > 0 && <Box sx={{overflowX: 'auto'}}><Box component="table" sx={{width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums', '& th, & td': {textAlign: 'left', borderBottom: 1, borderColor: 'divider', p: 1}}}>
-      <thead><tr><th>{t('results.place')}</th><th>{t('results.crew')}</th><th>{t('results.number')}</th><th>{t('results.region')}</th><th>{t('results.status')}</th><th>{t('results.time')}</th><th>{t('results.points')}</th><th>{t('results.attemptDetails')}</th></tr></thead>
-      <tbody>{rows.map(row => <tr key={row.crewId}>
-        <td>{number(row.place)}</td><td>{row.crewName}</td><td>{number(row.startNumber)}</td><td>{row.regionOrClub || '—'}</td>
-        <td>{discipline ? row.status && t(`results.${row.status}`) : t(`results.${overallStatus(row)}`)}</td>
-        <td>{discipline && row.status === 'FINISHED' ? time(row.totalCentiseconds) : '—'}</td><td>{number(discipline ? row.points : row.totalPoints)}</td>
-        <td><details><summary>{t(discipline ? 'results.attemptDetails' : 'results.breakdown')}</summary>{discipline ? row.attempts && <AttemptDetails attempts={row.attempts} slalom={selected?.type === 'SLALOM'}/> : <OverallBreakdown row={row} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))}/>}</details></td>
-      </tr>)}</tbody>
-    </Box></Box>}
-    {!desktop && rows?.map(row => <Box component="article" key={row.crewId} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere'}}>
-      <Typography variant="h6">{number(row.place)} — {row.crewName}</Typography>
-      <Typography>{t('results.number')}: {number(row.startNumber)} · {t('results.region')}: {row.regionOrClub || '—'}</Typography>
-      {discipline ? <><Typography>{t('results.status')}: {row.status && t(`results.${row.status}`)}</Typography><Typography>{t('results.time')}: {row.status === 'FINISHED' ? time(row.totalCentiseconds) : '—'}</Typography><Typography>{t('results.points')}: {number(row.points)}</Typography>{row.attempts && <AttemptDetails attempts={row.attempts} slalom={selected?.type === 'SLALOM'}/>}</> : <><OverallBreakdown row={row} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))}/></>}
-    </Box>)}
+    {rows && rows.length > 0 && <StandingsTable rows={rows} discipline={discipline} selected={selected} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))}/>}</>}
+
   </Box>
 }
 
+
+function StandingsTable({rows, discipline, selected, disciplines}: {rows: Result[], discipline: string, selected?: Discipline, disciplines: Discipline[]}) {
+  const {t, i18n} = useTranslation()
+  const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
+  const number = (value: number | null | undefined) => value == null ? '—' : formatNumber(value, locale)
+  return <Box component="table" sx={{width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums', '& th, & td': {textAlign: 'left', borderBottom: 1, borderColor: 'divider', p: 1}, '& th:last-child, & td:last-child': {textAlign: 'right'}, '& summary': {cursor: 'pointer', listStyle: 'none', color: 'primary.main', fontWeight: 600}, '& summary::-webkit-details-marker': {display: 'none'}, '& summary::before': {content: '"▸"', display: 'inline-block', width: '1em'}, '& details[open] > summary::before': {content: '"▾"'}, '& summary:focus-visible': {outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2}}}>
+    <thead><tr><th>{t('results.place')}</th><th>{t('results.crew')}</th><th>{t('results.points')}</th></tr></thead>
+    <tbody>{rows.map(row => <tr key={row.crewId}>
+      <td>{number(row.place)}</td>
+      <td><details><summary>{row.startNumber}. {row.crewName}{row.place == null && <small> · {t(discipline && row.status ? `results.${row.status}` : `results.${overallStatus(row)}`)}</small>}</summary>
+        <Typography>{t('results.region')}: {row.regionOrClub || '—'}</Typography>
+        {discipline ? <><Typography>{t('results.status')}: {row.status && t(`results.${row.status}`)}</Typography><Typography>{t('results.time')}: {row.status === 'FINISHED' ? formatTime(row.totalCentiseconds) : '—'}</Typography>{row.attempts && <AttemptDetails attempts={row.attempts} slalom={selected?.type === 'SLALOM'}/>}</> : <OverallBreakdown row={row} disciplines={disciplines}/>}
+      </details></td>
+      <td>{number(discipline ? row.points : row.totalPoints)}</td>
+    </tr>)}</tbody>
+  </Box>
+}
 
 function AttemptDetails({attempts, slalom}: {attempts: Attempt[], slalom: boolean}) {
   const {t, i18n} = useTranslation()

@@ -50,8 +50,8 @@ test('annuls a played heat with a reason and shows dependent heats', async () =>
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.spyOn(window, 'prompt').mockReturnValue('Timing error')
   render(<ParallelSprint readOnly={false}/> )
-  const buttons = await screen.findAllByRole('button', {name: 'Annul heat result'})
-  fireEvent.click(buttons[0])
+  fireEvent.click((await screen.findAllByRole('button', {name: 'Open heat 1 form'}))[0])
+  fireEvent.click(await screen.findByRole('button', {name: 'Annul heat result'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith(`${base}/brackets/8/heats/7/annulment`, 'POST', {version: 5, reason: 'Timing error'}))
   expect(await screen.findByRole('alert')).toHaveTextContent('Annul these dependent heats first')
 })
@@ -85,7 +85,7 @@ test('rebuild requires confirmation and explains recorded heats', async () => {
 })
 test('read-only users see positions and no editing controls', async () => {
   render(<ParallelSprint readOnly/>)
-  expect(await screen.findByText('Position 1: 1 — Alpha · — · —')).toBeInTheDocument()
+  expect(await screen.findByText('Position 1: 1 — Alpha')).toBeInTheDocument()
   expect(screen.queryByText('Save heat')).not.toBeInTheDocument()
   expect(screen.queryByText('Seed bracket')).not.toBeInTheDocument()
 })
@@ -93,7 +93,7 @@ test('saves a versioned heat and confirms a manual winner', async () => {
   vi.mocked(csrfRequest).mockResolvedValue({})
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   render(<ParallelSprint readOnly={false}/>)
-  fireEvent.change((fireEvent.click(await screen.findByText('Open heat 1 form')), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
+  fireEvent.change((fireEvent.click(await screen.findByRole('button', {name: 'Open heat 1 form'})), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
   fireEvent.change(screen.getByLabelText('Time Position 2 — Bravo'), {target: {value: '1:15.00'}})
   fireEvent.mouseDown(screen.getByLabelText('Winner override')); fireEvent.click(await screen.findByRole('option', {name: 'Bravo'}))
   fireEvent.click(screen.getByText('Save heat'))
@@ -103,7 +103,7 @@ test('saves a versioned heat and confirms a manual winner', async () => {
 test('conflict refreshes server heat while preserving the draft', async () => {
   vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {}))
   render(<ParallelSprint readOnly={false}/>)
-  fireEvent.change((fireEvent.click(await screen.findByText('Open heat 1 form')), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
+  fireEvent.change((fireEvent.click(await screen.findByRole('button', {name: 'Open heat 1 form'})), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
   fireEvent.change(screen.getByLabelText('Time Position 2 — Bravo'), {target: {value: '1:15.00'}})
   fireEvent.click(screen.getByText('Save heat'))
   expect(await screen.findByRole('alert')).toHaveTextContent('draft has been kept')
@@ -115,7 +115,7 @@ test('locks selection and inputs while a save is pending', async () => {
   let finish!: (value: unknown) => void
   vi.mocked(csrfRequest).mockImplementation(() => new Promise(resolve => {finish = resolve}))
   render(<ParallelSprint readOnly={false}/>)
-  fireEvent.change((fireEvent.click(await screen.findByText('Open heat 1 form')), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
+  fireEvent.change((fireEvent.click(await screen.findByRole('button', {name: 'Open heat 1 form'})), await screen.findByLabelText('Time Position 1 — Alpha')), {target: {value: '1:14.25'}})
   fireEvent.change(screen.getByLabelText('Time Position 2 — Bravo'), {target: {value: '1:15.00'}})
   fireEvent.click(screen.getByText('Save heat'))
   expect(screen.getByLabelText('Competition')).toHaveAttribute('aria-disabled', 'true')
@@ -148,11 +148,11 @@ test('selects an available round after changing bracket', async () => {
     throw new Error(p)
   })
   render(<ParallelSprint fixedCompetition="1" readOnly/>)
-  fireEvent.mouseDown(await screen.findByLabelText('Choose round'))
-  fireEvent.click(await screen.findByRole('option', {name: 'Round 2'}))
+  expect(await screen.findByRole('heading', {name: 'Round 2'})).toBeInTheDocument()
   fireEvent.mouseDown(screen.getByLabelText('Category'))
   fireEvent.click(await screen.findByRole('option', {name: 'R6'}))
-  await waitFor(() => expect(screen.getByLabelText('Choose round')).toHaveTextContent('Round 1'))
+  await waitFor(() => expect(screen.queryByRole('heading', {name: 'Round 2'})).not.toBeInTheDocument())
+  expect(screen.getByRole('heading', {name: 'Round 1'})).toBeInTheDocument()
 })
 
 test('keeps a heat draft when filter changes are declined and warns before reload', async () => {
@@ -165,7 +165,7 @@ test('keeps a heat draft when filter changes are declined and warns before reloa
   })
   const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
   render(<ParallelSprint readOnly={false}/>)
-  fireEvent.click(await screen.findByText('Open heat 1 form'))
+  fireEvent.click(await screen.findByRole('button', {name: 'Open heat 1 form'}))
   const time = screen.getByLabelText('Time Position 1 — Alpha')
   fireEvent.change(time, {target: {value: '1:14.25'}})
   fireEvent.mouseDown(screen.getByLabelText('Winner override'))
@@ -195,4 +195,13 @@ test.each(['CREATED', 'STARTED', 'COMPLETED'])('offers seeding only when discipl
   await screen.findByText('No bracket has been seeded.')
   if (status === 'STARTED') expect(screen.getByRole('button', {name: 'Seed bracket'})).toBeEnabled()
   else expect(screen.queryByRole('button', {name: 'Seed bracket'})).not.toBeInTheDocument()
+})
+
+
+test('opens the heat identified by a deep link', async () => {
+  window.location.hash = '#/workspace/1/parallel-sprint?discipline=3&category=2&round=1&heat=1'
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async p => p === '/api/competitions/1' ? {id: 1, title: 'Race'} : original(p))
+  render(<ParallelSprint fixedCompetition="1" readOnly={false}/>)
+  expect(await screen.findByLabelText('Time Position 1 — Alpha')).toBeInTheDocument()
 })

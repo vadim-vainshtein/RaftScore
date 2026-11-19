@@ -18,7 +18,7 @@ afterEach(() => cleanup())
 test('explains why admission is blocked by a completed discipline', async () => {
   vi.mocked(csrfRequest).mockRejectedValue(new ApiError(409, {code: 'crew_entry.completed_discipline', parameters: {}}))
   render(<Crews fixedCompetition="1"/>)
-  await screen.findByText(/7 — River/, {}, {timeout: 10000})
+  await screen.findByRole('button', {name: /7\. River/}, {timeout: 10000})
   fireEvent.click(await screen.findByRole('button', {name: 'Admit'}, {timeout: 10000}))
   expect(await screen.findByRole('alert')).toHaveTextContent('A discipline in this category is already complete, so another crew cannot become eligible.')
 })
@@ -26,7 +26,7 @@ test('explains why admission is blocked by a completed discipline', async () => 
 test('submits the current roster, typed answers and version', async () => {
   render(<Crews/>); const competition = await screen.findByLabelText('Competition')
   fireEvent.mouseDown(competition); fireEvent.click(await screen.findByRole('option', {name: 'Race'}))
-  await screen.findByText(/River/)
+  await screen.findByRole('button', {name: /7\. River/})
   fireEvent.click(screen.getByRole('button', {name: 'Edit'}))
   expect(await screen.findByLabelText(/Surname/)).toHaveValue('Smith')
   expect(within(screen.getByRole('group', {name: 'Member 1'})).getByLabelText(/Given name/)).toHaveValue('Sam')
@@ -390,4 +390,41 @@ test('single entry uses the member name and proposes the first free category num
   fireEvent.mouseDown(screen.getByRole('combobox', {name: /Consent/})); fireEvent.click(screen.getByRole('option', {name: 'Yes'}))
   fireEvent.click(screen.getByRole('button', {name: 'Save'}))
   await waitFor(() => expect(csrfRequest).toHaveBeenCalledWith('/api/competitions/1/entries', 'POST', expect.objectContaining({crewName: 'Doe Jane', startNumber: 1})))
+})
+
+
+test('selects the only category and offers admission for a pending crew', async () => {
+  render(<Crews fixedCompetition="1"/>)
+  expect(await screen.findByRole('button', {name: /7\. River/})).toBeInTheDocument()
+  expect(screen.getByLabelText('Category')).toHaveTextContent('R1')
+  expect(screen.getByRole('button', {name: 'Admit'})).toBeInTheDocument()
+})
+
+ test('selects a visible crew when the admission filter hides the selected one', async () => {
+  const admitted = {...detail, id: 5, crewName: 'Lake', startNumber: 8, admissionDecision: true}
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async path => path.endsWith('/entries/private') ? [detail, admitted] : original(path))
+  render(<Crews fixedCompetition="1"/>)
+  fireEvent.click(await screen.findByRole('button', {name: /7\. River/}))
+  fireEvent.mouseDown(screen.getByLabelText('Admission'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Admitted'}))
+  expect(screen.getByRole('button', {name: /8\. Lake/})).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('heading', {name: '8. Lake'})).toBeInTheDocument()
+  expect(screen.getByRole('button', {name: 'Edit'})).toBeInTheDocument()
+})
+
+test('selects the next pending crew after admission removes the selected one from the queue', async () => {
+  const next = {...detail, id: 5, crewName: 'Lake', startNumber: 8}
+  let admitted = false
+  const original = vi.mocked(apiRequest).getMockImplementation()!
+  vi.mocked(apiRequest).mockImplementation(async path => path.endsWith('/entries/private') ? [{...detail, admissionDecision: admitted ? true : null}, next] : original(path))
+  vi.mocked(csrfRequest).mockImplementation(async () => {admitted = true; return {}})
+  render(<Crews fixedCompetition="1"/>)
+  fireEvent.click(await screen.findByRole('button', {name: /7\. River/}))
+  fireEvent.mouseDown(screen.getByLabelText('Admission'))
+  fireEvent.click(await screen.findByRole('option', {name: 'Pending'}))
+  fireEvent.click(screen.getByRole('button', {name: 'Admit'}))
+  await waitFor(() => expect(screen.getByRole('button', {name: /8\. Lake/})).toHaveAttribute('aria-pressed', 'true'))
+  expect(screen.getByRole('heading', {name: '8. Lake'})).toBeInTheDocument()
+  expect(screen.getByRole('button', {name: 'Admit'})).toBeInTheDocument()
 })

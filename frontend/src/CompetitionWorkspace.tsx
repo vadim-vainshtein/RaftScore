@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react'
-import {Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography} from '@mui/material'
+import {Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import StartLists from './StartLists'
 import Competitions from './Competitions'
@@ -12,7 +12,8 @@ import {apiRequest, csrfRequest} from './api/client'
 import {formatDate} from './i18n/format'
 import {supportedLocale} from './i18n/supported-locales'
 
-type CompletionIssue = {discipline: string | null, category: string | null, crew: string | null, code: 'noParticipatingCategories' | 'noEligibleCrews' | 'noDisciplines' | 'qualificationIncomplete' | 'noQualification' | 'noBracket' | 'emptyBracket' | 'missingBronze' | 'unfinishedHeat' | 'missingStart' | 'missingAttempt' | 'missingGates' | 'missingSeededCrew' | 'extraSeededCrew' | 'seedOrderChanged', attempt: number | null, round: number | null, heat: number | null}
+type CompletionIssue = {disciplineId: number | null, discipline: string | null, categoryId: number | null, category: string | null, crewId: number | null, crew: string | null, code: 'noParticipatingCategories' | 'noEligibleCrews' | 'noDisciplines' | 'qualificationIncomplete' | 'noQualification' | 'noBracket' | 'emptyBracket' | 'missingBronze' | 'unfinishedHeat' | 'missingStart' | 'missingAttempt' | 'missingGates' | 'missingSeededCrew' | 'extraSeededCrew' | 'seedOrderChanged', attempt: number | null, round: number | null, heat: number | null}
+type CompletionStage = {disciplineId: number, categoryId: number, round: number, heat: number, name: 'semifinal' | 'finalA' | 'finalB'}
 type Competition = {id: number, title: string, version: number, startDate?: string, endDate?: string | null, location?: string, status: 'CREATED' | 'STARTED' | 'COMPLETED'}
 export default function CompetitionWorkspace({path, readOnly}: {path: string, readOnly: boolean}) {
   const {t, i18n} = useTranslation()
@@ -25,7 +26,11 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   const intentionalNavigation = useRef(false)
   const [nextRoute, setNextRoute] = useState<string | null>(null)
   useEffect(() => {if (!completing && nextRoute) {window.location.hash = nextRoute}}, [completing, nextRoute])
-  const [disciplineTypes, setDisciplineTypes] = useState<{id: number, type: string}[] | null>(null)
+  const [disciplineTypes, setDisciplineTypes] = useState<{id: number, name: string, type: string}[] | null>(null)
+  const [overviewIssues, setOverviewIssues] = useState<CompletionIssue[] | null>(null)
+  const [progress, setProgress] = useState<{disciplineId: number, completed: number, expected: number}[]>([])
+  const [stages, setStages] = useState<CompletionStage[]>([])
+  const [needsInput, setNeedsInput] = useState(false)
   const [readiness, setReadiness] = useState<{categories: number, disciplines: number} | null>(null)
   const [crewRevision, setCrewRevision] = useState(0)
   const [disciplineRevision, setDisciplineRevision] = useState(0)
@@ -39,7 +44,8 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   const [completionDrafts, setCompletionDrafts] = useState<number | null>(null)
   const [completionIssues, setCompletionIssues] = useState<CompletionIssue[] | null>(null)
   useEffect(() => {let active = true; if (!id) return; apiRequest<Competition>(`/api/competitions/${id}`).then(c => {if (active) {setCompetition(c); const params = new URLSearchParams(path.split('?')[1] ?? ''); if (!readOnly && c.status === 'STARTED' && params.get('complete') === '1') {params.delete('complete'); const cleanQuery = params.size ? '?' + params : ''; window.history.replaceState(window.history.state, '', `#/workspace/${id}${cleanQuery}`); setQuery(cleanQuery); setCompletionDrafts(0); apiRequest<CompletionIssue[]>(`/api/competitions/${id}/completion-issues`).then(setCompletionIssues).catch(() => setCompletionError(true))}}}).catch(() => {if (active) setError(true)}); return () => {active = false}}, [id, path, readOnly])
-  useEffect(() => {if (!id) return; let active = true; Promise.all([apiRequest<unknown[]>(`/api/competitions/${id}/categories`), apiRequest<{id: number, type: string}[]>(`/api/competitions/${id}/disciplines`)]).then(([categories, disciplines]) => {if (active) {setReadiness({categories: categories.length, disciplines: disciplines.length}); setDisciplineTypes(disciplines)}}).catch(() => {}); return () => {active = false}}, [id, disciplineRevision])
+  useEffect(() => {if (!id) return; let active = true; Promise.all([apiRequest<unknown[]>(`/api/competitions/${id}/categories`), apiRequest<{id: number, name: string, type: string}[]>(`/api/competitions/${id}/disciplines`)]).then(([categories, disciplines]) => {if (active) {setReadiness({categories: categories.length, disciplines: disciplines.length}); setDisciplineTypes(disciplines)}}).catch(() => {}); return () => {active = false}}, [id, disciplineRevision])
+  useEffect(() => {if (!id || path.includes('/workspace/' + id + '/')) return; let active = true; setOverviewIssues(null); apiRequest<{issues: CompletionIssue[], progress: {disciplineId: number, completed: number, expected: number}[], stages: CompletionStage[]}>(`/api/competitions/${id}/completion-overview`).then(data => {if (active) {setOverviewIssues(data.issues); setProgress(data.progress); setStages(data.stages ?? [])}}).catch(() => {if (active) setCompletionError(true)}); return () => {active = false}}, [id, path])
   useEffect(() => {
     const blockNavigation = (event: Event) => {if (completing && !intentionalNavigation.current) event.preventDefault()}
     window.addEventListener('category-navigation', blockNavigation)
@@ -105,9 +111,10 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
   }
   return <Box sx={{display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: {xs: 1, md: 2}, mt: {xs: 1, md: 2}}}>
     {!section ? <><Box className="workspace-heading"><Box>{(competition.startDate || competition.location) && <Typography color="text.secondary" variant="body2">{[competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' · ')}</Typography>}<Typography component="h1" variant="h5">{competition.title}</Typography><Box component="span" className={`status-pill status-${competition.status.toLowerCase()}`}>{t(`competition.states.${competition.status}`)}</Box></Box><Button component="a" href="#/competitions">{t('competition.back')}</Button></Box>
-    <Box className="readiness-panel">{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>
+    <Box sx={{display: 'flex', flexWrap: 'wrap', gap: 2}}>{readiness && <Typography>{t('workspace.readiness', readiness)}</Typography>}{crewReadiness && <Typography>{t('workspace.crewReadiness', crewReadiness)}</Typography>}{query.includes('discipline=') && query.includes('category=') && startReadiness !== null && <Typography>{t('workspace.startReadiness', {count: startReadiness})}</Typography>}</Box>
     <Box className="workspace-actions">{!readOnly && competition.status !== 'COMPLETED' && <Button variant="outlined" component="a" href={`#/workspace/${id}/edit${settingsParams.size ? '?' + settingsParams : ''}`}>{t('competition.edit')}</Button>}{!readOnly && competition.status === 'CREATED' && <Button variant="contained" disabled={completing || refreshingCompetition || competitionRefreshFailed} onClick={() => void changeStatus('STARTED')}>{t('competition.start')}</Button>}{!readOnly && competition.status === 'STARTED' && <Button variant="outlined" disabled={completing} onClick={() => void openCompletionDialog()}>{t('competition.complete')}</Button>}</Box></> : <Typography component="h1" className="workspace-compact-heading" variant="h6">{[competition.title, competition.startDate && formatDate(new Date(`${competition.startDate}T00:00:00Z`), supportedLocale(i18n.language) ?? 'en', 'UTC'), competition.location].filter(Boolean).join(' — ')}</Typography>}
-    {(!section || ['crews', 'start-lists', 'disciplines', 'parallel-sprint', 'edit'].includes(section)) && <Typography component="h2" variant="h6">{t(!section ? 'workspace.overview' : section === 'crews' ? 'navigation.crews' : section === 'start-lists' ? 'navigation.startLists' : section === 'disciplines' ? 'navigation.disciplines' : section === 'parallel-sprint' ? 'navigation.parallelSprint' : 'competition.edit')}</Typography>}
+    {!section && overviewIssues && <CompletionOverview id={id} issues={overviewIssues} disciplines={disciplineTypes ?? []} progress={progress} stages={stages} needsInput={needsInput} setNeedsInput={setNeedsInput} readOnly={readOnly}/>}
+    {section && ['crews', 'start-lists', 'disciplines', 'parallel-sprint', 'edit'].includes(section) && <Typography component="h2" variant="h6">{t(!section ? 'workspace.overview' : section === 'crews' ? 'navigation.crews' : section === 'start-lists' ? 'navigation.startLists' : section === 'disciplines' ? 'navigation.disciplines' : section === 'parallel-sprint' ? 'navigation.parallelSprint' : 'competition.edit')}</Typography>}
     {section === 'disciplines' && !readOnly && competition.status !== 'COMPLETED' && <Box><Button variant="outlined" component="a" href={`#/workspace/${id}/disciplines?${disciplineEditParams}`}>{t('competition.edit')}</Button></Box>}
     {completionError && <Typography role="alert">{t('competition.error')}</Typography>}
     <div inert={completing} style={{minWidth: 0}}>
@@ -127,5 +134,38 @@ export default function CompetitionWorkspace({path, readOnly}: {path: string, re
         </Button>
       </DialogActions>
     </Dialog>
+  </Box>
+}
+
+function CompletionOverview({id, issues, disciplines, progress, stages, needsInput, setNeedsInput, readOnly}: {
+  id: string, issues: CompletionIssue[], disciplines: {id: number, name: string, type: string}[],
+  progress: {disciplineId: number, completed: number, expected: number}[], stages: CompletionStage[], needsInput: boolean,
+  setNeedsInput: (value: boolean) => void, readOnly: boolean
+}) {
+  const {t} = useTranslation()
+  return <Box component="section" sx={{display: 'grid', gap: 1}}>
+    <Typography component="h2" variant="h6">{t('workspace.remaining')}: {issues.length}</Typography>
+    <TextField select label={t('workspace.allDisciplines')} value={needsInput ? 'needs' : 'all'} onChange={e => setNeedsInput(e.target.value === 'needs')}>
+      <MenuItem value="all">{t('workspace.allDisciplines')}</MenuItem><MenuItem value="needs">{t('workspace.needsInput')}</MenuItem>
+    </TextField>
+    {issues.filter(issue => !issue.disciplineId).map((issue, index) => <Typography key={index}>{t(`competition.completionIssues.${issue.code}`, issue)}</Typography>)}
+    {disciplines.filter(d => !needsInput || issues.some(issue => issue.disciplineId === d.id)).map(d => {
+      const blockers = issues.filter(issue => issue.disciplineId === d.id)
+      const count = progress.find(p => p.disciplineId === d.id)
+      return <Box key={d.id} sx={{borderBottom: 1, borderColor: 'divider', py: 1}}>
+        <Typography component="h3" variant="subtitle1">{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')} · {count && `${count.completed} / ${count.expected}`} · {blockers.length ? `${t('workspace.needsInput')}: ${blockers.length}` : count?.expected ? t('workspace.complete') : '—'}</Typography>
+        {blockers.map((issue, index) => <CompletionLink key={index} id={id} issue={issue} type={d.type} stage={stages.find(s => s.disciplineId === d.id && s.categoryId === issue.categoryId && s.round === issue.round && s.heat === issue.heat)} readOnly={readOnly}/>)}
+      </Box>
+    })}
+  </Box>
+}
+
+function CompletionLink({id, issue, type, stage, readOnly}: {id: string, issue: CompletionIssue, type: string, stage?: CompletionStage, readOnly: boolean}) {
+  const {t} = useTranslation()
+  const params = new URLSearchParams({discipline: String(issue.disciplineId)})
+  for (const [key, value] of Object.entries({category: issue.categoryId, crew: issue.crewId, attempt: issue.attempt, round: issue.round, heat: issue.heat})) if (value != null) params.set(key, String(value))
+  const destination = issue.code === 'missingStart' ? 'start-lists' : type === 'PARALLEL_SPRINT' ? 'parallel-sprint' : readOnly ? 'results' : 'result-grid'
+  return <Box sx={{display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1}}>
+    {issue.categoryId ? <Button component="a" href={`#/workspace/${id}/${destination}?${params}`}>{[issue.category, stage && t(`parallel.${stage.name}`), issue.crew, t(`competition.completionIssues.${issue.code}`, issue)].filter(Boolean).join(' — ')}</Button> : <Typography>{t(`competition.completionIssues.${issue.code}`, issue)}</Typography>}
   </Box>
 }

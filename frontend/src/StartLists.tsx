@@ -22,6 +22,8 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
   const [category, setCategory] = useState(params.get('category') ?? '')
+  const target = useRef({crew: Number(params.get('crew')) || null, discipline, category})
+  const targetRef = useRef<HTMLLIElement>(null)
   const selection = useRef({discipline, category})
   useEffect(() => {selection.current = {discipline, category}}, [discipline, category])
   useEffect(() => {
@@ -99,6 +101,12 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
   const orderKey = JSON.stringify([category, ids, existing, list?.id])
   const [manualOrder, setManualOrder] = useState<{key: string, value: number[]} | null>(null)
   const order = manualOrder?.key === orderKey ? manualOrder.value : [...existing, ...ids.filter(id => !existing.includes(id))]
+  const targetCrew = target.current.discipline === discipline && target.current.category === category ? target.current.crew : null
+  useEffect(() => {
+    if (!targetCrew || !list || readOnly || !crews.some(crew => crew.id === targetCrew && crew.categoryId === Number(category) && crew.eligible)) return
+    setMode('manual')
+  }, [targetCrew, list, readOnly, crews, category])
+  useEffect(() => {if (mode === 'manual' && targetCrew && targetRef.current) {targetRef.current.scrollIntoView?.({block: 'nearest'}); targetRef.current.focus()}}, [mode, targetCrew, orderKey])
   const setOrder = (value: number[]) => setManualOrder({key: orderKey, value})
   const move = (from: number, to: number) => {
     if (to < 0 || to >= order.length || from === to) return
@@ -197,7 +205,7 @@ export default function StartLists({readOnly, fixedCompetition, onReadinessChang
           {order.map((id, index) => {
             const crew = eligible.find(c => c.id === id)
             const planned = firstInstant && validInterval ? new Date(firstInstant.getTime() + index * Number(interval) * 1000) : null
-            return <li key={id} draggable={!list.locked && !busy}
+            return <li key={id} ref={id === targetCrew ? targetRef : undefined} tabIndex={id === targetCrew ? -1 : undefined} aria-current={id === targetCrew ? 'true' : undefined} style={id === targetCrew ? {background: 'var(--target-highlight, #e5efe3)', color: '#142e29'} : undefined} draggable={!list.locked && !busy}
               onDragStart={() => setDrag(index)} onDragOver={e => e.preventDefault()}
               onDrop={e => {e.preventDefault(); if (drag !== null) move(drag, index); setDrag(null)}}>
               {t('startList.position')}: {index + 1} — {t('startList.category')}: {categories.find(c => String(c.id) === category)?.displayName}

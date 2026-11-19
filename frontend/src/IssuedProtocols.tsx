@@ -20,13 +20,18 @@ export default function IssuedProtocols({competition, category, readOnly, discip
   const status = (value: string | null) => ({MISSING: label('Нет результата', 'Missing result'), FINISHED: label('Финиш', 'Finished'), DNS: label('Не стартовал', 'Did not start'), DNF: label('Не финишировал', 'Did not finish'), DSQ_ATTEMPT: label('Дисквалификация попытки', 'Attempt disqualified'), DSQ_DISCIPLINE: label('Дисквалификация в дисциплине', 'Disqualified in discipline'), DSQ_COMPETITION: label('Дисквалификация в соревновании', 'Disqualified in competition')} as Record<string, string>)[value ?? 'MISSING'] ?? value ?? '—'
   const [editions, setEditions] = useState<Edition[]>([])
   const [selected, setSelected] = useState<number | null>(null)
+  const [snapshotCategory, setSnapshotCategory] = useState(category)
+  const [snapshotDiscipline, setSnapshotDiscipline] = useState('')
+  const [showDocument, setShowDocument] = useState(false)
+  useEffect(() => {setSnapshotCategory(category); setSnapshotDiscipline('')}, [category])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const base = `/api/competitions/${competition}/protocols`
   const load = async () => {const data = await apiRequest<Edition[]>(base); setEditions(data); setSelected(old => old && data.some(e => e.edition === old) ? old : data[0]?.edition ?? null)}
   useEffect(() => {setEditions([]); setSelected(null); if (!competition) return; const refresh = () => void load().catch(() => setError(label('Не удалось загрузить протоколы', 'Could not load protocols'))); refresh(); const timer = window.setInterval(refresh, 2000); return () => window.clearInterval(timer)}, [competition])
   const current = editions.find(e => e.edition === selected)
-  const cat = current?.snapshot.categories.find(c => String(c.id) === category)
+  const cat = current?.snapshot.categories.find(c => String(c.id) === snapshotCategory) ?? current?.snapshot.categories[0]
+  const effectiveCategory = cat ? String(cat.id) : ''
   useEffect(() => {
     let original: HTMLElement | null = null
     let clone: HTMLElement | null = null
@@ -49,9 +54,14 @@ export default function IssuedProtocols({competition, category, readOnly, discip
     {!readOnly && <button disabled={busy} onClick={() => void issue()}>{label('Выдать протокол', 'Issue protocol')}</button>}
     {editions.length > 0 && <label>{label('Редакция', 'Edition')} <select value={selected ?? ''} onChange={e => setSelected(Number(e.target.value))}>{editions.map(e => <option key={e.edition} value={e.edition}>{e.edition} — {e.stale ? label('устарел', 'stale') : label('актуальный', 'current')}</option>)}</select></label>}
     {error && <p role="alert">{error}</p>}
-    {!readOnly && <ProtocolCorrection competition={competition} category={category} disciplines={disciplines} crews={cat?.crews ?? crews} onSaved={() => {void load()}}/>}
-    {current && cat && <><button onClick={() => window.print()}>{label('Печать', 'Print')}</button><article id="issued-protocol">
-      <style>{`@media print { @page { margin: 12mm } html, body { height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important } body > :not(#issued-protocol) { display: none !important } #issued-protocol { color: black; background: white; font-size: 12px; margin: 0; padding: 0 } #issued-protocol h1 { font-size: 20px } #issued-protocol h2 { font-size: 17px } #issued-protocol h3 { font-size: 14px; break-after: avoid } #issued-protocol p { margin: 6px 0 } #issued-protocol table { page-break-inside: auto } #issued-protocol tr { page-break-inside: avoid } } #issued-protocol table { border-collapse: collapse; width: 100% } #issued-protocol th, #issued-protocol td { border: 1px solid; padding: 3px; text-align: left }`}</style>
+    {!readOnly && <ProtocolCorrection competition={competition} category={category} disciplines={disciplines} crews={current?.snapshot.categories.find(c => String(c.id) === category)?.crews ?? crews} onSaved={() => {void load()}}/>}
+    {current && <label>{label('Категория', 'Category')} <select value={effectiveCategory} onChange={e => {setSnapshotCategory(e.target.value); setSnapshotDiscipline('')}}>{current.snapshot.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
+    {current && cat && <>
+      <label>{label('Дисциплина', 'Discipline')} <select value={snapshotDiscipline} onChange={e => setSnapshotDiscipline(e.target.value)}><option value="">{label('Общий зачёт', 'Overall')}</option>{cat.disciplines.map(d => <option key={d.id} value={d.id}>{d.name || d.type}</option>)}</select></label>
+      <SnapshotStandings category={cat} discipline={snapshotDiscipline} label={label} status={status}/>
+      <button onClick={() => setShowDocument(value => !value)} aria-expanded={showDocument}>{showDocument ? label('Скрыть документ', 'Hide document') : label('Просмотр документа', 'View document')}</button>
+      <button onClick={() => window.print()}>{label('Печать', 'Print')}</button><article id="issued-protocol" className={showDocument ? "" : "document-screen-hidden"}>
+      <style>{`@media screen { .document-screen-hidden { display: none } } @media print { @page { margin: 12mm } html, body { height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important } body > :not(#issued-protocol) { display: none !important } #issued-protocol { color: black; background: white; font-size: 12px; margin: 0; padding: 0 } #issued-protocol h1 { font-size: 20px } #issued-protocol h2 { font-size: 17px } #issued-protocol h3 { font-size: 14px; break-after: avoid } #issued-protocol p { margin: 6px 0 } #issued-protocol table { page-break-inside: auto } #issued-protocol tr { page-break-inside: avoid } } #issued-protocol table { border-collapse: collapse; width: 100% } #issued-protocol th, #issued-protocol td { border: 1px solid; padding: 3px; text-align: left }`}</style>
       <h1>{current.snapshot.competition}</h1><h2>{cat.name}</h2>
       <p>{label('Редакция', 'Edition')} {current.edition} · {current.stale ? label('УСТАРЕЛ', 'STALE') : label('Актуальный', 'Current')} · {label('Выдан', 'Issued')} {new Date(current.issuedAt).toLocaleString(ru ? 'ru-RU' : 'en-US', {timeZone: current.snapshot.timeZone})} ({current.snapshot.timeZone})</p>
       {current.changes.filter(c => c.detail.before.categoryId === cat.id).map(c => {
@@ -73,4 +83,13 @@ export default function IssuedProtocols({competition, category, readOnly, discip
       <p>{label('Подпись', 'Signature')}: ____________________________</p>
     </article></>}
   </section>
+}
+
+function SnapshotStandings({category, discipline, label, status}: {category: Category, discipline: string, label: (ru: string, en: string) => string, status: (value: string | null) => string}) {
+  const selected = category.disciplines.find(d => String(d.id) === discipline)
+  const rows = selected ? selected.results.map(r => ({crewId: r.crewId, place: r.place, points: r.points, status: r.status})) : category.standings.map(r => ({crewId: r.crewId, place: r.place, points: r.totalPoints, status: null}))
+  return <table style={{width: '100%', borderCollapse: 'collapse', fontVariantNumeric: 'tabular-nums'}}>
+    <thead><tr><th style={{textAlign: 'left'}}>{label('Место', 'Place')}</th><th style={{textAlign: 'left'}}>{label('Экипаж', 'Crew')}</th><th style={{textAlign: 'right'}}>{label('Очки', 'Points')}</th></tr></thead>
+    <tbody>{rows.map(row => {const crew = category.crews.find(c => c.id === row.crewId); return <tr key={row.crewId}><td>{row.place ?? '—'}</td><td>{crew?.number}. {crew?.name}{row.place == null && <small> · {row.status ? status(row.status) : label('Нет места', 'No place')}</small>}</td><td style={{textAlign: 'right'}}>{row.points}</td></tr>})}</tbody>
+  </table>
 }

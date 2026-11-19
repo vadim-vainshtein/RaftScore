@@ -142,6 +142,13 @@ class CompetitionController {
         return completionCheck.competition(id);
     }
 
+    @GetMapping("/{id}/completion-overview")
+    @Transactional(readOnly = true)
+    kz.vainshtein.raftscore.competition.CompletionCheck.Overview completionOverview(@PathVariable Long id) {
+        repository.findById(id).orElseThrow(NotFound::new);
+        return completionCheck.overview(id);
+    }
+
     @PutMapping("/{id}/status")
     @Transactional
     CompetitionResponse transition(@PathVariable Long id, @Valid @RequestBody StatusRequest request) {

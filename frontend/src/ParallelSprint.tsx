@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react'
-import {Box, Button, MenuItem, TextField, Typography, useMediaQuery} from '@mui/material'
+import {Box, Button, MenuItem, TextField, Typography} from '@mui/material'
 import {useTranslation} from 'react-i18next'
 import {apiRequest, ApiError, csrfRequest} from './api/client'
 import {apiErrorKey, type ApiErrorKey} from './api/errors'
@@ -20,9 +20,8 @@ const draftFor = (h: Heat): Draft => ({version: h.version, firstStatus: h.firstS
 
 export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
   const {t} = useTranslation()
-  const desktop = useMediaQuery('(min-width:900px)')
 
-  const displayTime = (value: number | null) => time(value)
+  const displayTime = (value: number | null) => value === null ? '—' : time(value).padStart(8, '0')
   const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '')
   const [competition, setCompetition] = useState(fixedCompetition ?? params.get('competition') ?? '')
   const [discipline, setDiscipline] = useState(params.get('discipline') ?? '')
@@ -39,7 +38,9 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   const [competitions, setCompetitions] = useState<Competition[]>([])
   const [disciplines, setDisciplines] = useState<Discipline[]>([])
   const [categories, setCategories] = useState<Category[]>([])
-  const [selectedRound, setSelectedRound] = useState(1)
+  const [, setSelectedRound] = useState(1)
+  const [selectedHeat, setSelectedHeat] = useState<number | null>(null)
+  const [followCrew, setFollowCrew] = useState('')
   const [bracket, setBracket] = useState<Bracket | null>(null)
   const [drafts, setDrafts] = useState<Record<number, Draft>>({})
   const [conflict, setConflict] = useState<number | null>(null)
@@ -54,7 +55,7 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   useEffect(() => {let active = true; const load = async () => {
       if (fixedCompetition) {const item = await apiRequest<Competition>(`/api/competitions/${fixedCompetition}`); if (active) setCompetitions([item]); return}const first = await apiRequest<{content: Competition[], totalPages: number}>('/api/competitions?size=100'); const rest = await Promise.all(Array.from({length: Math.max(0, first.totalPages - 1)}, (_, i) => apiRequest<{content: Competition[]}>(`/api/competitions?size=100&page=${i + 1}`))); if (active) setCompetitions([...first.content, ...rest.flatMap(p => p.content)])}; void load().catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [fixedCompetition])
   useEffect(() => {if (!competition) return; let active = true; Promise.all([apiRequest<Discipline[]>(`/api/competitions/${competition}/disciplines`), apiRequest<Category[]>(`/api/competitions/${competition}/categories`)]).then(([ds, cs]) => {if (active) {const compatible = ds.filter(d => d.type === 'PARALLEL_SPRINT'); setDisciplines(compatible); setCategories(cs); setDiscipline(current => current && !compatible.some(d => String(d.id) === current) ? '' : current)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [competition])
-  useEffect(() => {if (!competition || !selected || !selected.categoryIds.includes(Number(category))) return; let active = true; apiRequest<Bracket>(`${base}/bracket`).then(b => {if (active) {setBracket(b); setSelectedRound(b.heats[0]?.round ?? 1); setDrafts({}); setConflict(null)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [base, competition, selected, category])
+  useEffect(() => {if (!competition || !selected || !selected.categoryIds.includes(Number(category))) return; let active = true; apiRequest<Bracket>(`${base}/bracket`).then(b => {if (active) {setBracket(b); setSelectedRound(Number(params.get('round')) || b.heats[0]?.round || 1); setSelectedHeat(b.heats.find(h => h.round === Number(params.get('round')) && h.number === Number(params.get('heat')))?.id ?? null); setDrafts({}); setConflict(null)}}).catch(e => active && setError(apiErrorKey(e))); return () => {active = false}}, [base, competition, selected, category])
   const completionNavigation = useRef(false)
   useEffect(() => {const listener = () => {completionNavigation.current = true}; window.addEventListener('result-completed', listener); return () => window.removeEventListener('result-completed', listener)}, [])
   const dirty = bracket?.heats.some(heat => {
@@ -74,7 +75,7 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
   useEffect(() => {const listener = (event: BeforeUnloadEvent) => {if (dirty && !completionNavigation.current) {event.preventDefault(); event.returnValue = ''}}; window.addEventListener('beforeunload', listener); return () => window.removeEventListener('beforeunload', listener)}, [dirty])
   const canLeave = () => !dirty || window.confirm(t('resultGrid.discard'))
   useEffect(() => {const listener = (event: Event) => {const detail = (event as CustomEvent<{count: number, busy: boolean}>).detail; detail.count += bracket?.heats.filter(heat => {const draft = drafts[heat.id]; return draft && JSON.stringify(draft) !== JSON.stringify(draftFor(heat))}).length ?? 0; detail.busy ||= busy}; window.addEventListener('result-dirty-count', listener); return () => window.removeEventListener('result-dirty-count', listener)}, [bracket, drafts, busy])
-  const clearSelection = () => {setBracket(null); setDrafts({}); setConflict(null); setError('')}
+  const clearSelection = () => {setSelectedHeat(null); setFollowCrew(''); setBracket(null); setDrafts({}); setConflict(null); setError('')}
   const refresh = async () => {const updated = await apiRequest<Bracket>(`${base}/bracket`); setBracket(updated); setSelectedRound(current => updated.heats.some(heat => heat.round === current) ? current : updated.heats[0]?.round ?? 1)}
   const seed = async () => {if (readOnly || selected?.status !== 'STARTED') return; setBusy(true); setError(''); try {const seeded = await csrfRequest<Bracket>(`${base}/bracket`, 'POST'); setBracket(seeded); setSelectedRound(seeded.heats[0]?.round ?? 1)} catch (e) {setError(e instanceof ApiError && e.code === 'parallel.qualification_incomplete' ? 'parallel.qualificationIncomplete' : apiErrorKey(e))} finally {setBusy(false)}}
   const rebuild = async () => {
@@ -132,24 +133,47 @@ export default function ParallelSprint({readOnly, fixedCompetition}: {readOnly: 
     {bracket && !bracket.id && <><Typography>{t('parallel.empty')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void seed()}>{t('parallel.seed')}</Button>}</>}
     {!!bracket?.id && seededCrews >= 4 && !hasBronzeFinal && <><Typography role="status">{t(selected?.status === 'COMPLETED' ? 'parallel.legacyCompleted' : 'parallel.legacy')}</Typography>{!readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void addBronze()}>{t('parallel.upgrade')}</Button>}</>}
     {!!bracket?.id && !readOnly && selected?.status === 'STARTED' && <Button disabled={busy} onClick={() => void rebuild()}>{t('parallel.rebuild')}</Button>}
-    {!!bracket?.heats.length && <TextField select label={t('parallel.chooseRound')} value={selectedRound} onChange={e => setSelectedRound(Number(e.target.value))} sx={{display: {xs: 'block', md: 'none'}}}>{[...new Set(bracket.heats.map(h => h.round))].map(round => <MenuItem key={round} value={round}>{t('parallel.round', {round})}</MenuItem>)}</TextField>}
-    <Box sx={{display: {md: 'flex'}, gap: 2, alignItems: 'start', overflowX: 'auto'}}>
-    {[...new Set(bracket?.heats.map(h => h.round) ?? [])].map(round => <Box component="section" key={round} sx={{display: {xs: selectedRound === round ? 'grid' : 'none', md: 'grid'}, gap: 2, minWidth: {md: 320}, flex: 1}}><Typography component="h2" variant="h5">{t('parallel.round', {round})}</Typography>{bracket?.heats.filter(h => h.round === round).map(h => {
-      const draft = drafts[h.id] ?? draftFor(h)
+    {!!bracket?.heats.length && <TextField select label={t('parallel.followCrew')} value={followCrew} onChange={e => setFollowCrew(e.target.value)}><MenuItem value="">{t('parallel.allCrews')}</MenuItem>{Array.from(new Map(bracket.heats.flatMap(h => [h.first, h.second]).filter((c): c is Crew => c !== null).map(c => [c.id, c])).values()).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.startNumber} — {c.name}</MenuItem>)}</TextField>}
+    {followCrew && <Box component="section" aria-label={t('parallel.followCrew')} sx={{p: 1, border: 1, borderColor: 'divider'}}>{bracket?.heats.filter(h => [h.first?.id, h.second?.id].includes(Number(followCrew))).map(h => {
+      const own = h.first?.id === Number(followCrew) ? h.first : h.second
+      const opponent = h.first?.id === Number(followCrew) ? h.second : h.first
       const winner = h.winnerSlot === 1 ? h.first : h.winnerSlot === 2 ? h.second : null
-      return <Box component="section" key={h.id} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere'}}>
-        <Typography component="h3" variant="h6">{round === finalRound && hasBronzeFinal ? t(h.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : t('parallel.heat', {heat: h.number})}</Typography>
-        {[{crew: h.first, status: h.firstStatus, value: h.firstTimeCentiseconds, resolved: h.firstResolved}, {crew: h.second, status: h.secondStatus, value: h.secondTimeCentiseconds, resolved: h.secondResolved}].map((slot, i) => <Typography key={i}>{t('parallel.slot', {number: i + 1})}: {slot.crew ? `${slot.crew.startNumber} — ${slot.crew.name}` : t((slot.resolved ?? h.round === 1) ? 'parallel.bye' : 'parallel.pending')} · {slot.status ? t(`results.${slot.status}`) : '—'} · {displayTime(slot.value) || '—'}</Typography>)}
-        <Typography>{t('parallel.winner')}: {winner?.name ?? '—'}{h.winnerOverridden ? ` (${t('parallel.manual')})` : ''}</Typography>
-        {!readOnly && selected?.status === 'STARTED' && h.first && h.second && <details open={desktop || undefined}><summary>{t('parallel.editHeat', {heat: h.number})}</summary><Box sx={{display: 'grid', gap: 1, mt: 1}}>
+      return <Typography key={h.id}>{h.round === finalRound && hasBronzeFinal ? t(h.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : h.round === finalRound - 1 ? t('parallel.semifinal') : t('parallel.round', {round: h.round})} · {own?.name} — {opponent?.name ?? '—'} · {t('parallel.winner')}: {winner?.name ?? '—'} · {displayTime(h.first?.id === Number(followCrew) ? h.firstTimeCentiseconds : h.secondTimeCentiseconds) || '—'} / {displayTime(h.first?.id === Number(followCrew) ? h.secondTimeCentiseconds : h.firstTimeCentiseconds) || '—'}</Typography>
+    })}</Box>}
+    <Box sx={{display: {md: 'flex'}, gap: 2, alignItems: 'start', overflowX: 'auto'}}>
+    {[...new Set(bracket?.heats.map(h => h.round) ?? [])].map(round => <Box component="section" key={round} sx={{display: 'grid', gap: 2, minWidth: {md: 320}, flex: 1}}><Typography component="h2" variant="h5">{t('parallel.round', {round})}</Typography>{bracket?.heats.filter(h => h.round === round).map(h => {
+      const draft = drafts[h.id] ?? draftFor(h)
+      return <Box component="section" key={h.id} sx={{border: 1, borderColor: 'divider', borderRadius: 1, p: 2, overflowWrap: 'anywhere', borderLeftWidth: followCrew && [h.first?.id, h.second?.id].includes(Number(followCrew)) ? 5 : 1}}>
+        <Button fullWidth aria-pressed={selectedHeat === h.id} aria-label={t(readOnly ? 'parallel.heatDetails' : 'parallel.editHeat', {heat: h.number})} onClick={() => {if (canLeave()) setSelectedHeat(selectedHeat === h.id ? null : h.id)}} sx={{display: 'block', textAlign: 'left', color: 'text.primary', textTransform: 'none', '&[aria-pressed="true"]': {backgroundColor: 'action.selected'}}}>
+          <Typography component="span" sx={{display: 'block', fontWeight: 'bold'}}>{round === finalRound && hasBronzeFinal ? t(h.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : t('parallel.heat', {heat: h.number})}</Typography>
+          <HeatLanes heat={h}/>
+        </Button>
+        {selectedHeat === h.id && <HeatDetail heat={h} finalRound={finalRound} hasBronzeFinal={hasBronzeFinal}/>}
+        {selectedHeat === h.id && !readOnly && selected?.status === 'STARTED' && h.first && h.second && <><Box sx={{display: 'grid', gap: 1, mt: 1}}>
           {([1, 2] as const).map(i => <Box key={i} sx={{display: 'grid', gap: 1}}><TextField select disabled={busy} label={`${t('results.status')} ${i}`} value={i === 1 ? draft.firstStatus : draft.secondStatus} onChange={e => update(h, i === 1 ? {firstStatus: e.target.value as Status} : {secondStatus: e.target.value as Status})}>{statuses.map(status => <MenuItem key={status} value={status}>{t(`results.${status}`)}</MenuItem>)}</TextField><TextField label={`${t('results.time')} ${t('parallel.slot', {number: i})} — ${i === 1 ? h.first?.name : h.second?.name}`} value={i === 1 ? draft.firstTime : draft.secondTime} disabled={busy || (i === 1 ? draft.firstStatus : draft.secondStatus) !== 'FINISHED'} onChange={e => update(h, i === 1 ? {firstTime: e.target.value} : {secondTime: e.target.value})}/></Box>)}
           <TextField select disabled={busy} label={t('parallel.override')} value={draft.winner} onChange={e => update(h, {winner: e.target.value})}><MenuItem value="">{t('parallel.automatic')}</MenuItem><MenuItem value={String(h.first.id)}>{h.first.name}</MenuItem><MenuItem value={String(h.second.id)}>{h.second.name}</MenuItem></TextField>
           {conflict === h.id && <><Typography role="alert">{t('parallel.conflict')}</Typography><Button disabled={busy} onClick={() => {setDrafts(old => {const next = {...old}; delete next[h.id]; return next}); setConflict(null)}}>{t('parallel.useLatest')}</Button></>}
           <Button disabled={busy || conflict === h.id} onClick={() => void save(h)}>{t('parallel.save')}</Button>
           {(h.firstStatus || h.secondStatus) && <Button disabled={busy} onClick={() => void annul(h)}>{t('parallel.annul')}</Button>}
-        </Box></details>}
+        </Box></>}
       </Box>
     })}</Box>)}
     </Box>
   </Box>
+}
+
+function HeatLanes({heat}: {heat: Heat}) {
+  const {t} = useTranslation()
+  const lanes = [{crew: heat.first, status: heat.firstStatus, value: heat.firstTimeCentiseconds, resolved: heat.firstResolved}, {crew: heat.second, status: heat.secondStatus, value: heat.secondTimeCentiseconds, resolved: heat.secondResolved}]
+  return <Box component="span" sx={{display: 'grid', gap: 0.5}}>{lanes.map((lane, index) => <Box component="span" key={index} sx={{display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 1, fontVariantNumeric: 'tabular-nums'}}>
+    <span>{t('parallel.slot', {number: index + 1})}: {lane.crew ? `${lane.crew.startNumber} — ${lane.crew.name}` : t((lane.resolved ?? heat.round === 1) ? 'parallel.bye' : 'parallel.pending')}{heat.winnerSlot === index + 1 && <strong> · {t('parallel.winner')}</strong>}</span>
+    <span style={{textAlign: 'right'}}>{lane.value == null ? (lane.status ? t(`results.${lane.status}`) : '—') : time(lane.value).padStart(8, '0')}</span>
+  </Box>)}</Box>
+}
+
+function HeatDetail({heat, finalRound, hasBronzeFinal}: {heat: Heat, finalRound: number, hasBronzeFinal: boolean}) {
+  const {t} = useTranslation()
+  const winner = heat.winnerSlot === 1 ? heat.first : heat.winnerSlot === 2 ? heat.second : null
+  const stage = heat.round === finalRound && hasBronzeFinal ? t(heat.number === 2 ? 'parallel.finalB' : 'parallel.finalA') : heat.round === finalRound - 1 ? t('parallel.semifinal') : t('parallel.round', {round: heat.round})
+  return <Box sx={{p: 1, backgroundColor: 'action.hover'}}><Typography>{stage} · {t('parallel.heat', {heat: heat.number})}</Typography><Typography>{t('parallel.winner')}: {winner?.name ?? '—'}{heat.winnerOverridden ? ` (${t('parallel.manual')})` : ''}</Typography>{[heat.firstStatus, heat.secondStatus].map((status, i) => <Typography key={i}>{t('parallel.slot', {number: i + 1})}: {status ? t(`results.${status}`) : '—'}</Typography>)}</Box>
 }

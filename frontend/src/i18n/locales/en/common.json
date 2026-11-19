@@ -272,6 +272,7 @@
     "timePolicy": "Times use the competition time zone. If a clock time occurs twice, the earlier instant is used; nonexistent times are rejected."
   },
   "resultGrid": {
+    "tableView":"Table entry", "crewList":"Crews", "waiting":"Waiting", "preview":"Provisional total", "saveContinue":"Save and continue",
     "attempt": "Attempt",
     "gate": "Gate",
     "time": "Time",
@@ -310,6 +311,8 @@
     "missingGate": "Complete gate {{number}}."
   },
   "results": {
+    "liveView": "Current standings",
+    "issuedView": "Issued protocols",
     "overall": "Overall",
     "discipline": "Discipline",
     "competition": "Competition",
@@ -346,6 +349,10 @@
     "exitFullscreen": "Exit fullscreen"
   },
   "parallel": {
+    "heatDetails": "Heat {{heat}} details",
+    "semifinal": "Semifinal",
+    "followCrew": "Crew path",
+    "allCrews": "All crews",
     "finalA": "Final A (places 1–2)",
     "finalB": "Final B (places 3–4)",
     "legacy": "This bracket was created under the previous rules: there is no final B, and semifinal losers are ranked by time.",
@@ -430,6 +437,7 @@
     "downloadNamed": "Download backup from {{date}} ({{id}})"
   },
   "workspace": {
+    "needsInput":"Needs input", "allDisciplines":"All disciplines", "remaining":"Reasons preventing completion", "openIssue":"Open", "complete":"Complete",
     "overview": "Overview",
     "readiness": "Categories: {{categories}} · Disciplines: {{disciplines}}",
     "input": "Result entry",
