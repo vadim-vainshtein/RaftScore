@@ -52,7 +52,7 @@ class AttemptResultRepositoryIntegrationTest extends PostgreSqlIntegrationTest {
         }
         entityManager.flush();
         entityManager.clear();
-        var loaded = results.findAll();
+        var loaded = results.findByDisciplineIdAndCrewEntryCompetitionCategoryId(fixture.discipline().getId(), fixture.crew().getCompetitionCategory().getId());
         assertThat(loaded).hasSize(6).extracting(AttemptResult::getStatus)
                 .containsExactlyInAnyOrder(AttemptResultStatus.values());
         var first = loaded.stream().filter(r -> r.getStatus() == AttemptResultStatus.FINISHED).findFirst().orElseThrow();
