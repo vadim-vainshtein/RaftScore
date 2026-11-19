@@ -12,6 +12,7 @@ beforeEach(() => {
     if (p.endsWith('/disciplines')) return [{id: 3, name: 'Sprint', type: 'SPRINT', categoryIds: [2]}]
     if (p.endsWith('/tiebreak')) return {disciplineId: null}
     if (p.endsWith('/categories')) return [{id: 2, displayName: 'R4'}]
+    if (p.endsWith('/protocols')) return []
     if (p.endsWith('/start-list')) return {slots: [{crewId: 4}]}
     if (p === path) return [{crewId: 4, crewName: 'Crew A', regionOrClub: 'Club', startNumber: 1, place: 1, totalCentiseconds: 7425, status: 'FINISHED', points: 100}]
     throw new Error(p)

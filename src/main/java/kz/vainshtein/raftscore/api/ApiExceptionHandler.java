@@ -15,6 +15,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 class ApiExceptionHandler {
 
+    @ExceptionHandler(kz.vainshtein.raftscore.protocol.ProtocolSeedingConflict.class)
+    ResponseEntity<ApiError> seedingConflict() {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("protocol.seeding_change"));
+    }
+
     @ExceptionHandler({org.springframework.transaction.TransactionException.class, org.springframework.dao.DataAccessResourceFailureException.class, org.hibernate.exception.JDBCConnectionException.class, java.sql.SQLException.class})
     ResponseEntity<ApiError> databaseUnavailable(Exception exception) throws Exception {
         if (!DatabaseUnavailable.isCausedBy(exception)) {

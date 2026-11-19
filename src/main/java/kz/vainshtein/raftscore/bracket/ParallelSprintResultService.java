@@ -19,6 +19,9 @@ public class ParallelSprintResultService {
     private final kz.vainshtein.raftscore.discipline.entities.DisciplineRepository disciplines;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     private final ParallelSprintProgressionService progression;
+    private final kz.vainshtein.raftscore.protocol.ProtocolCorrections corrections;
+    private final tools.jackson.databind.ObjectMapper mapper;
+    private final kz.vainshtein.raftscore.competition.CompletionCheck completion;
 
     public static class DependentHeats extends RuntimeException {
         public final java.util.List<Long> ids;
@@ -75,18 +78,29 @@ public class ParallelSprintResultService {
 
     @Transactional
     public void record(long heatId, long expectedVersion, Result first, Result second, Long winnerCrewId) {
+        save(heatId, expectedVersion, first, second, winnerCrewId, null);
+    }
+
+    @Transactional
+    public void correct(long heatId, long expectedVersion, Result first, Result second, Long winnerCrewId, String reason) {
+        save(heatId, expectedVersion, first, second, winnerCrewId, reason);
+    }
+
+    private void save(long heatId, long expectedVersion, Result first, Result second, Long winnerCrewId, String reason) {
         if (first == null || second == null) throw new IllegalArgumentException("both results are required");
         var heat = heats.findById(heatId).orElseThrow();
         // All result writers must acquire this lock before changing source results.
         var discipline = disciplines.findForStartListUpdate(heat.getBracket().getDiscipline().getId()).orElseThrow();
-        discipline.requireStarted();
+        if (reason == null) discipline.requireStarted();
+        else if (discipline.getStatus() == kz.vainshtein.raftscore.discipline.entities.DisciplineStatus.CREATED)
+            throw new IllegalStateException("discipline is not started");
         entityManager.refresh(heat);
         if (heat.getVersion() != expectedVersion) {
             if (expectedVersion < Long.MAX_VALUE && heat.getVersion() == expectedVersion + 1
                     && heat.getCrew1() != null && heat.getCrew2() != null && matches(heat, first, second, winnerCrewId)) return;
             throw new IllegalStateException("heat has changed");
         }
-        if (heat.getCrew1() == null || heat.getCrew2() == null)
+        if (heat.getCrew1() == null || heat.getCrew2() == null || !heat.isSlot1Resolved() || !heat.isSlot2Resolved())
             throw new IllegalStateException("heat must have two crews; seeded byes cannot be edited");
         eligibility.requireEligible(heat.getCrew1());
         eligibility.requireEligible(heat.getCrew2());
@@ -97,11 +111,31 @@ public class ParallelSprintResultService {
                 throw new IllegalArgumentException("disqualified crew cannot win");
         }
         var before = progression.outcome(heat);
+        var beforeDetail = detail(heat);
         heat.record(first.status(), first.timeCentiseconds(), second.status(), second.timeCentiseconds(), winner, winnerCrewId != null);
         progression.propagate(heat, before);
         heats.flush();
         if (heat.getVersion() == expectedVersion) entityManager.lock(heat, LockModeType.PESSIMISTIC_FORCE_INCREMENT);
         recalculation.recalculateLocked(heat.getBracket().getDiscipline(), heat.getBracket().getCategory().getId());
+        if (reason != null) {
+            var categoryId = heat.getCategory().getId();
+            if (completion.competition(discipline.getCompetition().getId()).stream().anyMatch(issue ->
+                    java.util.Objects.equals(issue.categoryId(), categoryId)
+                            && java.util.Set.of("seedOrderChanged", "missingSeededCrew", "extraSeededCrew").contains(issue.code())))
+                throw new kz.vainshtein.raftscore.protocol.ProtocolSeedingConflict();
+            corrections.record(discipline.getCompetition().getId(), reason,
+                    mapper.writeValueAsString(new HeatChange("heat", beforeDetail, detail(heat))));
+        }
+    }
+
+    record HeatDetail(long disciplineId, long categoryId, int round, int heat, long crew1, long crew2,
+                      AttemptResultStatus status1, Integer time1Centiseconds, AttemptResultStatus status2,
+                      Integer time2Centiseconds, Integer winnerSlot, boolean winnerOverridden) { }
+    record HeatChange(String kind, HeatDetail before, HeatDetail after) { }
+    private HeatDetail detail(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat h) {
+        return new HeatDetail(h.getBracket().getDiscipline().getId(), h.getCategory().getId(), h.getRoundNumber(), h.getHeatNumber(),
+                h.getCrew1().getId(), h.getCrew2().getId(), h.getStatus1(), h.getTime1Centiseconds(), h.getStatus2(), h.getTime2Centiseconds(),
+                h.getWinnerSlot(), h.isWinnerOverridden());
     }
 
     private boolean matches(kz.vainshtein.raftscore.bracket.entities.ParallelSprintHeat heat, Result first, Result second, Long winnerCrewId) {

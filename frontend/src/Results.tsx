@@ -1,3 +1,4 @@
+import IssuedProtocols from './IssuedProtocols'
 import {useEffect, useRef, useState} from 'react'
 import {Box, Button, MenuItem, TextField, Typography, useMediaQuery} from '@mui/material'
 import {useTranslation} from 'react-i18next'
@@ -8,7 +9,7 @@ import {supportedLocale} from './i18n/supported-locales'
 
 type Competition = {id: number, title: string}
 type Category = {id: number, displayName: string}
-type Discipline = {id: number, name: string, type: string, categoryIds: number[]}
+type Discipline = {id: number, name: string, type: string, categoryIds: number[], gateCount?: number | null}
 type Status = 'FINISHED' | 'DNS' | 'DNF' | 'DSQ_ATTEMPT' | 'DSQ_DISCIPLINE' | 'DSQ_COMPETITION'
 type Part = {disciplineId: number, disciplineName: string, place: number | null, status: Status, points: number}
 type Attempt = {number: number, durationCentiseconds: number | null, penaltyCentiseconds: number, status: Status, gates: {number: number, penaltySeconds: number}[]}
@@ -16,7 +17,7 @@ type Result = {crewId: number, crewName: string, regionOrClub: string, startNumb
 
 const formatTime = (value: number | null | undefined) => value == null ? '—' : `${String(Math.floor(value / 6000)).padStart(2, '0')}:${String(Math.floor(value / 100) % 60).padStart(2, '0')}.${String(value % 100).padStart(2, '0')}`
 
-export default function Results({readOnly, fixedCompetition}: {readOnly: boolean, fixedCompetition?: string}) {
+export default function Results({readOnly, fixedCompetition, protocolReadOnly = readOnly}: {readOnly: boolean, fixedCompetition?: string, protocolReadOnly?: boolean}) {
   const {t, i18n} = useTranslation()
   const desktop = useMediaQuery('(min-width:900px)')
   const locale = supportedLocale(i18n.resolvedLanguage) ?? 'en'
@@ -129,6 +130,7 @@ export default function Results({readOnly, fixedCompetition}: {readOnly: boolean
     {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.category')} value={category} onChange={e => {setCategory(e.target.value); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">—</MenuItem>{categories.filter(c => !discipline || selected?.categoryIds.includes(c.id)).map(c => <MenuItem key={c.id} value={String(c.id)}>{c.displayName}</MenuItem>)}</TextField>}
     {competition && <TextField select slotProps={{select: {MenuProps: {container: () => display.current}}}} label={t('results.discipline')} value={discipline} onChange={e => {setDiscipline(e.target.value); if (e.target.value && !disciplines.find(d => String(d.id) === e.target.value)?.categoryIds.includes(Number(category))) setCategory(''); setRows(null); setError(null); setResultError(null); setListError(null)}}><MenuItem value="">{t('results.overall')}</MenuItem>{disciplines.map(d => <MenuItem key={d.id} value={String(d.id)}>{d.name || t(`discipline.types.${d.type}` as 'discipline.types.SPRINT')}</MenuItem>)}</TextField>}</Box>}
     {competition && category && <Box><Button onClick={() => setRefresh(value => value + 1)}>{t('results.refresh')}</Button>{updatedAt && <Typography component="span">{t('results.updatedAt', {time: new Intl.DateTimeFormat(locale, {timeStyle: 'medium'}).format(updatedAt)})}</Typography>}{discipline && selected?.type === 'PARALLEL_SPRINT' && <Button component="a" href={`#/workspace/${competition}/parallel-sprint?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('navigation.parallelSprint')}</Button>}{!readOnly && <>{discipline && selected?.type !== 'PARALLEL_SPRINT' && <Button component="a" href={`${fixedCompetition ? `#/workspace/${competition}/result-grid` : '#/result-grid'}?competition=${competition}&discipline=${discipline}&category=${category}`}>{t('results.edit')}</Button>}<Button disabled={busy} onClick={async () => {setBusy(true); try {await csrfRequest(`/api/competitions/${competition}/recalculate`, 'POST'); setRefresh(value => value + 1)} catch (e) {setError(apiErrorKey(e))} finally {setBusy(false)}}}>{t('results.recalculate')}</Button></>}</Box>}
+    {competition && category && <IssuedProtocols competition={competition} category={category} readOnly={protocolReadOnly} disciplines={disciplines.filter(d => d.categoryIds.includes(Number(category)))} crews={(rows ?? []).map(r => ({id: r.crewId, name: r.crewName}))}/>}
     {rows && incomplete && <Typography>{t('results.availableData')}</Typography>}
     {error && <Typography role="alert">{t(error)}</Typography>}
     {resultError && <Typography role="alert">{t(resultError)}</Typography>}

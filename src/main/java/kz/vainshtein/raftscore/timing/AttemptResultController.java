@@ -25,6 +25,10 @@ import org.springframework.web.server.ResponseStatusException;
 class AttemptResultController {
     private final kz.vainshtein.raftscore.competition.entities.CompetitionLifecycle lifecycle;
     private final jakarta.persistence.EntityManager entityManager;
+    private final kz.vainshtein.raftscore.competition.entities.CompetitionRepository competitions;
+    private final kz.vainshtein.raftscore.protocol.ProtocolCorrections corrections;
+    private final tools.jackson.databind.ObjectMapper mapper;
+    private final kz.vainshtein.raftscore.competition.CompletionCheck completion;
     private final DisciplineRepository disciplines;
     private final CrewEntryRepository crews;
     private final StartListRepository lists;
@@ -43,17 +47,38 @@ class AttemptResultController {
                    @NotNull @DecimalMin("0") @DecimalMax("2147483647") @Digits(integer=10, fraction=0) BigDecimal penaltyCentiseconds,
                    @NotNull AttemptResultStatus status, @Valid List<@NotNull Gate> gates) { }
     record View(long id, long version) { }
+    record Correction(@NotBlank @Size(max=2000) @Pattern(regexp="[^\\x00]*") String reason, @NotNull @Valid Request result) { }
+
+    @PutMapping("/corrections/{attemptNumber}")
+    @Transactional
+    View correct(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
+                 @PathVariable long crewId, @PathVariable int attemptNumber, @Valid @RequestBody Correction correction) {
+        return save(competitionId, disciplineId, categoryId, crewId, attemptNumber, correction.result(), correction.reason());
+    }
 
     @PutMapping("/{attemptNumber}")
     @Transactional
     View put(@PathVariable long competitionId, @PathVariable long disciplineId, @PathVariable long categoryId,
              @PathVariable long crewId, @PathVariable int attemptNumber, @Valid @RequestBody Request request) {
-        lifecycle.requireStarted(competitionId);
+        return save(competitionId, disciplineId, categoryId, crewId, attemptNumber, request, null);
+    }
+
+    private View save(long competitionId, long disciplineId, long categoryId, long crewId, int attemptNumber,
+                      Request request, String reason) {
+        if (reason == null) lifecycle.requireStarted(competitionId);
+        else {
+            var competition = competitions.findForDisciplineConfiguration(competitionId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+            if (competition.getStatus() != kz.vainshtein.raftscore.competition.entities.CompetitionStatus.COMPLETED)
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Competition is not completed");
+        }
         var discipline = disciplines.findForStartListUpdate(disciplineId)
                 .filter(d -> d.getCompetition().getId().equals(competitionId)
                         && d.getCategories().stream().anyMatch(c -> c.getId().equals(categoryId)))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        discipline.requireStarted();
+        if (reason == null) discipline.requireStarted();
+        else if (discipline.getStatus() == DisciplineStatus.CREATED)
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Discipline is not started");
         var crew = crews.findByIdAndCompetitionCategoryCompetitionId(crewId, competitionId)
                 .filter(c -> c.getCompetitionCategory().getId().equals(categoryId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
@@ -64,6 +89,13 @@ class AttemptResultController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "crew must have a start slot in a timed discipline");
         try {
             var existing = attempts.findByDisciplineIdAndCrewEntryIdAndAttemptNumber(disciplineId, crewId, attemptNumber);
+            if (reason != null && existing.isEmpty() && completion.discipline(discipline, categoryId).stream().noneMatch(issue ->
+                    "missingAttempt".equals(issue.code()) && Objects.equals(issue.crewId(), crewId)
+                            && Objects.equals(issue.attempt(), attemptNumber)))
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Attempt is not missing from the required results");
+            var before = reason == null ? null : existing.isEmpty()
+                    ? new CorrectionDetail(disciplineId, categoryId, crewId, attemptNumber, null, null, null, 0, "MISSING", List.of())
+                    : detail(existing.get(), disciplineId, categoryId, crewId, attemptNumber);
             var duration = request.durationCentiseconds() == null ? null : request.durationCentiseconds().intValueExact();
             var penalty = request.penaltyCentiseconds().intValueExact();
             if (existing.isPresent() && (request.version() == null || existing.get().getVersion() != request.version().longValueExact())) {
@@ -97,10 +129,26 @@ class AttemptResultController {
             }
             penalties.flush();
             recalculation.recalculateLocked(discipline, categoryId);
+            if (reason != null && completion.competition(competitionId).stream().anyMatch(issue ->
+                    Objects.equals(issue.categoryId(), categoryId) && java.util.Set.of("seedOrderChanged", "missingSeededCrew", "extraSeededCrew").contains(issue.code())))
+                throw new kz.vainshtein.raftscore.protocol.ProtocolSeedingConflict();
+            if (reason != null) corrections.record(competitionId, reason, mapper.writeValueAsString(
+                    new Change(before, detail(attempt, disciplineId, categoryId, crewId, attemptNumber))));
             return new View(attempt.getId(), attempt.getVersion());
         } catch (IllegalArgumentException | ArithmeticException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+    record CorrectionDetail(long disciplineId, long categoryId, long crewId, int attemptNumber,
+                            Integer durationCentiseconds, Instant startInstant, Instant finishInstant,
+                            int penaltyCentiseconds, String status, List<Gate> gates) { }
+    record Change(CorrectionDetail before, CorrectionDetail after) { }
+    private CorrectionDetail detail(AttemptResult attempt, long disciplineId, long categoryId, long crewId, int attemptNumber) {
+        var gates = penalties.findByAttemptId(attempt.getId()).stream()
+                .sorted(java.util.Comparator.comparingInt(SlalomGatePenalty::getGateNumber))
+                .map(g -> new Gate(BigDecimal.valueOf(g.getGateNumber()), BigDecimal.valueOf(g.getPenaltySeconds()))).toList();
+        return new CorrectionDetail(disciplineId, categoryId, crewId, attemptNumber, attempt.getDurationCentiseconds(),
+                attempt.getStartInstant(), attempt.getFinishInstant(), attempt.getPenaltyCentiseconds(), attempt.getStatus().name(), gates);
     }
     private boolean matches(AttemptResult saved, Discipline discipline, kz.vainshtein.raftscore.entry.entities.CrewEntry crew,
                             int attemptNumber, Integer duration, int penalty, Request request) {

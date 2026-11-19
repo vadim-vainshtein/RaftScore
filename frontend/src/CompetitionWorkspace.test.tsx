@@ -213,3 +213,19 @@ test.each([
   expect(await screen.findByText(message)).toBeInTheDocument()
   expect(within(screen.getByRole('dialog')).getByRole('button', {name: 'Complete competition'})).toBeDisabled()
 })
+
+test.each([false, true])('completed workspace separates protocol authority from live result writes (readOnly=%s)', async readOnly => {
+  window.location.hash = '#/workspace/1/results?category=2'
+  vi.mocked(apiRequest).mockImplementation(async path => {
+    if (path === '/api/competitions/1') return {id: 1, title: 'Race', version: 4, status: 'COMPLETED'}
+    if (path.endsWith('/categories')) return [{id: 2, displayName: 'R1'}]
+    if (path.endsWith('/disciplines') || path.endsWith('/protocols') || path.endsWith('/standings')) return []
+    throw new Error(path)
+  })
+  render(<CompetitionWorkspace path="/workspace/1/results?category=2" readOnly={readOnly}/> )
+  await screen.findByText('Issued protocols')
+  if (readOnly) expect(screen.queryByRole('button', {name: 'Issue protocol'})).not.toBeInTheDocument()
+  else expect(screen.getByRole('button', {name: 'Issue protocol'})).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name: 'Recalculate'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', {name: 'Edit result'})).not.toBeInTheDocument()
+})
