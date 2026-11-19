@@ -156,19 +156,21 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
         var created = mvc.perform(post("/api/competitions").with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{" + BODY + "}"))
                 .andExpect(status().isCreated()).andReturn();
         Number id = JsonPath.read(created.getResponse().getContentAsString(), "$.id");
-        var category = jdbc.queryForObject("insert into competition_categories (competition_id, class_label, scoring_group_label, crew_size) values (?, 'R1', 'Open', 1) returning id", Long.class, id.longValue());
-        var discipline = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Sprint', 'SPRINT', 0, 'STARTED') returning id", Long.class, id.longValue());
-        jdbc.update("insert into discipline_categories (discipline_id, category_id) values (?, ?)", discipline, category);
-        var crew = jdbc.queryForObject("insert into crew_entries (competition_category_id, crew_name, region_or_club, representative, start_number) values (?, 'Lock vessel', '', '', 1) returning id", Long.class, category);
-        var person = jdbc.queryForObject("insert into participants (surname, given_name) values ('Test', 'Person') returning id", Long.class);
-        jdbc.update("insert into crew_memberships (crew_entry_id, competition_category_id, participant_id, position) values (?, ?, ?, 1)", crew, category, person);
-        var list = jdbc.queryForObject("insert into start_lists (discipline_id, category_id) values (?, ?) returning id", Long.class, discipline, category);
-        jdbc.update("insert into start_slots (start_list_id, category_id, crew_entry_id, position) values (?, ?, ?, 1)", list, category, crew);
-        var url = "/api/competitions/" + id + "/status";
-        mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(statusChange("STARTED", 0))).andExpect(status().isOk());
-        var locked = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
         var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
         try {
+            var category = jdbc.queryForObject("insert into competition_categories (competition_id, class_label, scoring_group_label, crew_size) values (?, 'R1', 'Open', 1) returning id", Long.class, id.longValue());
+            var discipline = jdbc.queryForObject("insert into disciplines (competition_id, name, type, display_order, status) values (?, 'Sprint', 'SPRINT', 0, 'STARTED') returning id", Long.class, id.longValue());
+            jdbc.update("insert into discipline_categories (discipline_id, category_id) values (?, ?)", discipline, category);
+            var crew = jdbc.queryForObject("insert into crew_entries (competition_category_id, crew_name, region_or_club, representative, start_number) values (?, 'Lock vessel', '', '', 1) returning id", Long.class, category);
+            var person = jdbc.queryForObject("insert into participants (surname, given_name) values ('Test', 'Person') returning id", Long.class);
+            jdbc.update("insert into crew_memberships (crew_entry_id, competition_category_id, participant_id, position) values (?, ?, ?, 1)", crew, category, person);
+            var list = jdbc.queryForObject("insert into start_lists (discipline_id, category_id) values (?, ?) returning id", Long.class, discipline, category);
+            jdbc.update("insert into start_slots (start_list_id, category_id, crew_entry_id, position) values (?, ?, ?, 1)", list, category, crew);
+            var url = "/api/competitions/" + id + "/status";
+            mvc.perform(put(url).with(full()).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(statusChange("STARTED", 0))).andExpect(status().isOk());
+
             var writer = pool.submit(() -> new TransactionTemplate(transactions).executeWithoutResult(status -> {
                 jdbc.queryForObject("select id from competitions where id = ? for update", Long.class, id.longValue());
                 jdbc.update("insert into attempt_results (discipline_id, crew_entry_id, attempt_number, duration_centiseconds, penalty_centiseconds, status) values (?, ?, 1, 100, 0, 'FINISHED')", discipline, crew);
@@ -183,8 +185,33 @@ class CompetitionControllerIntegrationTest extends PostgreSqlIntegrationTest {
             release.countDown(); writer.get(10, java.util.concurrent.TimeUnit.SECONDS);
             assertThat(closing.get(10, java.util.concurrent.TimeUnit.SECONDS).getResponse().getStatus()).isEqualTo(200);
             assertThat(jdbc.queryForObject("select status from disciplines where id = ?", String.class, discipline)).isEqualTo("COMPLETED");
-        } finally { release.countDown(); pool.shutdownNow(); }
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+            if (!pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS))
+                throw new IllegalStateException("test worker did not stop; fixture retained");
+            cleanupConcurrentCompletionFixture(id.longValue());
+        }
     }
+    private void cleanupConcurrentCompletionFixture(long competitionId) {
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            var participantIds = jdbc.queryForList("""
+                    select m.participant_id from crew_memberships m
+                    join competition_categories c on c.id = m.competition_category_id where c.competition_id = ?
+                    """, Long.class, competitionId);
+            jdbc.update("delete from attempt_results where discipline_id in (select id from disciplines where competition_id = ?)", competitionId);
+            jdbc.update("delete from start_slots where category_id in (select id from competition_categories where competition_id = ?)", competitionId);
+            jdbc.update("delete from start_lists where discipline_id in (select id from disciplines where competition_id = ?)", competitionId);
+            jdbc.update("delete from crew_memberships where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
+            jdbc.update("delete from crew_entries where competition_category_id in (select id from competition_categories where competition_id = ?)", competitionId);
+            jdbc.update("delete from discipline_categories where discipline_id in (select id from disciplines where competition_id = ?)", competitionId);
+            jdbc.update("delete from disciplines where competition_id = ?", competitionId);
+            jdbc.update("delete from competition_categories where competition_id = ?", competitionId);
+            jdbc.update("delete from competitions where id = ?", competitionId);
+            for (var participantId : participantIds) jdbc.update("delete from participants where id = ?", participantId);
+        });
+    }
+
     private static String statusChange(String status, long version) {
         return "{\"status\":\"%s\",\"version\":%d}".formatted(status, version);
     }

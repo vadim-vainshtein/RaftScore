@@ -86,6 +86,8 @@ class AttemptGridIntegrationTest extends PostgreSqlIntegrationTest {
             mvc.perform(get(grid).with(user("reader").roles("READ_ONLY"))).andExpect(status().isForbidden());
             var invalid = update.replace("\"version\":" + version, "\"version\":" + (version + 1)).replace("\"durationCentiseconds\":100", "\"durationCentiseconds\":90").replace("[{\"number\":1,\"penaltySeconds\":5}]", "[]");
             mvc.perform(put(url).with(auth).with(csrf()).contentType("application/json").content(invalid)).andExpect(status().isBadRequest());
+            mvc.perform(put(url.replace("/attempts/1", "/attempts/2")).with(auth).with(csrf()).contentType("application/json")
+                    .content("{\"penaltyCentiseconds\":0,\"status\":\"DNS\"}")).andExpect(status().isOk());
             var currentDiscipline = disciplines.findById(discipline.getId()).orElseThrow();
             var complete = "{\"status\":\"COMPLETED\",\"version\":" + currentDiscipline.getVersion() + "}";
             mvc.perform(put(statusUrl).with(auth).with(csrf()).contentType("application/json").content(complete)).andExpect(status().isOk());

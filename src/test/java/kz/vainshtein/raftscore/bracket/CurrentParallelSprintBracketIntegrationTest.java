@@ -8,6 +8,8 @@ import kz.vainshtein.raftscore.competition.entities.*;
 import kz.vainshtein.raftscore.discipline.entities.*;
 import kz.vainshtein.raftscore.entry.entities.*;
 import kz.vainshtein.raftscore.scoring.entities.*;
+import kz.vainshtein.raftscore.startlist.entities.*;
+import kz.vainshtein.raftscore.timing.entities.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,6 +32,9 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
     @Autowired ParticipantRepository participants;
     @Autowired CrewMembershipRepository memberships;
     @Autowired CalculatedDisciplineResultRepository results;
+    @Autowired StartListRepository lists;
+    @Autowired StartSlotRepository slots;
+    @Autowired AttemptResultRepository attempts;
     @Autowired ParallelSprintBracketRepository brackets;
     @Autowired ParallelSprintHeatRepository heats;
     @Autowired EntityManager em;
@@ -43,12 +48,15 @@ class CurrentParallelSprintBracketIntegrationTest extends PostgreSqlIntegrationT
         var category = categories.saveAndFlush(CompetitionCategory.builder().competition(competition).classLabel("R4").scoringGroupLabel("Open").crewSize(4).build());
         var sprint = discipline(competition, category, DisciplineType.SPRINT);
         var parallel = discipline(competition, category, DisciplineType.PARALLEL_SPRINT);
+        var startList = lists.saveAndFlush(StartList.builder().discipline(sprint).category(category).build());
         for (int n = 1; n <= 4; n++) {
             var crew = crews.saveAndFlush(CrewEntry.builder().competitionCategory(category).crewName("Crew " + n).regionOrClub("Club").representative("Coach").startNumber(n).build());
             for (int i = 1; i <= category.getCrewSize(); i++) {
                 var person = participants.save(Participant.builder().surname("Crew" + n).givenName("Person" + i).build());
                 memberships.save(CrewMembership.builder().crewEntry(crew).participant(person).position(i).build());
             }
+            slots.save(StartSlot.builder().startList(startList).crew(crew).position(n).build());
+            attempts.save(AttemptResult.builder().discipline(sprint).crewEntry(crew).attemptNumber(1).durationCentiseconds(n * 100).status(AttemptResultStatus.FINISHED).build());
             results.save(CalculatedDisciplineResult.builder().discipline(sprint).crewEntry(crew).place(n).status(CalculatedResultStatus.FINISHED).build());
         }
         em.flush();
